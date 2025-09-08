@@ -8,7 +8,7 @@
 
 Model Context Protocol (MCP) server for Atlassian products (Confluence and Jira). This integration supports both Confluence & Jira Cloud and Server/Data Center deployments.
 
-Note: This project is a fork from (mcp-atlassian)[https://github.com/sooperset/mcp-atlassian]. The project at the time of making a fork has not been maintained for a while with couple of dozen pull requests and a few issues on the github project. Hence, it was about time to fork the project and make some fixes.
+Note: This project is a fork from [mcp-atlassian](https://github.com/sooperset/mcp-atlassian). The project at the time of making a fork has not been maintained for a while with couple of dozen pull requests and a few issues on the github project. Hence, it was about time to fork the project and make some fixes.
 
 ## Example Usage
 
@@ -42,7 +42,7 @@ https://github.com/user-attachments/assets/7fe9c488-ad0c-4876-9b54-120b666bb785
 
 ### 🔐 1. Authentication Setup
 
-MCP Atlassian supports three authentication methods:
+MCP Atlassian supports four authentication methods:
 
 #### A. API Token Authentication (Cloud) - **Recommended**
 
@@ -108,6 +108,48 @@ To use this method, set the following environment variables (or use the correspo
 This option is useful in scenarios where OAuth credential management is centralized or handled by other infrastructure components.
 </details>
 
+#### D. Dynamic Header-Based Authentication - **Multi-Tenant**
+
+> [!NOTE]
+> Header-based authentication enables dynamic, per-request credential management without requiring environment variables or server restarts. This is ideal for multi-tenant applications, serverless environments, or when credentials need to be managed dynamically.
+
+With header-based authentication, you can pass Jira and Confluence credentials directly through HTTP headers on each request. This method supports both Personal Access Tokens (PAT) for Server/Data Center and API tokens for Cloud deployments.
+
+**Required Headers:**
+
+For **Jira authentication**:
+- `X-Atlassian-Jira-Personal-Token`: Your Jira PAT or API token
+- `X-Atlassian-Jira-Url`: Your Jira instance URL
+
+For **Confluence authentication**:
+- `X-Atlassian-Confluence-Personal-Token`: Your Confluence PAT or API token
+- `X-Atlassian-Confluence-Url`: Your Confluence instance URL
+
+**Benefits:**
+- ✅ No environment variables required
+- ✅ Per-request authentication
+- ✅ Multi-tenant support
+- ✅ Dynamic credential management
+- ✅ Zero server configuration needed
+- ✅ Works with both Cloud and Server/Data Center
+
+**Example MCP Client Configuration:**
+```json
+{
+  "Atlassian": {
+    "url": "http://localhost:8000/mcp",
+    "headers": {
+      "X-Atlassian-Read-Only-Mode": "true",
+      "X-Atlassian-Jira-Personal-Token": "your_jira_pat_or_api_token",
+      "X-Atlassian-Jira-Url": "https://your-jira-instance.com",
+      "X-Atlassian-Confluence-Personal-Token": "your_confluence_pat_or_api_token",
+      "X-Atlassian-Confluence-Url": "https://your-confluence-instance.com"
+    },
+    "type": "http"
+  }
+}
+```
+
 > [!TIP]
 > **Multi-Cloud OAuth Support**: If you're building a multi-tenant application where users provide their own OAuth tokens, see the [Multi-Cloud OAuth Support](#multi-cloud-oauth-support) section for minimal configuration setup.
 
@@ -134,10 +176,11 @@ MCP Atlassian is designed to be used with AI assistants through IDE integration.
 
 ### ⚙️ Configuration Methods
 
-There are two main approaches to configure the Docker container:
+There are three main approaches to configure the Docker container:
 
 1. **Passing Variables Directly** (shown in examples below)
 2. **Using an Environment File** with `--env-file` flag (shown in collapsible sections)
+3. **Header-Based Authentication** (no environment variables required - see [Header-Based Authentication Configuration](#header-based-authentication-configuration))
 
 > [!NOTE]
 > Common environment variables include:
@@ -148,6 +191,13 @@ There are two main approaches to configure the Docker container:
 > - `MCP_VERBOSE`: Set to "true" for more detailed logging
 > - `MCP_LOGGING_STDOUT`: Set to "true" to log to stdout instead of stderr
 > - `ENABLED_TOOLS`: Comma-separated list of tool names to enable (e.g., "confluence_search,jira_get_issue")
+>
+> **New: Header-Based Authentication Headers** (no environment variables needed):
+> - `X-Atlassian-Jira-Personal-Token`: Jira PAT/API token (passed as HTTP header)
+> - `X-Atlassian-Jira-Url`: Jira instance URL (passed as HTTP header)
+> - `X-Atlassian-Confluence-Personal-Token`: Confluence PAT/API token (passed as HTTP header)
+> - `X-Atlassian-Confluence-Url`: Confluence instance URL (passed as HTTP header)
+> - `X-Atlassian-Read-Only-Mode`: Per-request read-only mode (passed as HTTP header)
 >
 > See the [.env.example](https://github.com/SharkyND/mcp-atlassian/blob/main/.env.example) file for all available options.
 
@@ -332,6 +382,86 @@ This configuration is for when you are providing your own externally managed OAu
 >   - You primarily need `JIRA_URL`, `CONFLUENCE_URL`, `ATLASSIAN_OAUTH_CLOUD_ID`, and `ATLASSIAN_OAUTH_ACCESS_TOKEN`.
 >   - Standard OAuth client variables (`ATLASSIAN_OAUTH_CLIENT_ID`, `CLIENT_SECRET`, `REDIRECT_URI`, `SCOPE`) are **not** used.
 >   - Token lifecycle (e.g., refreshing the token before it expires and restarting mcp-atlassian) is your responsibility, as the server will not refresh BYOT tokens.
+
+</details>
+
+<details>
+<summary>Header-Based Authentication Configuration</summary>
+
+This configuration uses the new [dynamic header-based authentication](#d-dynamic-header-based-authentication---multi-tenant) feature. **No environment variables are required** - credentials are passed through HTTP headers on each request.
+
+**Minimal Docker Configuration (No Environment Variables Needed):**
+
+```json
+{
+  "mcpServers": {
+    "mcp-atlassian": {
+      "command": "docker",
+      "args": [
+        "run",
+        "--rm",
+        "-i",
+        "ghcr.io/SharkyND/mcp-atlassian:latest"
+      ]
+    }
+  }
+}
+```
+
+**MCP Client Configuration with Headers:**
+
+Configure your MCP client to send authentication headers with each request:
+
+```json
+{
+  "Atlassian": {
+    "url": "http://localhost:8000/mcp",
+    "headers": {
+      "X-Atlassian-Read-Only-Mode": "true",
+      "X-Atlassian-Jira-Personal-Token": "your_jira_pat_or_api_token",
+      "X-Atlassian-Jira-Url": "https://your-jira-instance.com",
+      "X-Atlassian-Confluence-Personal-Token": "your_confluence_pat_or_api_token",
+      "X-Atlassian-Confluence-Url": "https://your-confluence-instance.com"
+    },
+    "type": "http"
+  }
+}
+```
+
+**Optional Docker Configuration with Read-Only Mode:**
+
+If you want to enable read-only mode globally (rather than per-request), you can still use environment variables:
+
+```json
+{
+  "mcpServers": {
+    "mcp-atlassian": {
+      "command": "docker",
+      "args": [
+        "run",
+        "--rm",
+        "-i",
+        "-e", "READ_ONLY_MODE",
+        "ghcr.io/SharkyND/mcp-atlassian:latest"
+      ],
+      "env": {
+        "READ_ONLY_MODE": "true"
+      }
+    }
+  }
+}
+```
+
+> [!NOTE]
+> **Header-Based Authentication Benefits:**
+> - ✅ **Zero Configuration**: No environment variables required
+> - ✅ **Multi-Tenant Ready**: Different credentials per request
+> - ✅ **Dynamic**: Credentials can change without server restart
+> - ✅ **Flexible**: Mix and match Jira/Confluence authentication
+> - ✅ **Secure**: Credentials are not stored in environment or files
+
+> [!TIP]
+> **Selective Service Authentication**: You can authenticate with just Jira or just Confluence by providing only the relevant headers. The server will automatically detect available services based on the headers provided.
 
 </details>
 
