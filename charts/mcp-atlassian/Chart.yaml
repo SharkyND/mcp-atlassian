@@ -1,0 +1,25 @@
+apiVersion: v2
+name: mcp-atlassian
+description: A Helm chart for deploying MCP (Model Context Protocol) Atlassian server for Jira and Confluence integration
+type: application
+version: 0.1.0
+appVersion: "latest"
+
+home: https://github.com/SharkyND/mcp-atlassian
+sources:
+  - https://github.com/SharkyND/mcp-atlassian
+
+maintainers:
+  - name: SharkyND
+    url: https://github.com/SharkyND
+
+keywords:
+  - mcp
+  - atlassian
+  - jira
+  - confluence
+  - model-context-protocol
+
+annotations:
+  category: Integration
+  licenses: Apache-2.0
