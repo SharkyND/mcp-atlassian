@@ -321,7 +321,7 @@ def run_oauth_flow(args: OAuthSetupArgs) -> bool:
                             "ATLASSIAN_OAUTH_SCOPE",
                             "-e",
                             "ATLASSIAN_OAUTH_CLOUD_ID",
-                            "ghcr.io/SharkyND/mcp-atlassian:latest",
+                            "ghcr.io/sharkynd/mcp-atlassian:latest",
                         ],
                         "env": {
                             "CONFLUENCE_URL": "https://your-company.atlassian.net/wiki",

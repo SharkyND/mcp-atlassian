@@ -1,0 +1,45 @@
+1. Get the application URL by running these commands:
+{{- if .Values.ingress.enabled }}
+{{- range $host := .Values.ingress.hosts }}
+  {{- range .paths }}
+  http{{ if $.Values.ingress.tls }}s{{ end }}://{{ $host.host }}{{ .path }}
+  {{- end }}
+{{- end }}
+{{- else if contains "NodePort" .Values.service.type }}
+  export NODE_PORT=$(kubectl get --namespace {{ .Release.Namespace }} -o jsonpath="{.spec.ports[0].nodePort}" services {{ include "mcp-atlassian.fullname" . }})
+  export NODE_IP=$(kubectl get nodes --namespace {{ .Release.Namespace }} -o jsonpath="{.items[0].status.addresses[0].address}")
+  echo http://$NODE_IP:$NODE_PORT
+{{- else if contains "LoadBalancer" .Values.service.type }}
+     NOTE: It may take a few minutes for the LoadBalancer IP to be available.
+           You can watch the status of by running 'kubectl get --namespace {{ .Release.Namespace }} svc -w {{ include "mcp-atlassian.fullname" . }}'
+  export SERVICE_IP=$(kubectl get svc --namespace {{ .Release.Namespace }} {{ include "mcp-atlassian.fullname" . }} --template "{{"{{ range (index .status.loadBalancer.ingress 0) }}{{.}}{{ end }}"}}")
+  echo http://$SERVICE_IP:{{ .Values.service.port }}
+{{- else if contains "ClusterIP" .Values.service.type }}
+  export POD_NAME=$(kubectl get pods --namespace {{ .Release.Namespace }} -l "app.kubernetes.io/name={{ include "mcp-atlassian.name" . }},app.kubernetes.io/instance={{ .Release.Name }}" -o jsonpath="{.items[0].metadata.name}")
+  export CONTAINER_PORT=$(kubectl get pod --namespace {{ .Release.Namespace }} $POD_NAME -o jsonpath="{.spec.containers[0].ports[0].containerPort}")
+  echo "Visit http://127.0.0.1:8080 to use your application"
+  kubectl --namespace {{ .Release.Namespace }} port-forward $POD_NAME 8080:$CONTAINER_PORT
+{{- end }}
+
+2. MCP Atlassian Configuration:
+   - Transport: {{ .Values.env.TRANSPORT | default "streamable-http" }}
+   - Port: {{ .Values.service.targetPort }}
+
+3. To configure your MCP client:
+{{- if eq (.Values.env.TRANSPORT | default "streamable-http") "streamable-http" }}
+   Use the following URL for streamable-http transport:
+   http://{{ include "mcp-atlassian.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.service.port }}
+{{- else if eq .Values.env.TRANSPORT "sse" }}
+   Use the following URL for SSE transport:
+   http://{{ include "mcp-atlassian.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.service.port }}/sse
+{{- end }}
+
+4. Environment variables configured:
+{{- range $key, $value := .Values.env }}
+   - {{ $key }}: {{ $value }}
+{{- end }}
+
+5. To connect to Atlassian services, ensure you have configured:
+   - CONFLUENCE_URL and/or JIRA_URL in your environment variables
+   - Appropriate authentication (API tokens, personal tokens, or OAuth)
+   - Network access from your Kubernetes cluster to your Atlassian instances
