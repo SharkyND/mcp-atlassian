@@ -180,7 +180,7 @@ class AtlassianMCP(FastMCP[MainAppContext]):
             tool_tags = tool_obj.tags
 
             if not should_include_tool(registered_name, enabled_tools_filter):
-                logger.debug(f"Excluding tool '{registered_name}' (not enabled)")
+                logger.info(f"Excluding tool '{registered_name}' (not enabled)")
                 continue
 
             if tool_obj and read_only and "write" in tool_tags:

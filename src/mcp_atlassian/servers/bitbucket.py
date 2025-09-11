@@ -2,7 +2,7 @@
 
 import json
 import logging
-from typing import Annotated
+from typing import Annotated, List
 
 from fastmcp import Context, FastMCP
 from pydantic import Field
@@ -334,7 +334,7 @@ async def get_file_content(
                 "repository": repository,
                 "file_path": file_path,
                 "branch": branch,
-                "content": content,
+                "content": content.decode('utf-8'),
             },
             indent=2,
         )
@@ -691,19 +691,23 @@ async def update_file(
     ],
     repository: Annotated[
         str,
-        Field(description="Repository name"),
+        Field(description="Repository key."),
     ],
     file_path: Annotated[
         str,
-        Field(description="Path to the file in the repository"),
+        Field(description="Path to the file in the repository. It must exist."),
     ],
     content: Annotated[
-        str,
+        List[str],
         Field(description="New file content"),
     ],
     commit_message: Annotated[
         str,
         Field(description="Commit message for the file update"),
+    ],
+source_commit_id: Annotated[
+        str,
+        Field(description="A previous commit ID must be provided when editing an existing file to prevent concurrent modifications."),
     ],
     branch: Annotated[
         str,
@@ -711,7 +715,7 @@ async def update_file(
     ] = "main",
 ) -> str:
     """
-    Update or create a file in a repository.
+    Update the contents of an existing file in a repository.
 
     Args:
         workspace: Workspace name or project key.
@@ -720,7 +724,7 @@ async def update_file(
         content: New file content.
         commit_message: Commit message for the file update.
         branch: Branch name to commit to (default: main).
-
+        source_commit_id: A previous commit ID must be provided when editing an existing file to prevent concurrent modifications.
     Returns:
         JSON string containing the commit details.
 
@@ -730,15 +734,8 @@ async def update_file(
     try:
         bitbucket = await get_bitbucket_fetcher(ctx)
 
-        # Create commit data
-        commit_data = {
-            "message": commit_message,
-            "branch": branch,
-            file_path: content,
-        }
-
-        # Use the underlying Bitbucket client to update the file
-        result = bitbucket.upload_file(workspace, repository, commit_data)
+        result = bitbucket.update_file(workspace, repository, content, commit_message,
+                                       branch, file_path, source_commit_id)
 
         return json.dumps(
             {
@@ -767,6 +764,87 @@ async def update_file(
         }
         logger.log(log_level, f"bitbucket_update_file failed: {error_message}")
         return json.dumps(error_result, indent=2)
+
+
+@bitbucket_mcp.tool(tags={"bitbucket", "write"})
+@check_write_access
+async def create_file(
+    ctx: Context,
+    workspace: Annotated[
+        str,
+        Field(description="Workspace name (Cloud) or project key (Server/DC)"),
+    ],
+    repository: Annotated[
+        str,
+        Field(description="Repository name"),
+    ],
+    file_path: Annotated[
+        str,
+        Field(description="Path to the new file in the repository"),
+    ],
+    content: Annotated[
+        str,
+        Field(description="New file content"),
+    ],
+    commit_message: Annotated[
+        str,
+        Field(description="Commit message for the file creation"),
+    ],
+    branch: Annotated[
+        str,
+        Field(description="Branch name to commit to"),
+    ] = "main",
+) -> str:
+    """
+    Create a new file in a repository.
+
+    Args:
+        workspace: Workspace name or project key.
+        repository: Repository name.
+        file_path: Path to the new file in the repository.
+        content: New file content.
+        commit_message: Commit message for the file creation.
+        branch: Branch name to commit to (default: main).
+    Returns:
+        JSON string containing the commit details.
+
+    Raises:
+        ValueError: If the Bitbucket client is not configured or available.
+    """
+    try:
+        bitbucket = await get_bitbucket_fetcher(ctx)
+
+        result = bitbucket.upload_file(workspace, repository, content, commit_message,
+                                       branch, file_path)
+
+        return json.dumps(
+            {
+                "success": True,
+                "commit": result,
+                "file_path": file_path,
+                "branch": branch,
+            },
+            indent=2,
+        )
+    except Exception as e:
+        log_level = logging.ERROR
+        if isinstance(e, MCPAtlassianAuthenticationError):
+            error_message = f"Authentication/Permission Error: {str(e)}"
+        elif isinstance(e, OSError | HTTPError):
+            error_message = f"Network or API Error: {str(e)}"
+        elif isinstance(e, ValueError):
+            error_message = f"Configuration Error: {str(e)}"
+        else:
+            error_message = f"An unexpected error occurred while creating file {file_path} in {workspace}/{repository}."
+            logger.exception("Unexpected error in bitbucket_create_file:")
+
+        error_result = {
+            "success": False,
+            "error": error_message,
+        }
+        logger.log(log_level, f"bitbucket_create_file failed: {error_message}")
+        return json.dumps(error_result, indent=2)
+
 
 
 @bitbucket_mcp.tool(tags={"bitbucket", "write"})
