@@ -33,6 +33,7 @@ The following table lists the configurable parameters and their default values.
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
+| `replicaCount` | Number of replicas | `1` |
 | `image.repository` | Container image repository | `ghcr.io/sharkynd/mcp-atlassian` |
 | `image.tag` | Container image tag | `""` (uses appVersion) |
 | `image.pullPolicy` | Image pull policy | `IfNotPresent` |
@@ -66,6 +67,14 @@ The following table lists the configurable parameters and their default values.
 | `ingress.hosts` | Ingress hosts configuration | `[{host: "mcp-atlassian.local", paths: [{path: "/", pathType: "Prefix"}]}]` |
 | `ingress.tls` | Ingress TLS configuration | `[]` |
 
+### High Availability Configuration
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `podDisruptionBudget.enabled` | Enable Pod Disruption Budget | `false` |
+| `podDisruptionBudget.minAvailable` | Minimum available pods during disruptions | `1` |
+| `podDisruptionBudget.maxUnavailable` | Maximum unavailable pods during disruptions | `""` |
+
 ### Security Configuration
 
 | Parameter | Description | Default |
@@ -82,10 +91,16 @@ The following table lists the configurable parameters and their default values.
 | Parameter | Description | Default |
 |-----------|-------------|---------|
 | `resources` | Resource limits and requests | `{}` |
+
+### Autoscaling Configuration
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
 | `autoscaling.enabled` | Enable horizontal pod autoscaling | `false` |
 | `autoscaling.minReplicas` | Minimum number of replicas | `1` |
 | `autoscaling.maxReplicas` | Maximum number of replicas | `100` |
 | `autoscaling.targetCPUUtilizationPercentage` | Target CPU utilization | `80` |
+| `autoscaling.targetMemoryUtilizationPercentage` | Target memory utilization | `""` (disabled) |
 
 ### Health Checks
 
@@ -180,6 +195,85 @@ autoscaling:
   minReplicas: 2
   maxReplicas: 10
   targetCPUUtilizationPercentage: 70
+```
+
+### High Availability Deployment with Sticky Sessions
+
+```yaml
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # NGINX sticky sessions
+    nginx.ingress.kubernetes.io/affinity: "cookie"
+    nginx.ingress.kubernetes.io/session-cookie-name: "mcp-atlassian-session"
+    nginx.ingress.kubernetes.io/session-cookie-expires: "86400"
+    nginx.ingress.kubernetes.io/session-cookie-max-age: "86400"
+    nginx.ingress.kubernetes.io/session-cookie-path: "/"
+    nginx.ingress.kubernetes.io/session-cookie-change-on-failure: "true"
+    # NGINX proxy settings for long-running connections
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-http-version: "1.1"
+  hosts:
+    - host: mcp-atlassian.yourdomain.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: mcp-atlassian-tls
+      hosts:
+        - mcp-atlassian.yourdomain.com
+
+# Enable Pod Disruption Budget for high availability
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# Anti-affinity to spread pods across different nodes
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+    - weight: 100
+      podAffinityTerm:
+        labelSelector:
+          matchExpressions:
+          - key: app.kubernetes.io/name
+            operator: In
+            values:
+            - mcp-atlassian
+        topologyKey: kubernetes.io/hostname
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+```
+### Autoscaling Deployment
+
+```yaml
+# Enable autoscaling instead of fixed replica count
+# Note: replicaCount is ignored when autoscaling is enabled
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+# Resource requests/limits are required for autoscaling to work
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
 ```
 
 ### High-Security Deployment

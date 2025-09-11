@@ -5,7 +5,9 @@ metadata:
   labels:
     {{- include "mcp-atlassian.labels" . | nindent 4 }}
 spec:
-  replicas: 1
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
   selector:
     matchLabels:
       {{- include "mcp-atlassian.selectorLabels" . | nindent 6 }}
