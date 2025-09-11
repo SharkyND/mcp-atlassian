@@ -36,4 +36,6 @@ def is_atlassian_cloud_url(url: str) -> bool:
         or ".jira.com" in hostname
         or ".jira-dev.com" in hostname
         or "api.atlassian.com" in hostname
+        or "bitbucket.org" in hostname  # Bitbucket Cloud
+        or "api.bitbucket.org" in hostname  # Bitbucket Cloud API
     )
