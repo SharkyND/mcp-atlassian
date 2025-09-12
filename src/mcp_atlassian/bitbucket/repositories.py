@@ -116,8 +116,9 @@ class RepositoriesMixin(BitbucketClient):
             MCPAtlassianAuthenticationError: If authentication fails with the Bitbucket API (401/403)
         """
         try:
-
-            return self.bitbucket.get_content_of_file(workspace, repository, path, branch)
+            return self.bitbucket.get_content_of_file(
+                workspace, repository, path, branch
+            )
         except HTTPError as http_err:
             if http_err.response is not None and http_err.response.status_code in [
                 401,
@@ -156,7 +157,7 @@ class RepositoriesMixin(BitbucketClient):
             MCPAtlassianAuthenticationError: If authentication fails with the Bitbucket API (401/403)
         """
         try:
-            return self.bitbucket.get_directory_content(workspace, repository, path, branch)
+            return self.bitbucket.get_file_list(workspace, repository, path, branch)
         except HTTPError as http_err:
             if http_err.response is not None and http_err.response.status_code in [
                 401,
@@ -176,31 +177,21 @@ class RepositoriesMixin(BitbucketClient):
             logger.error(error_msg)
             raise Exception(f"Error getting directory content: {str(e)}") from e
 
-    def upload_file(
-        self, workspace: str, repository: str, content: str, message: str, branch: str, filename: str
-    ) -> dict[str, Any]:
-        """
-        Upload or update a file in a repository.
+
+    def get_repositories(
+        self, workspace
+    ) -> list[BitbucketRepository]:
+        """Get list of repositories.
 
         Args:
             workspace: Workspace name (Cloud) or project key (Server/DC)
-            repository: Repository name
-            content: file content
-            message: commit message
-            branch: branch where file will be created
-            filename: path of the file
 
         Returns:
-            Created commit data
-
-        Raises:
-            MCPAtlassianAuthenticationError: If authentication fails with the Bitbucket API (401/403)
+            List of repository dictionaries
         """
         try:
-
-            return self.bitbucket.upload_file(
-                workspace, repository, str(content), message, branch, filename
-            )
+            repos = list(self.bitbucket.repo_list(workspace))
+            return [BitbucketRepository.from_api_response(r) for r in repos]
         except HTTPError as http_err:
             if http_err.response is not None and http_err.response.status_code in [
                 401,
@@ -216,50 +207,6 @@ class RepositoriesMixin(BitbucketClient):
                 logger.error(f"HTTP error during API call: {http_err}", exc_info=False)
                 raise http_err
         except Exception as e:
-            error_msg = f"Error uploading file to {workspace}/{repository}: {str(e)}"
+            error_msg = f"Error getting repos in {workspace}: {str(e)}"
             logger.error(error_msg)
-            raise Exception(f"Error uploading file: {str(e)}") from e
-
-
-    def update_file(
-        self, workspace: str, repository: str, content, message, branch, filename, source_commit_id
-    ) -> dict[str, Any]:
-        """
-        Update a file in a repository.
-
-        Args:
-            workspace: Workspace name (Cloud) or project key (Server/DC)
-            repository: Repository name
-            content: The file contents to replace with.
-            message: Commit message
-            branch: Existing branch to update the file on.
-            filename: Name of the file to update. It must exist.
-            source_commit_id: A previous commit ID must be provided when editing an existing file to prevent concurrent modifications.
-
-        Returns:
-            Created commit data
-
-        Raises:
-            MCPAtlassianAuthenticationError: If authentication fails with the Bitbucket API (401/403)
-        """
-        try:
-            return self.bitbucket.update_file(workspace, repository,
-                                              str(content), message, branch, filename, source_commit_id)
-        except HTTPError as http_err:
-            if http_err.response is not None and http_err.response.status_code in [
-                401,
-                403,
-            ]:
-                error_msg = (
-                    f"Authentication failed for Bitbucket API ({http_err.response.status_code}). "
-                    "Token may be expired or invalid. Please verify credentials."
-                )
-                logger.error(error_msg)
-                raise MCPAtlassianAuthenticationError(error_msg) from http_err
-            else:
-                logger.error(f"HTTP error during API call: {http_err}", exc_info=False)
-                raise http_err
-        except Exception as e:
-            error_msg = f"Error uploading file to {workspace}/{repository}: {str(e)}"
-            logger.error(error_msg)
-            raise Exception(f"Error uploading file: {str(e)}") from e
+            raise Exception(f"Error getting repos: {str(e)}") from e

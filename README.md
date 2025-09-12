@@ -6,7 +6,7 @@
 [![Run Tests](https://github.com/SharkyND/mcp-atlassian/actions/workflows/tests.yml/badge.svg)](https://github.com/SharkyND/mcp-atlassian/actions/workflows/tests.yml)
 ![License](https://img.shields.io/github/license/SharkyND/mcp-atlassian)
 
-Model Context Protocol (MCP) server for Atlassian products (Confluence and Jira). This integration supports both Confluence & Jira Cloud and Server/Data Center deployments.
+Model Context Protocol (MCP) server for Atlassian products (Confluence, Jira and Bitbucket). This integration supports both Confluence, Jira and Bitbucket Cloud and Server/Data Center deployments.
 
 Note: This project is a fork from [mcp-atlassian](https://github.com/sooperset/mcp-atlassian). The project at the time of making a fork has not been maintained for a while with couple of dozen pull requests and a few issues on the github project. Hence, it was about time to fork the project and make some fixes.
 
@@ -18,6 +18,7 @@ Ask your AI assistant to:
 - **🔍 AI-Powered Confluence Search** - "Find our OKR guide in Confluence and summarize it"
 - **🐛 Smart Jira Issue Filtering** - "Show me urgent bugs in PROJ project from last week"
 - **📄 Content Creation & Management** - "Create a tech design doc for XYZ feature"
+
 
 ### Feature Demo
 
@@ -37,6 +38,8 @@ https://github.com/user-attachments/assets/7fe9c488-ad0c-4876-9b54-120b666bb785
 | **Confluence** | Server/Data Center | ✅ Supported (version 6.0+)  |
 | **Jira**       | Cloud              | ✅ Fully supported           |
 | **Jira**       | Server/Data Center | ✅ Supported (version 8.14+) |
+| **Bitbucket**  | Cloud              | ✅ Fully supported           |
+| **Bitbucket**  | Server/Data Center | ✅ Supported (version 7.0+)  |
 
 ## Quick Start Guide
 
@@ -113,7 +116,7 @@ This option is useful in scenarios where OAuth credential management is centrali
 > [!NOTE]
 > Header-based authentication enables dynamic, per-request credential management without requiring environment variables or server restarts. This is ideal for multi-tenant applications, serverless environments, or when credentials need to be managed dynamically.
 
-With header-based authentication, you can pass Jira and Confluence credentials directly through HTTP headers on each request. This method supports both Personal Access Tokens (PAT) for Server/Data Center and API tokens for Cloud deployments.
+With header-based authentication, you can pass Jira, Confluence, and Bitbucket credentials directly through HTTP headers on each request. This method supports both Personal Access Tokens (PAT) for Server/Data Center and API tokens for Cloud deployments.
 
 **Required Headers:**
 
@@ -124,6 +127,11 @@ For **Jira authentication**:
 For **Confluence authentication**:
 - `X-Atlassian-Confluence-Personal-Token`: Your Confluence PAT or API token
 - `X-Atlassian-Confluence-Url`: Your Confluence instance URL
+
+For **Bitbucket authentication**:
+- `X-Atlassian-Bitbucket-Personal-Token`: Your Bitbucket PAT or app password
+- `X-Atlassian-Bitbucket-Url`: Your Bitbucket instance URL
+- `X-Atlassian-Bitbucket-Username`: Your Bitbucket username (required for PAT auth)
 
 **Benefits:**
 - ✅ No environment variables required
@@ -143,7 +151,10 @@ For **Confluence authentication**:
       "X-Atlassian-Jira-Personal-Token": "your_jira_pat_or_api_token",
       "X-Atlassian-Jira-Url": "https://your-jira-instance.com",
       "X-Atlassian-Confluence-Personal-Token": "your_confluence_pat_or_api_token",
-      "X-Atlassian-Confluence-Url": "https://your-confluence-instance.com"
+      "X-Atlassian-Confluence-Url": "https://your-confluence-instance.com",
+      "X-Atlassian-Bitbucket-Personal-Token": "your_bitbucket_pat_or_app_password",
+      "X-Atlassian-Bitbucket-Url": "https://your-bitbucket-instance.com",
+      "X-Atlassian-Bitbucket-Username": "your_bitbucket_username"
     },
     "type": "http"
   }
@@ -220,6 +231,9 @@ There are three main approaches to configure the Docker container:
         "-e", "JIRA_URL",
         "-e", "JIRA_USERNAME",
         "-e", "JIRA_API_TOKEN",
+        "-e", "BITBUCKET_URL",
+        "-e", "BITBUCKET_USERNAME",
+        "-e", "BITBUCKET_APP_PASSWORD",
         "ghcr.io/SharkyND/mcp-atlassian:latest"
       ],
       "env": {
@@ -228,7 +242,10 @@ There are three main approaches to configure the Docker container:
         "CONFLUENCE_API_TOKEN": "your_confluence_api_token",
         "JIRA_URL": "https://your-company.atlassian.net",
         "JIRA_USERNAME": "your.email@company.com",
-        "JIRA_API_TOKEN": "your_jira_api_token"
+        "JIRA_API_TOKEN": "your_jira_api_token",
+        "BITBUCKET_URL": "https://bitbucket.org",
+        "BITBUCKET_USERNAME": "your.email@company.com",
+        "BITBUCKET_APP_PASSWORD": "your_bitbucket_app_password"
       }
     }
   }
@@ -464,13 +481,10 @@ If you want to enable read-only mode globally (rather than per-request), you can
 > **Selective Service Authentication**: You can authenticate with just Jira or just Confluence by providing only the relevant headers. The server will automatically detect available services based on the headers provided.
 
 </details>
-
 <details>
 <summary>Proxy Configuration</summary>
-
-MCP Atlassian supports routing API requests through standard HTTP/HTTPS/SOCKS proxies. Configure using environment variables:
-
 - Supports standard `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, `SOCKS_PROXY`.
+
 - Service-specific overrides are available (e.g., `JIRA_HTTPS_PROXY`, `CONFLUENCE_NO_PROXY`).
 - Service-specific variables override global ones for that service.
 
@@ -870,46 +884,54 @@ Here's a complete example of setting up multi-user authentication with streamabl
 - `confluence_create_page`: Create a new page
 - `confluence_update_page`: Update an existing page
 
+#### Bitbucket Tools
+
+- `list_workspaces`: List all accessible workspaces/projects
+- `list_repositories`: List repositories in a workspace or all accessible repositories
+- `get_repository_info`: Get detailed information about a specific repository
+- `list_branches`: List all branches in a repository
+- `get_default_branch`: Get the default branch of a repository
+- `get_file_content`: Get content of a specific file from a repository
+
 <details> <summary>View All Tools</summary>
 
-| Operation | Jira Tools                          | Confluence Tools               |
-|-----------|-------------------------------------|--------------------------------|
-| **Read**  | `jira_search`                       | `confluence_search`            |
-|           | `jira_get_issue`                    | `confluence_get_page`          |
-|           | `jira_get_all_projects`             | `confluence_get_page_children` |
-|           | `jira_get_project_issues`           | `confluence_get_comments`      |
-|           | `jira_get_worklog`                  | `confluence_get_labels`        |
-|           | `jira_get_transitions`              | `confluence_search_user`       |
-|           | `jira_search_fields`                |                                |
-|           | `jira_get_agile_boards`             |                                |
-|           | `jira_get_board_issues`             |                                |
-|           | `jira_get_sprints_from_board`       |                                |
-|           | `jira_get_sprint_issues`            |                                |
-|           | `jira_get_issue_link_types`         |                                |
-|           | `jira_batch_get_changelogs`*        |                                |
-|           | `jira_get_user_profile`             |                                |
-|           | `jira_download_attachments`         |                                |
-|           | `jira_get_project_versions`         |                                |
-| **Write** | `jira_create_issue`                 | `confluence_create_page`       |
-|           | `jira_update_issue`                 | `confluence_update_page`       |
-|           | `jira_delete_issue`                 | `confluence_delete_page`       |
-|           | `jira_batch_create_issues`          | `confluence_add_label`         |
-|           | `jira_add_comment`                  | `confluence_add_comment`       |
-|           | `jira_transition_issue`             |                                |
-|           | `jira_add_worklog`                  |                                |
-|           | `jira_link_to_epic`                 |                                |
-|           | `jira_create_sprint`                |                                |
-|           | `jira_update_sprint`                |                                |
-|           | `jira_create_issue_link`            |                                |
-|           | `jira_remove_issue_link`            |                                |
-|           | `jira_create_version`               |                                |
-|           | `jira_batch_create_versions`        |                                |
+| Operation | Jira Tools                    | Confluence Tools               | Bitbucket Tools                    |
+|-----------|-------------------------------|--------------------------------|------------------------------------|
+| **Read**  | `jira_search`                 | `confluence_search`            | `list_workspaces`                  |
+|           | `jira_get_issue`              | `confluence_get_page`          | `list_repositories`                |
+|           | `jira_get_all_projects`       | `confluence_get_page_children` | `get_repository_info`              |
+|           | `jira_get_project_issues`     | `confluence_get_comments`      | `list_branches`                    |
+|           | `jira_get_worklog`            | `confluence_get_labels`        | `get_default_branch`               |
+|           | `jira_get_transitions`        | `confluence_search_user`       | `get_file_content`                 |
+|           | `jira_search_fields`          |                                | `list_directory`                   |
+|           | `jira_get_agile_boards`       |                                | `list_pull_requests`               |
+|           | `jira_get_board_issues`       |                                | `pull_request_activities`          |
+|           | `jira_get_sprints_from_board` |                                | `get_pull_request`                 |
+|           | `jira_get_sprint_issues`      |                                | `get_commit_changes`               |
+|           | `jira_get_issue_link_types`   |                                | `get_commits`                      |
+|           | `jira_batch_get_changelogs`*  |                                |                                    |
+|           | `jira_get_user_profile`       |                                |                                    |
+|           | `jira_download_attachments`   |                                |                                    |
+|           | `jira_get_project_versions`   |                                |                                    |
+| **Write** | `jira_create_issue`           | `confluence_create_page`       | `create_pull_request`              |
+|           | `jira_update_issue`           | `confluence_update_page`       | `create_branch`                    |
+|           | `jira_delete_issue`           | `confluence_delete_page`       | `add_pull_request_blocker_comment` |
+|           | `jira_batch_create_issues`    | `confluence_add_label`         | `add_pull_request_comment`         |
+|           | `jira_add_comment`            | `confluence_add_comment`       |                                    |
+|           | `jira_transition_issue`       |                                |                                    |
+|           | `jira_add_worklog`            |                                |                                    |
+|           | `jira_link_to_epic`           |                                |                                    |
+|           | `jira_create_sprint`          |                                |                                    |
+|           | `jira_update_sprint`          |                                |                                    |
+|           | `jira_create_issue_link`      |                                |                                    |
+|           | `jira_remove_issue_link`      |                                |                                    |
+|           | `jira_create_version`         |                                |                                    |
+|           | `jira_batch_create_versions`  |                                |                                    |
 
 </details>
 
 *Tool only available on Jira Cloud
 
-</details>
 
 ### Tool Filtering and Access Control
 

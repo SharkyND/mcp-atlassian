@@ -6,7 +6,7 @@ from typing import Any
 from requests.exceptions import HTTPError
 
 from ..exceptions import MCPAtlassianAuthenticationError
-from ..models.bitbucket.common import BitbucketBranch, BitbucketCommit
+from ..models.bitbucket.common import BitbucketBranch, BitbucketCommit, CommitChanges
 from .client import BitbucketClient
 from .constants import DEFAULT_BRANCH_NAMES
 
@@ -38,7 +38,7 @@ class BranchesMixin(BitbucketClient):
         """
         try:
             # Use the base class method that returns raw dictionaries
-            raw_branches = super().get_branches(workspace, repository)
+            raw_branches = self.bitbucket.get_branches(workspace, repository)
             return [
                 BitbucketBranch.from_api_response(branch) for branch in raw_branches
             ]
@@ -60,6 +60,62 @@ class BranchesMixin(BitbucketClient):
             error_msg = f"Error getting branches for {workspace}/{repository}: {str(e)}"
             logger.error(error_msg)
             raise Exception(f"Error getting branches: {str(e)}") from e
+
+    def get_branches(
+        self,
+        workspace: str,
+        repository: str,
+        base: str = None,
+        branch_filter: str = None,
+        start: int = 0,
+        limit: int = None,
+    ) -> list[BitbucketBranch]:
+        """Get list of branches for a repository.
+
+        Args:
+            workspace: Workspace name (Cloud) or project key (Server/DC)
+            repository: Repository name,
+            base:
+            branch_filter:
+            start:
+            limit:
+
+        Returns:
+            List of branch dictionaries
+        """
+        try:
+            return [
+                BitbucketBranch.from_api_response(i)
+                for i in self.bitbucket.get_branches(
+                    workspace,
+                    repository,
+                    base=base,
+                    filter=branch_filter,
+                    start=start,
+                    limit=limit,
+                )
+            ]
+        except HTTPError as http_err:
+            if http_err.response is not None and http_err.response.status_code in [
+                401,
+                403,
+            ]:
+                error_msg = (
+                    f"Authentication failed for Bitbucket API ({http_err.response.status_code}). "
+                    "Token may be expired or invalid. Please verify credentials."
+                )
+                logger.error(error_msg)
+                raise MCPAtlassianAuthenticationError(error_msg) from http_err
+            else:
+                logger.error(f"HTTP error during API call: {http_err}", exc_info=False)
+                raise http_err
+        except Exception as e:
+            error_msg = (
+                f"Error getting brnches for {workspace}/{repository}: {str(e)}"
+            )
+            logger.error(error_msg)
+            raise Exception(f"Error getting branches: {str(e)}") from e
+
 
     def get_default_branch(
         self, workspace: str, repository: str
@@ -85,7 +141,6 @@ class BranchesMixin(BitbucketClient):
                 )
                 return BitbucketBranch.from_api_response(default_branch_data)
             except Exception:
-                # Fallback: try common default branch names
                 branches = self.get_all_branches(workspace, repository)
                 for default_name in DEFAULT_BRANCH_NAMES:
                     for branch in branches:
@@ -115,8 +170,12 @@ class BranchesMixin(BitbucketClient):
             raise Exception(f"Error getting default branch: {str(e)}") from e
 
     def get_commits(
-        self, workspace: str, repository: str, limit: int = 25,
-            until=None, since=None
+        self,
+        workspace: str,
+        repository: str,
+        limit: int = 25,
+        until: str = None,
+        since: str = None,
     ) -> list[BitbucketCommit]:
         """
         Get commit history for a repository branch.
@@ -156,6 +215,61 @@ class BranchesMixin(BitbucketClient):
             error_msg = f"Error getting commits for {workspace}/{repository} : {str(e)}"
             logger.error(error_msg)
             raise Exception(f"Error getting commits: {str(e)}") from e
+
+    def get_commit_changes(
+        self,
+        workspace: str,
+        repository: str,
+        commit_id: str,
+        merges: str = "include",
+        hash_newest: str = None,
+    ) -> CommitChanges:
+        """
+        Get changes for a specific commit in a repository.
+
+        Args:
+            workspace: Workspace name (Cloud) or project key (Server/DC)
+            repository: Repository name
+            hash_newest: Latest hash of the commit to fetch.
+            merges: Filter merges ('include', 'exclude', 'only')
+            commit_id: Specific commit ID to get changes for
+
+        Returns:
+            List of change dictionaries
+
+        Raises:
+            MCPAtlassianAuthenticationError: If authentication fails with the Bitbucket API (401/403)
+        """
+        try:
+            changes = self.bitbucket.get_commit_changes(
+                project_key=workspace,
+                repository_slug=repository,
+                hash_newest=hash_newest,
+                merges=merges,
+                commit_id=commit_id,
+            )
+            print(changes)
+            return CommitChanges.from_api_response(changes)
+        except HTTPError as http_err:
+            if http_err.response is not None and http_err.response.status_code in [
+                401,
+                403,
+            ]:
+                error_msg = (
+                    f"Authentication failed for Bitbucket API ({http_err.response.status_code}). "
+                    "Token may be expired or invalid. Please verify credentials."
+                )
+                logger.error(error_msg)
+                raise MCPAtlassianAuthenticationError(error_msg) from http_err
+            else:
+                logger.error(f"HTTP error during API call: {http_err}", exc_info=False)
+                raise http_err
+        except Exception as e:
+            error_msg = (
+                f"Error getting commit changes for {workspace}/{repository}: {str(e)}"
+            )
+            logger.error(error_msg)
+            raise Exception(f"Error getting commit changes: {str(e)}") from e
 
     def create_branch(
         self, workspace: str, repository: str, branch_data: dict[str, Any]

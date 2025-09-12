@@ -44,7 +44,7 @@ class PullRequestsMixin(BitbucketClient):
                 state = "OPEN"
 
             # Use the base class method that returns raw dictionaries
-            raw_prs = super().get_pull_requests(workspace, repository, state)
+            raw_prs = self.bitbucket.get_pull_requests(workspace, repository, state)
             return [BitbucketPullRequest.from_api_response(pr) for pr in raw_prs]
         except HTTPError as http_err:
             if http_err.response is not None and http_err.response.status_code in [
@@ -127,7 +127,7 @@ class PullRequestsMixin(BitbucketClient):
         """
         try:
             # Use the base class method that implements the actual API call
-            return super().get_pull_request_commits(
+            return self.bitbucket.get_pull_requests_commits(
                 workspace, repository, pull_request_id
             )
         except HTTPError as http_err:
@@ -149,7 +149,43 @@ class PullRequestsMixin(BitbucketClient):
             logger.error(error_msg)
             raise Exception(f"Error getting PR commits: {str(e)}") from e
 
-    def get_pull_request_comments(
+    def get_pull_requests(
+        self, workspace: str, repository: str, state: str = "OPEN"
+    ) -> list[dict[str, Any]]:
+        """Get list of pull requests.
+
+        Args:
+            workspace: Workspace name (Cloud) or project key (Server/DC)
+            repository: Repository name
+            state: PR state (OPEN, MERGED, DECLINED)
+
+        Returns:
+            List of pull request dictionaries
+        """
+        try:
+            return self.bitbucket.get_pull_requests(workspace, repository, state=state)
+        except HTTPError as http_err:
+            if http_err.response is not None and http_err.response.status_code in [
+                401,
+                403,
+            ]:
+                error_msg = (
+                    f"Authentication failed for Bitbucket API ({http_err.response.status_code}). "
+                    "Token may be expired or invalid. Please verify credentials."
+                )
+                logger.error(error_msg)
+                raise MCPAtlassianAuthenticationError(error_msg) from http_err
+            else:
+                logger.error(f"HTTP error during API call: {http_err}", exc_info=False)
+                raise http_err
+        except Exception as e:
+            error_msg = (
+                f"Error getting pull requests in {workspace}/{repository}: {str(e)}"
+            )
+            logger.error(error_msg)
+            raise Exception(f"Error getting PRs: {str(e)}") from e
+
+    def get_pull_request_activities(
         self, workspace: str, repository: str, pull_request_id: int
     ) -> list[dict[str, Any]]:
         """
@@ -167,8 +203,7 @@ class PullRequestsMixin(BitbucketClient):
             MCPAtlassianAuthenticationError: If authentication fails with the Bitbucket API (401/403)
         """
         try:
-            # Use the base class method that implements the actual API call
-            return super().get_pull_request_comments(
+            return super().get_pull_request_activities(
                 workspace, repository, pull_request_id
             )
         except HTTPError as http_err:
@@ -274,3 +309,49 @@ class PullRequestsMixin(BitbucketClient):
             error_msg = f"Error adding comment to PR {pull_request_id} in {workspace}/{repository}: {str(e)}"
             logger.error(error_msg)
             raise Exception(f"Error adding PR comment: {str(e)}") from e
+
+    def add_pull_request_blocker_comment(
+        self,
+        workspace: str,
+        repository: str,
+        pull_request_id: int,
+        comment: str,
+        severity: str = None,
+    ) -> dict[str, Any]:
+        """
+        Add a blocker comment on a pull request.
+        Args:
+            workspace: Workspace name (Cloud) or project key (Server/DC)
+            repository: Repository name
+            pull_request_id: Pull request ID
+            comment: Comment data including content
+            severity: Severity of the blocker. The severity must be one of: [NORMAL, BLOCKER], or it can be omitted.
+
+        Returns:
+            Created comment data
+
+        Raises:
+            MCPAtlassianAuthenticationError: If authentication fails with the Bitbucket API (401/403)
+        """
+        try:
+            return self.bitbucket.add_pull_request_blocker_comment(
+                workspace, repository, pull_request_id, comment, severity=severity
+            )
+        except HTTPError as http_err:
+            if http_err.response is not None and http_err.response.status_code in [
+                401,
+                403,
+            ]:
+                error_msg = (
+                    f"Authentication failed for Bitbucket API ({http_err.response.status_code}). "
+                    "Token may be expired or invalid. Please verify credentials."
+                )
+                logger.error(error_msg)
+                raise MCPAtlassianAuthenticationError(error_msg) from http_err
+            else:
+                logger.error(f"HTTP error during API call: {http_err}", exc_info=False)
+                raise http_err
+        except Exception as e:
+            error_msg = f"Error adding blocker comment to PR {pull_request_id} in {workspace}/{repository}: {str(e)}"
+            logger.error(error_msg)
+            raise Exception(f"Error blocker adding PR comment: {str(e)}") from e

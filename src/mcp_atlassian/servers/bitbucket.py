@@ -2,7 +2,7 @@
 
 import json
 import logging
-from typing import Annotated, List
+from typing import Annotated, Literal
 
 from fastmcp import Context, FastMCP
 from pydantic import Field
@@ -142,7 +142,9 @@ async def get_repository_info(
     try:
         bitbucket = await get_bitbucket_fetcher(ctx)
         repo_info = bitbucket.get_repository_info(workspace, repository)
-        return json.dumps(repo_info.model_dump(mode='json', serialize_as_any=True), indent=2)
+        return json.dumps(
+            repo_info.model_dump(mode="json", serialize_as_any=True), indent=2
+        )
     except Exception as e:
         error_message = ""
         log_level = logging.ERROR
@@ -175,22 +177,22 @@ async def list_branches(
         str,
         Field(description="Repository name"),
     ],
-base: Annotated[
+    base: Annotated[
         str,
         Field(description="The base branch"),
     ] = None,
-branch_filter: Annotated[
+    branch_filter: Annotated[
         str,
         Field(description="Branch pattern to filter on."),
     ] = None,
-start: Annotated[
+    start: Annotated[
         int,
         Field(description="Starting index."),
-    ]= 0,
-limit: Annotated[
+    ] = 0,
+    limit: Annotated[
         int,
         Field(description="Maximum number of branches to return"),
-    ] = None
+    ] = None,
 ) -> str:
     """
     List all branches in a repository.
@@ -212,9 +214,13 @@ limit: Annotated[
     """
     try:
         bitbucket = await get_bitbucket_fetcher(ctx)
-        branches = bitbucket.get_branches(workspace, repository, base, branch_filter, start, limit)
+        branches = bitbucket.get_branches(
+            workspace, repository, base, branch_filter, start, limit
+        )
         # Convert model objects to dictionaries for JSON serialization
-        branch_dicts = [branch.model_dump(mode='json', serialize_as_any=True) for branch in branches]
+        branch_dicts = [
+            branch.model_dump(mode="json", serialize_as_any=True) for branch in branches
+        ]
         return json.dumps(branch_dicts, indent=2)
     except Exception as e:
         error_message = ""
@@ -266,7 +272,9 @@ async def get_default_branch(
         bitbucket = await get_bitbucket_fetcher(ctx)
         default_branch = bitbucket.get_default_branch(workspace, repository)
         if default_branch:
-            return json.dumps(default_branch.model_dump(mode='json', serialize_as_any=True), indent=2)
+            return json.dumps(
+                default_branch.model_dump(mode="json", serialize_as_any=True), indent=2
+            )
         else:
             return json.dumps({"error": "No default branch found"})
     except Exception as e:
@@ -334,7 +342,7 @@ async def get_file_content(
                 "repository": repository,
                 "file_path": file_path,
                 "branch": branch,
-                "content": content.decode('utf-8'),
+                "content": content.decode("utf-8"),
             },
             indent=2,
         )
@@ -396,7 +404,9 @@ async def list_directory(
     """
     try:
         bitbucket = await get_bitbucket_fetcher(ctx)
-        contents = bitbucket.get_directory_content(workspace, repository, path, branch)
+        contents = list(
+            bitbucket.get_directory_content(workspace, repository, path, branch)
+        )
         return json.dumps(contents, indent=2)
     except Exception as e:
         error_message = ""
@@ -475,6 +485,62 @@ async def list_pull_requests(
 
 
 @bitbucket_mcp.tool(tags={"bitbucket", "read"})
+async def pull_request_activities(
+    ctx: Context,
+    workspace: Annotated[
+        str,
+        Field(description="Workspace name (Cloud) or project key (Server/DC)"),
+    ],
+    repository: Annotated[
+        str,
+        Field(description="Repository name"),
+    ],
+    pull_request_id: Annotated[
+        int,
+        Field(description="Pull request ID to get comments for."),
+    ],
+) -> str:
+    """
+    Get all activities on a pull request.
+
+    Args:
+        workspace: Workspace name or project key.
+        repository: Repository name.
+        pull_request_id: Pull request ID to get comments for.
+
+    Returns:
+        JSON string containing list of pull requests.
+
+    Raises:
+        ValueError: If the Bitbucket client is not configured or available.
+    """
+    try:
+        bitbucket = await get_bitbucket_fetcher(ctx)
+        pull_requests = bitbucket.get_pull_request_activities(
+            workspace, repository, pull_request_id
+        )
+        return json.dumps(pull_requests, indent=2)
+    except Exception as e:
+        log_level = logging.ERROR
+        if isinstance(e, MCPAtlassianAuthenticationError):
+            error_message = f"Authentication/Permission Error: {str(e)}"
+        elif isinstance(e, OSError | HTTPError):
+            error_message = f"Network or API Error: {str(e)}"
+        elif isinstance(e, ValueError):
+            error_message = f"Configuration Error: {str(e)}"
+        else:
+            error_message = f"An unexpected error occurred while fetching pull requests for {workspace}/{repository}."
+            logger.exception("Unexpected error in bitbucket_list_pull_requests:")
+
+        error_result = {
+            "success": False,
+            "error": error_message,
+        }
+        logger.log(log_level, f"bitbucket_list_pull_requests failed: {error_message}")
+        return json.dumps(error_result, indent=2)
+
+
+@bitbucket_mcp.tool(tags={"bitbucket", "read"})
 async def get_pull_request(
     ctx: Context,
     workspace: Annotated[
@@ -509,7 +575,9 @@ async def get_pull_request(
         pull_request = bitbucket.get_pull_request(
             workspace, repository, pull_request_id
         )
-        return json.dumps(pull_request.to_dict(), indent=2)
+        return json.dumps(
+            pull_request.model_dump(mode="json", serialize_as_any=True), indent=2
+        )
     except Exception as e:
         log_level = logging.ERROR
         if isinstance(e, MCPAtlassianAuthenticationError):
@@ -531,6 +599,76 @@ async def get_pull_request(
 
 
 @bitbucket_mcp.tool(tags={"bitbucket", "read"})
+async def get_commit_changes(
+    ctx: Context,
+    workspace: Annotated[
+        str,
+        Field(description="Workspace name (Cloud) or project key (Server/DC)"),
+    ],
+    repository: Annotated[
+        str,
+        Field(description="Repository name"),
+    ],
+    commit_id: Annotated[
+        str,
+        Field(description="ID of the commit whose changes are being fetched."),
+    ],
+    merges: Annotated[
+        Literal["include", "exclude", "only"],
+        Field(
+            description="Filter merges ('include', 'exclude', 'only') (default: include)"
+        ),
+    ] = "include",
+    hash_newest: Annotated[
+        str,
+        Field(description="Fetch changes for a particular commit hash."),
+    ] = None,
+) -> str:
+    """
+    Get commit history for a repository branch.
+
+    Args:
+        workspace: Workspace name or project key.
+        repository: Repository name.
+        commit_id: ID of the commit whose changes are being fetched.
+        merges: Filter merges ('include', 'exclude', 'only') (default: include)
+        hash_newest: Fetch changes for a particular commit hash.
+
+    Returns:
+        JSON string containing commit history.
+
+    Raises:
+        ValueError: If the Bitbucket client is not configured or available.
+    """
+    try:
+        bitbucket = await get_bitbucket_fetcher(ctx)
+        commits = bitbucket.get_commit_changes(
+            workspace, repository, commit_id, merges, hash_newest
+        )
+        return json.dumps(
+            commits.model_dump(mode="json", serialize_as_any=True), indent=2
+        )
+    except Exception as e:
+        log_level = logging.ERROR
+        if isinstance(e, MCPAtlassianAuthenticationError):
+            error_message = f"Authentication/Permission Error: {str(e)}"
+        elif isinstance(e, OSError | HTTPError):
+            error_message = f"Network or API Error: {str(e)}"
+        elif isinstance(e, ValueError):
+            error_message = f"Configuration Error: {str(e)}"
+        else:
+            error_message = f"An unexpected error occurred while fetching commits for {workspace}/{repository}."
+            logger.exception("Unexpected error in bitbucket_get_commits:")
+
+        error_result = {
+            "success": False,
+            "error": error_message,
+        }
+        logger.log(log_level, f"bitbucket_get_commits failed: {error_message}")
+        return json.dumps(error_result, indent=2)
+
+
+@bitbucket_mcp.tool(tags={"bitbucket", "read"})
 async def get_commits(
     ctx: Context,
     workspace: Annotated[
@@ -545,14 +683,18 @@ async def get_commits(
         int,
         Field(description="Maximum number of commits to return"),
     ] = 25,
-until: Annotated[
+    until: Annotated[
         str,
-        Field(description="The commit ID or ref (inclusively) to retrieve commits before"),
+        Field(
+            description="The commit ID or ref (inclusively) to retrieve commits before"
+        ),
     ] = None,
-since: Annotated[
+    since: Annotated[
         str,
-        Field(description="The commit ID or ref (inclusively) to retrieve commits after"),
-    ] = None
+        Field(
+            description="The commit ID or ref (inclusively) to retrieve commits after"
+        ),
+    ] = None,
 ) -> str:
     """
     Get commit history for a repository branch.
@@ -572,9 +714,13 @@ since: Annotated[
     """
     try:
         bitbucket = await get_bitbucket_fetcher(ctx)
-        commits = bitbucket.get_commits(workspace, repository, limit=limit, until=until, since=since )
+        commits = bitbucket.get_commits(
+            workspace, repository, limit=limit, until=until, since=since
+        )
 
-        commit_dicts = [commit.model_dump(mode='json', serialize_as_any=True) for commit in commits]
+        commit_dicts = [
+            commit.model_dump(mode="json", serialize_as_any=True) for commit in commits
+        ]
         return json.dumps(commit_dicts, indent=2)
     except Exception as e:
         log_level = logging.ERROR
@@ -647,9 +793,28 @@ async def create_pull_request(
 
         pr_data = {
             "title": title,
-            "description": description or "",
-            "source": {"branch": {"name": source_branch}},
-            "destination": {"branch": {"name": destination_branch}},
+            "description": description,
+            "state": "OPEN",
+            "open": True,
+            "closed": False,
+            "fromRef": {
+                "id": f"refs/heads/{source_branch}",
+                "repository": {
+                    "slug": repository,
+                    "name": None,
+                    "project": {"key": workspace},
+                },
+            },
+            "toRef": {
+                "id": f"refs/heads/{destination_branch}",
+                "repository": {
+                    "slug": repository,
+                    "name": None,
+                    "project": {"key": workspace},
+                },
+            },
+            "locked": False,
+            "reviewers": [],
         }
 
         result = bitbucket.create_pull_request(workspace, repository, pr_data)
@@ -679,172 +844,6 @@ async def create_pull_request(
         }
         logger.log(log_level, f"bitbucket_create_pull_request failed: {error_message}")
         return json.dumps(error_result, indent=2)
-
-
-@bitbucket_mcp.tool(tags={"bitbucket", "write"})
-@check_write_access
-async def update_file(
-    ctx: Context,
-    workspace: Annotated[
-        str,
-        Field(description="Workspace name (Cloud) or project key (Server/DC)"),
-    ],
-    repository: Annotated[
-        str,
-        Field(description="Repository key."),
-    ],
-    file_path: Annotated[
-        str,
-        Field(description="Path to the file in the repository. It must exist."),
-    ],
-    content: Annotated[
-        List[str],
-        Field(description="New file content"),
-    ],
-    commit_message: Annotated[
-        str,
-        Field(description="Commit message for the file update"),
-    ],
-source_commit_id: Annotated[
-        str,
-        Field(description="A previous commit ID must be provided when editing an existing file to prevent concurrent modifications."),
-    ],
-    branch: Annotated[
-        str,
-        Field(description="Branch name to commit to"),
-    ] = "main",
-) -> str:
-    """
-    Update the contents of an existing file in a repository.
-
-    Args:
-        workspace: Workspace name or project key.
-        repository: Repository name.
-        file_path: Path to the file in the repository.
-        content: New file content.
-        commit_message: Commit message for the file update.
-        branch: Branch name to commit to (default: main).
-        source_commit_id: A previous commit ID must be provided when editing an existing file to prevent concurrent modifications.
-    Returns:
-        JSON string containing the commit details.
-
-    Raises:
-        ValueError: If the Bitbucket client is not configured or available.
-    """
-    try:
-        bitbucket = await get_bitbucket_fetcher(ctx)
-
-        result = bitbucket.update_file(workspace, repository, content, commit_message,
-                                       branch, file_path, source_commit_id)
-
-        return json.dumps(
-            {
-                "success": True,
-                "commit": result,
-                "file_path": file_path,
-                "branch": branch,
-            },
-            indent=2,
-        )
-    except Exception as e:
-        log_level = logging.ERROR
-        if isinstance(e, MCPAtlassianAuthenticationError):
-            error_message = f"Authentication/Permission Error: {str(e)}"
-        elif isinstance(e, OSError | HTTPError):
-            error_message = f"Network or API Error: {str(e)}"
-        elif isinstance(e, ValueError):
-            error_message = f"Configuration Error: {str(e)}"
-        else:
-            error_message = f"An unexpected error occurred while updating file {file_path} in {workspace}/{repository}."
-            logger.exception("Unexpected error in bitbucket_update_file:")
-
-        error_result = {
-            "success": False,
-            "error": error_message,
-        }
-        logger.log(log_level, f"bitbucket_update_file failed: {error_message}")
-        return json.dumps(error_result, indent=2)
-
-
-@bitbucket_mcp.tool(tags={"bitbucket", "write"})
-@check_write_access
-async def create_file(
-    ctx: Context,
-    workspace: Annotated[
-        str,
-        Field(description="Workspace name (Cloud) or project key (Server/DC)"),
-    ],
-    repository: Annotated[
-        str,
-        Field(description="Repository name"),
-    ],
-    file_path: Annotated[
-        str,
-        Field(description="Path to the new file in the repository"),
-    ],
-    content: Annotated[
-        str,
-        Field(description="New file content"),
-    ],
-    commit_message: Annotated[
-        str,
-        Field(description="Commit message for the file creation"),
-    ],
-    branch: Annotated[
-        str,
-        Field(description="Branch name to commit to"),
-    ] = "main",
-) -> str:
-    """
-    Create a new file in a repository.
-
-    Args:
-        workspace: Workspace name or project key.
-        repository: Repository name.
-        file_path: Path to the new file in the repository.
-        content: New file content.
-        commit_message: Commit message for the file creation.
-        branch: Branch name to commit to (default: main).
-    Returns:
-        JSON string containing the commit details.
-
-    Raises:
-        ValueError: If the Bitbucket client is not configured or available.
-    """
-    try:
-        bitbucket = await get_bitbucket_fetcher(ctx)
-
-        result = bitbucket.upload_file(workspace, repository, content, commit_message,
-                                       branch, file_path)
-
-        return json.dumps(
-            {
-                "success": True,
-                "commit": result,
-                "file_path": file_path,
-                "branch": branch,
-            },
-            indent=2,
-        )
-    except Exception as e:
-        log_level = logging.ERROR
-        if isinstance(e, MCPAtlassianAuthenticationError):
-            error_message = f"Authentication/Permission Error: {str(e)}"
-        elif isinstance(e, OSError | HTTPError):
-            error_message = f"Network or API Error: {str(e)}"
-        elif isinstance(e, ValueError):
-            error_message = f"Configuration Error: {str(e)}"
-        else:
-            error_message = f"An unexpected error occurred while creating file {file_path} in {workspace}/{repository}."
-            logger.exception("Unexpected error in bitbucket_create_file:")
-
-        error_result = {
-            "success": False,
-            "error": error_message,
-        }
-        logger.log(log_level, f"bitbucket_create_file failed: {error_message}")
-        return json.dumps(error_result, indent=2)
-
 
 
 @bitbucket_mcp.tool(tags={"bitbucket", "write"})
@@ -923,6 +922,87 @@ async def create_branch(
 
 @bitbucket_mcp.tool(tags={"bitbucket", "write"})
 @check_write_access
+async def add_pull_request_blocker_comment(
+    ctx: Context,
+    workspace: Annotated[
+        str,
+        Field(description="Workspace name (Cloud) or project key (Server/DC)"),
+    ],
+    repository: Annotated[
+        str,
+        Field(description="Repository name"),
+    ],
+    pull_request_id: Annotated[
+        int,
+        Field(description="Pull request ID"),
+    ],
+    comment: Annotated[
+        str,
+        Field(description="Comment text"),
+    ],
+    severity: Annotated[
+        Literal["NORMAL", "BLOCKER"],
+        Field(description="Severity of the blocker."),
+    ] = "NORMAL",
+) -> str:
+    """
+    Add a comment to a pull request.
+
+    Args:
+        workspace: Workspace name or project key.
+        repository: Repository name.
+        pull_request_id: Pull request ID.
+        comment: Comment text.
+        severity: Severity of the blocker. (Normal or Blocker) (default: NORMAL)
+
+    Returns:
+        JSON string containing the created comment details.
+
+    Raises:
+        ValueError: If the Bitbucket client is not configured or available.
+    """
+    try:
+        bitbucket = await get_bitbucket_fetcher(ctx)
+
+        result = bitbucket.add_pull_request_blocker_comment(
+            workspace, repository, pull_request_id, comment, severity
+        )
+
+        return json.dumps(
+            {
+                "success": True,
+                "comment": result,
+                "pull_request_id": pull_request_id,
+            },
+            indent=2,
+        )
+    except Exception as e:
+        log_level = logging.ERROR
+        if isinstance(e, MCPAtlassianAuthenticationError):
+            error_message = f"Authentication/Permission Error: {str(e)}"
+        elif isinstance(e, OSError | HTTPError):
+            error_message = f"Network or API Error: {str(e)}"
+        elif isinstance(e, ValueError):
+            error_message = f"Configuration Error: {str(e)}"
+        else:
+            error_message = f"An unexpected error occurred while adding blocker comment to PR {pull_request_id} in {workspace}/{repository}."
+            logger.exception(
+                "Unexpected error in bitbucket_add_pull_request_blocker_comment:"
+            )
+
+        error_result = {
+            "success": False,
+            "error": error_message,
+        }
+        logger.log(
+            log_level,
+            f"bitbucket_add_pull_request_blocker_comment failed: {error_message}",
+        )
+        return json.dumps(error_result, indent=2)
+
+
+@bitbucket_mcp.tool(tags={"bitbucket", "write"})
+@check_write_access
 async def add_pull_request_comment(
     ctx: Context,
     workspace: Annotated[
@@ -960,12 +1040,8 @@ async def add_pull_request_comment(
     try:
         bitbucket = await get_bitbucket_fetcher(ctx)
 
-        comment_data = {
-            "content": {"raw": comment},
-        }
-
         result = bitbucket.add_pull_request_comment(
-            workspace, repository, pull_request_id, comment_data
+            workspace, repository, pull_request_id, comment
         )
 
         return json.dumps(

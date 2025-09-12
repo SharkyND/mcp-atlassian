@@ -39,23 +39,23 @@ class UsersMixin(BitbucketClient):
             if self.config.is_cloud:
                 user_data = self.bitbucket.get("user")
             else:
-                try:
-                    user_data = self.bitbucket.get("/plugins/servlet/applinks/whoami")
-                except Exception as e:
-                    logger.info(f"Bitbucket Server/DC whoami endpoint failed: {e}")
-                    logger.info(
-                        "Creating mock user data from configured username since whoami endpoint is not accessible"
-                    )
-                    # Create a mock user data dict using the configured username
-                    # If username is wrong, downstream API calls will fail with proper errors
-                    user_data = {
-                        "username": self.config.username,
-                        "name": self.config.username,
-                        "displayName": self.config.username,
-                        "email": f"{self.config.username}@its.jnj.com",
-                        "type": "normal",
-                        "mock_data": True,
-                    }
+                # try:
+                #     user_data = self.bitbucket.get("/plugins/servlet/applinks/whoami")
+                # except Exception as e:
+                #     logger.info(f"Bitbucket Server/DC whoami endpoint failed: {e}")
+                #     logger.info(
+                #         "Creating mock user data from configured username since whoami endpoint is not accessible"
+                #     )
+                #     # Create a mock user data dict using the configured username
+                #     # If username is wrong, downstream API calls will fail with proper errors
+                user_data = {
+                    "username": self.config.username,
+                    "name": self.config.username,
+                    "displayName": self.config.username,
+                    "email": f"{self.config.username}@its.jnj.com",
+                    "type": "normal",
+                    "mock_data": True,
+                }
 
             if not isinstance(user_data, dict):
                 logger.error(
