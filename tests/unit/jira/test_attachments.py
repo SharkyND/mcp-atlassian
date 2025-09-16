@@ -324,7 +324,9 @@ class TestAttachmentsMixin:
             TypeError,
             match="Unexpected return value type from `jira.issue`: <class 'NoneType'>",
         ):
-            attachments_mixin.download_issue_attachments("TEST-123", str(tmp_path / "attachments"))
+            attachments_mixin.download_issue_attachments(
+                "TEST-123", str(tmp_path / "attachments")
+            )
 
     def test_download_issue_attachments_no_fields(
         self, attachments_mixin: AttachmentsMixin, tmp_path

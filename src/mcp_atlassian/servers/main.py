@@ -442,7 +442,9 @@ class UserTokenMiddleware(BaseHTTPMiddleware):
         return response
 
 
-main_mcp = AtlassianMCP(name="Atlassian MCP", lifespan=main_lifespan)
+main_mcp = AtlassianMCP(name="Atlassian MCP")
+# Set the lifespan after construction to avoid deprecation warnings
+main_mcp._lifespan = main_lifespan
 main_mcp.mount("jira", jira_mcp)
 main_mcp.mount("confluence", confluence_mcp)
 main_mcp.mount("bitbucket", bitbucket_mcp)

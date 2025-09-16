@@ -137,7 +137,23 @@ class BranchesMixin(BitbucketClient):
                     workspace, repository
                 )
                 return BitbucketBranch.from_api_response(default_branch_data)
+            except HTTPError as http_err:
+                # Re-raise HTTPErrors so they can be handled by the outer try-catch
+                if http_err.response is not None and http_err.response.status_code in [
+                    401,
+                    403,
+                ]:
+                    raise http_err
+                # For other HTTP errors, fall back to alternative methods
+                branches = self.get_all_branches(workspace, repository)
+                for default_name in DEFAULT_BRANCH_NAMES:
+                    for branch in branches:
+                        if branch.name == default_name:
+                            return branch
+                # If no common default found, return the first branch
+                return branches[0] if branches else None
             except Exception:
+                # For non-HTTP errors, fall back to alternative methods
                 branches = self.get_all_branches(workspace, repository)
                 for default_name in DEFAULT_BRANCH_NAMES:
                     for branch in branches:

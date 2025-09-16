@@ -14,10 +14,7 @@ from mcp_atlassian.utils.decorators import check_write_access
 
 logger = logging.getLogger(__name__)
 
-bitbucket_mcp = FastMCP(
-    name="Bitbucket MCP Service",
-    description="Provides tools for interacting with Atlassian Bitbucket.",
-)
+bitbucket_mcp = FastMCP(name="Bitbucket MCP Service")
 
 
 @bitbucket_mcp.tool(tags={"bitbucket", "read"})

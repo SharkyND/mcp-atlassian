@@ -57,12 +57,14 @@ def env_scenarios():
     }
 
 
-def _assert_service_availability(result, confluence_expected, jira_expected, bitbucket_expected=False):
+def _assert_service_availability(
+    result, confluence_expected, jira_expected, bitbucket_expected=False
+):
     """Helper to assert service availability."""
     assert result == {
         "confluence": confluence_expected,
         "jira": jira_expected,
-        "bitbucket": bitbucket_expected
+        "bitbucket": bitbucket_expected,
     }
 
 

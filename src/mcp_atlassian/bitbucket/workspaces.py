@@ -43,9 +43,12 @@ class WorkspacesMixin(BitbucketClient):
                 ]
                 filtered_workspaces = []
                 for workspace in workspaces:
-                    # Check workspace name/slug/uuid depending on the platform
-                    workspace_id = workspace.uuid or workspace.name or workspace.slug
-                    if workspace_id and workspace_id in allowed_workspaces:
+                    # Check workspace name, slug, or uuid
+                    if (
+                        workspace.name in allowed_workspaces
+                        or workspace.slug in allowed_workspaces
+                        or workspace.uuid in allowed_workspaces
+                    ):
                         filtered_workspaces.append(workspace)
                 logger.debug(
                     f"Filtered workspaces from {len(workspaces)} to {len(filtered_workspaces)} based on filter: {self.config.workspaces_filter}"

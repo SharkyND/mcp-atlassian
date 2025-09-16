@@ -35,7 +35,7 @@ class TestSetupSignalHandlers:
 
         # Mock SIGPIPE as not available
         def side_effect(sig, handler):
-            if hasattr(signal, 'SIGPIPE') and sig == signal.SIGPIPE:
+            if hasattr(signal, "SIGPIPE") and sig == signal.SIGPIPE:
                 raise AttributeError("SIGPIPE not available")
             return None
 

@@ -6,6 +6,8 @@ across all test modules. It integrates with the new test utilities framework
 to provide efficient, reusable test fixtures.
 """
 
+import os
+
 import pytest
 
 from tests.utils.factories import (
@@ -25,6 +27,67 @@ def pytest_addoption(parser):
         default=False,
         help="Run tests that use real API data (requires env vars)",
     )
+
+
+# ============================================================================
+# Real Data Test Control Fixtures
+# ============================================================================
+
+
+@pytest.fixture
+def use_real_jira_data(request):
+    """
+    Fixture that controls whether Jira tests should use real API data.
+
+    Tests are skipped if:
+    1. --use-real-data flag is not passed to pytest
+    2. Required Jira environment variables are not set
+
+    Returns:
+        bool: True if real Jira data tests should run
+    """
+    use_real_data = request.config.getoption("--use-real-data")
+    if not use_real_data:
+        return False
+
+    # Check if required Jira environment variables are set
+    required_vars = ["JIRA_URL", "JIRA_USERNAME", "JIRA_API_TOKEN"]
+    missing_vars = [var for var in required_vars if not os.environ.get(var)]
+
+    if missing_vars:
+        pytest.skip(
+            f"Missing required Jira environment variables: {', '.join(missing_vars)}"
+        )
+
+    return True
+
+
+@pytest.fixture
+def use_real_confluence_data(request):
+    """
+    Fixture that controls whether Confluence tests should use real API data.
+
+    Tests are skipped if:
+    1. --use-real-data flag is not passed to pytest
+    2. Required Confluence environment variables are not set
+
+    Returns:
+        bool: True if real Confluence data tests should run
+    """
+    use_real_data = request.config.getoption("--use-real-data")
+    if not use_real_data:
+        return False
+
+    # Check if required Confluence environment variables are set
+    required_vars = ["CONFLUENCE_URL", "CONFLUENCE_USERNAME", "CONFLUENCE_API_TOKEN"]
+    missing_vars = [var for var in required_vars if not os.environ.get(var)]
+
+    if missing_vars:
+        pytest.skip(
+            f"Missing required Confluence environment variables: {', '.join(missing_vars)}"
+        )
+
+    return True
 
 
 # ============================================================================
@@ -233,35 +296,6 @@ def mock_confluence_client():
         MagicMock: Configured mock Confluence client
     """
     return MockAtlassianClient.create_confluence_client()
-
-
-# ============================================================================
-# Compatibility Fixtures (maintain backward compatibility)
-# ============================================================================
-
-
-@pytest.fixture
-def use_real_jira_data(request):
-    """
-    Check if real Jira data tests should be run.
-
-    This will be True if the --use-real-data flag is passed to pytest.
-
-    Note: This fixture is maintained for backward compatibility.
-    """
-    return request.config.getoption("--use-real-data")
-
-
-@pytest.fixture
-def use_real_confluence_data(request):
-    """
-    Check if real Confluence data tests should be run.
-
-    This will be True if the --use-real-data flag is passed to pytest.
-
-    Note: This fixture is maintained for backward compatibility.
-    """
-    return request.config.getoption("--use-real-data")
 
 
 # ============================================================================
