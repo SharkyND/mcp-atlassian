@@ -110,12 +110,9 @@ class BranchesMixin(BitbucketClient):
                 logger.error(f"HTTP error during API call: {http_err}", exc_info=False)
                 raise http_err
         except Exception as e:
-            error_msg = (
-                f"Error getting brnches for {workspace}/{repository}: {str(e)}"
-            )
+            error_msg = f"Error getting brnches for {workspace}/{repository}: {str(e)}"
             logger.error(error_msg)
             raise Exception(f"Error getting branches: {str(e)}") from e
-
 
     def get_default_branch(
         self, workspace: str, repository: str

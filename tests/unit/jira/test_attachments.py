@@ -315,7 +315,7 @@ class TestAttachmentsMixin:
             mock_mkdir.assert_called_once()
 
     def test_download_issue_attachments_issue_not_found(
-        self, attachments_mixin: AttachmentsMixin
+        self, attachments_mixin: AttachmentsMixin, tmp_path
     ):
         """Test download when issue cannot be retrieved."""
         attachments_mixin.jira.issue.return_value = None
@@ -324,10 +324,10 @@ class TestAttachmentsMixin:
             TypeError,
             match="Unexpected return value type from `jira.issue`: <class 'NoneType'>",
         ):
-            attachments_mixin.download_issue_attachments("TEST-123", "/tmp/attachments")
+            attachments_mixin.download_issue_attachments("TEST-123", str(tmp_path / "attachments"))
 
     def test_download_issue_attachments_no_fields(
-        self, attachments_mixin: AttachmentsMixin
+        self, attachments_mixin: AttachmentsMixin, tmp_path
     ):
         """Test download when issue has no fields."""
         # Mock the issue data with no fields
@@ -335,7 +335,7 @@ class TestAttachmentsMixin:
         attachments_mixin.jira.issue.return_value = mock_issue
 
         result = attachments_mixin.download_issue_attachments(
-            "TEST-123", "/tmp/attachments"
+            "TEST-123", str(tmp_path / "attachments")
         )
 
         # Assertions

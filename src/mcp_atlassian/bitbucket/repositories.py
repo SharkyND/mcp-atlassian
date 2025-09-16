@@ -177,10 +177,7 @@ class RepositoriesMixin(BitbucketClient):
             logger.error(error_msg)
             raise Exception(f"Error getting directory content: {str(e)}") from e
 
-
-    def get_repositories(
-        self, workspace
-    ) -> list[BitbucketRepository]:
+    def get_repositories(self, workspace: str) -> list[BitbucketRepository]:
         """Get list of repositories.
 
         Args:

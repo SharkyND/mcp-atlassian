@@ -129,7 +129,114 @@ class BitbucketClient:
                 f"Added custom headers: {get_masked_session_headers(self.config.custom_headers)}"
             )
 
+    # def get_workspaces(self) -> list[dict[str, Any]]:
+    #     """Get list of accessible workspaces.
+    #
+    #     Returns:
+    #         List of workspace dictionaries
+    #     """
+    #     try:
+    #         if self.config.is_cloud:
+    #             # For Bitbucket Cloud, use workspaces endpoint
+    #             raw_workspaces = self.bitbucket.get("workspaces")
+    #             if isinstance(raw_workspaces, dict) and "values" in raw_workspaces:
+    #                 raw_workspaces = raw_workspaces["values"]
+    #             elif not isinstance(raw_workspaces, list):
+    #                 raw_workspaces = []
+    #         else:
+    #             # For Bitbucket Server/DC, use projects endpoint
+    #             raw_workspaces = self.bitbucket.project_list()
+    #
+    #         # Apply workspace filtering if configured
+    #         if self.config.workspaces_filter:
+    #             allowed_workspaces = [
+    #                 ws.strip() for ws in self.config.workspaces_filter.split(",")
+    #             ]
+    #             filtered_workspaces = []
+    #             for workspace in raw_workspaces:
+    #                 # Check workspace name/slug/uuid depending on the platform
+    #                 workspace_id = (
+    #                     workspace.get("uuid")
+    #                     or workspace.get("name")
+    #                     or workspace.get("key")
+    #                     or workspace.get("slug")
+    #                 )
+    #                 if workspace_id and workspace_id in allowed_workspaces:
+    #                     filtered_workspaces.append(workspace)
+    #             logger.debug(
+    #                 f"Filtered workspaces from {len(raw_workspaces)} to {len(filtered_workspaces)} based on filter: {self.config.workspaces_filter}"
+    #             )
+    #             return filtered_workspaces
+    #
+    #         return raw_workspaces
+    #     except Exception as e:
+    #         logger.error(f"Failed to get workspaces: {e}")
+    #         raise
+    #
+    #
 
+    # def get_file_content(
+    #     self, workspace: str, repository: str, path: str, branch: str = "main"
+    # ) -> str:
+    #     """Get file content from repository.
+    #
+    #     Args:
+    #         workspace: Workspace name (Cloud) or project key (Server/DC)
+    #         repository: Repository name
+    #         path: File path in repository
+    #         branch: Branch name (default: main)
+    #
+    #     Returns:
+    #         File content as string
+    #     """
+    #     try:
+    #         return self.bitbucket.get_content_of_file(
+    #             workspace, repository, path, branch
+    #         )
+    #     except Exception as e:
+    #         logger.error(
+    #             f"Failed to get file content for {workspace}/{repository}/{path}: {e}"
+    #         )
+    #         raise
+    #
+
+    # def get_pull_request_commits(
+    #     self, workspace: str, repository: str, pull_request_id: int
+    # ) -> list[dict[str, Any]]:
+    #     """Get commits for a pull request.
+    #
+    #     Args:
+    #         workspace: Workspace name (Cloud) or project key (Server/DC)
+    #         repository: Repository name
+    #         pull_request_id: Pull request ID
+    #
+    #     Returns:
+    #         List of commit dictionaries
+    #     """
+    #     try:
+    #         # Use the generic get method with the appropriate endpoint
+    #         if self.config.is_cloud:
+    #             # Bitbucket Cloud API 2.0
+    #             endpoint = f"repositories/{workspace}/{repository}/pullrequests/{pull_request_id}/commits"
+    #         else:
+    #             # Bitbucket Server/DC API 1.0
+    #             endpoint = f"projects/{workspace}/repos/{repository}/pull-requests/{pull_request_id}/commits"
+    #
+    #         response = self.bitbucket.get(endpoint)
+    #
+    #         # Handle paginated response
+    #         if isinstance(response, dict) and "values" in response:
+    #             return response["values"]
+    #         elif isinstance(response, list):
+    #             return response
+    #         else:
+    #             return []
+    #     except Exception as e:
+    #         logger.error(
+    #             f"Failed to get pull request commits for {workspace}/{repository}/PR-{pull_request_id}: {e}"
+    #         )
+    #         raise
+    #
     def get_pull_request_activities(
         self, workspace: str, repository: str, pull_request_id: int
     ) -> list[dict[str, Any]]:

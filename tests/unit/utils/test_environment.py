@@ -57,9 +57,13 @@ def env_scenarios():
     }
 
 
-def _assert_service_availability(result, confluence_expected, jira_expected):
+def _assert_service_availability(result, confluence_expected, jira_expected, bitbucket_expected=False):
     """Helper to assert service availability."""
-    assert result == {"confluence": confluence_expected, "jira": jira_expected}
+    assert result == {
+        "confluence": confluence_expected,
+        "jira": jira_expected,
+        "bitbucket": bitbucket_expected
+    }
 
 
 def _assert_authentication_logs(caplog, auth_type, services):
@@ -236,7 +240,7 @@ class TestGetAvailableServices:
             result = get_available_services()
 
             assert isinstance(result, dict)
-            assert set(result.keys()) == {"confluence", "jira"}
+            assert set(result.keys()) == {"confluence", "jira", "bitbucket"}
             assert all(isinstance(v, bool) for v in result.values())
 
     @pytest.mark.parametrize(
