@@ -88,10 +88,9 @@ class TestBitbucketClient:
         assert client.config == pat_config
         mock_bitbucket.assert_called_once_with(
             url="https://bitbucket.company.com",
-            username="testuser",
-            password="pat_token",  # PAT goes in password field
             cloud=False,
             verify_ssl=True,
+            token="pat_token",  # PAT goes in token field
         )
         mock_ssl_config.assert_called_once()
 

@@ -69,14 +69,23 @@ class TestUsersMixin:
 
     def test_get_current_user_info_server_success(self, users_mixin_server):
         """Test successful user info retrieval for Bitbucket Server."""
-        # Server returns mock data since whoami endpoint is commented out
+        # Mock an HTTP 404 error to trigger mock data fallback
+        from requests.exceptions import HTTPError
+
+        mock_response = MagicMock()
+        mock_response.status_code = 404
+        http_error = HTTPError()
+        http_error.response = mock_response
+
+        users_mixin_server.bitbucket.get.side_effect = http_error
+
         result = users_mixin_server.get_current_user_info()
 
         expected_mock_data = {
             "username": "testuser",
             "name": "testuser",
             "displayName": "testuser",
-            "email": "testuser@its.jnj.com",
+            "email": "testuser@domain.co",
             "type": "normal",
             "mock_data": True,
         }
@@ -123,6 +132,14 @@ class TestUsersMixin:
 
     def test_get_current_user_info_pat_auth_logging(self, users_mixin_server):
         """Test that PAT authentication is properly logged."""
+        # Mock an HTTP 404 error to trigger mock data fallback
+        mock_response = MagicMock()
+        mock_response.status_code = 404
+        http_error = HTTPError()
+        http_error.response = mock_response
+
+        users_mixin_server.bitbucket.get.side_effect = http_error
+
         with patch("mcp_atlassian.bitbucket.users.logger") as mock_logger:
             result = users_mixin_server.get_current_user_info()
 
@@ -155,6 +172,14 @@ class TestUsersMixin:
 
     def test_get_current_user_info_server_mock_data_logging(self, users_mixin_server):
         """Test that mock data usage is properly logged for server."""
+        # Mock an HTTP 404 error to trigger mock data fallback
+        mock_response = MagicMock()
+        mock_response.status_code = 404
+        http_error = HTTPError()
+        http_error.response = mock_response
+
+        users_mixin_server.bitbucket.get.side_effect = http_error
+
         with patch("mcp_atlassian.bitbucket.users.logger") as mock_logger:
             result = users_mixin_server.get_current_user_info()
 

@@ -131,7 +131,6 @@ For **Confluence authentication**:
 For **Bitbucket authentication**:
 - `X-Atlassian-Bitbucket-Personal-Token`: Your Bitbucket PAT or app password
 - `X-Atlassian-Bitbucket-Url`: Your Bitbucket instance URL
-- `X-Atlassian-Bitbucket-Username`: Your Bitbucket username (required for PAT auth)
 
 **Benefits:**
 - ✅ No environment variables required
@@ -153,8 +152,7 @@ For **Bitbucket authentication**:
       "X-Atlassian-Confluence-Personal-Token": "your_confluence_pat_or_api_token",
       "X-Atlassian-Confluence-Url": "https://your-confluence-instance.com",
       "X-Atlassian-Bitbucket-Personal-Token": "your_bitbucket_pat_or_app_password",
-      "X-Atlassian-Bitbucket-Url": "https://your-bitbucket-instance.com",
-      "X-Atlassian-Bitbucket-Username": "your_bitbucket_username"
+      "X-Atlassian-Bitbucket-Url": "https://your-bitbucket-instance.com"
     },
     "type": "http"
   }

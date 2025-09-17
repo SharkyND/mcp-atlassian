@@ -31,7 +31,6 @@ async def list_workspaces(ctx: Context) -> str:
     try:
         bitbucket = await get_bitbucket_fetcher(ctx)
         workspaces = bitbucket.get_all_workspaces()
-        # Convert model objects to dictionaries for JSON serialization
         workspace_dicts = [
             ws.model_dump(mode="json", serialize_as_any=True) for ws in workspaces
         ]

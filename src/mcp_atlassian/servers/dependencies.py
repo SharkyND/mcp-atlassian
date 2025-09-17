@@ -145,25 +145,14 @@ def _create_user_config_for_fetcher(
                 "PAT authentication typically uses the base URL directly and doesn't require cloud_id override."
             )
 
-        # Service-specific credential handling for PAT
-        if isinstance(base_config, BitbucketConfig):
-            common_args.update(
-                {
-                    "personal_token": user_pat,
-                    "oauth_config": None,
-                    "username": None,
-                    "app_password": None,
-                }
-            )
-        else:  # Jira and Confluence use api_token
-            common_args.update(
-                {
-                    "personal_token": user_pat,
-                    "oauth_config": None,
-                    "username": None,
-                    "api_token": None,
-                }
-            )
+        common_args.update(
+            {
+                "personal_token": user_pat,
+                "oauth_config": None,
+                "username": None,
+                "api_token": None,
+            }
+        )
 
     if isinstance(base_config, JiraConfig):
         user_jira_config: UserJiraConfigType = dataclasses.replace(
@@ -555,24 +544,20 @@ async def get_bitbucket_fetcher(ctx: Context) -> BitbucketFetcher:
         bitbucket_token_header = service_headers.get(
             "X-Atlassian-Bitbucket-Personal-Token"
         )
-        bitbucket_username_header = service_headers.get(
-            "X-Atlassian-Bitbucket-Username"
-        )
 
         if (
             user_auth_type == "pat"
             and bitbucket_url_header
             and bitbucket_token_header
-            and bitbucket_username_header
             and not hasattr(request.state, "user_atlassian_token")
         ):
             logger.info(
-                f"Creating header-based BitbucketFetcher with URL: {bitbucket_url_header}, Username: {bitbucket_username_header}, and PAT token"
+                f"Creating header-based BitbucketFetcher with URL: {bitbucket_url_header} and PAT token"
             )
             header_config = BitbucketConfig(
                 url=bitbucket_url_header,
                 auth_type="pat",
-                username=bitbucket_username_header,
+                username=None,
                 personal_token=bitbucket_token_header,
                 ssl_verify=True,
                 http_proxy=None,

@@ -110,13 +110,6 @@ class BitbucketConfig:
             # OAuth is available - could be full config or minimal config for user-provided tokens
             auth_type = "oauth"
         elif personal_token:
-            # PAT works for both Cloud and Server/DC, but requires username for Basic Auth
-            if not username:
-                error_msg = (
-                    "For Bitbucket PAT authentication, both BITBUCKET_USERNAME and "
-                    "BITBUCKET_PERSONAL_TOKEN environment variables are required"
-                )
-                raise ValueError(error_msg)
             auth_type = "pat"
         elif is_cloud:
             if username and app_password:
@@ -128,7 +121,6 @@ class BitbucketConfig:
                 )
                 raise ValueError(error_msg)
         else:
-            # Server/Data Center instance
             if username and app_password:
                 auth_type = "basic"
             else:
