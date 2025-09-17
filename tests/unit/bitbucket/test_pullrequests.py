@@ -347,3 +347,198 @@ class TestPullRequestsMixin:
                 assert hasattr(mixin, "create_pull_request")
                 assert hasattr(mixin, "get_pull_request_commits")
                 assert hasattr(mixin, "config")  # From parent class
+
+    def test_get_pull_requests_success(
+        self, pullrequests_mixin, sample_pull_request_data
+    ):
+        """Test successful retrieval of pull requests (raw dict version)."""
+        pullrequests_mixin.bitbucket.get_pull_requests.return_value = (
+            sample_pull_request_data
+        )
+        result = pullrequests_mixin.get_pull_requests("workspace", "repo", "OPEN")
+        assert result == sample_pull_request_data
+        pullrequests_mixin.bitbucket.get_pull_requests.assert_called_once_with(
+            "workspace", "repo", state="OPEN"
+        )
+
+    def test_get_pull_requests_authentication_error_401(self, pullrequests_mixin):
+        """Test authentication error (401) in get_pull_requests."""
+        mock_response = Mock()
+        mock_response.status_code = 401
+        http_error = HTTPError(response=mock_response)
+        pullrequests_mixin.bitbucket.get_pull_requests.side_effect = http_error
+        with pytest.raises(MCPAtlassianAuthenticationError):
+            pullrequests_mixin.get_pull_requests("workspace", "repo", "OPEN")
+
+    def test_get_pull_requests_authentication_error_403(self, pullrequests_mixin):
+        """Test authentication error (403) in get_pull_requests."""
+        mock_response = Mock()
+        mock_response.status_code = 403
+        http_error = HTTPError(response=mock_response)
+        pullrequests_mixin.bitbucket.get_pull_requests.side_effect = http_error
+        with pytest.raises(MCPAtlassianAuthenticationError):
+            pullrequests_mixin.get_pull_requests("workspace", "repo", "OPEN")
+
+    def test_get_pull_requests_http_error_other(self, pullrequests_mixin):
+        """Test other HTTP error in get_pull_requests."""
+        mock_response = Mock()
+        mock_response.status_code = 500
+        http_error = HTTPError(response=mock_response)
+        pullrequests_mixin.bitbucket.get_pull_requests.side_effect = http_error
+        with pytest.raises(HTTPError):
+            pullrequests_mixin.get_pull_requests("workspace", "repo", "OPEN")
+
+    def test_get_pull_requests_general_exception(self, pullrequests_mixin):
+        """Test general exception in get_pull_requests."""
+        pullrequests_mixin.bitbucket.get_pull_requests.side_effect = Exception(
+            "API error"
+        )
+        with pytest.raises(Exception) as exc_info:
+            pullrequests_mixin.get_pull_requests("workspace", "repo", "OPEN")
+        assert "Error getting PRs" in str(exc_info.value)
+
+    def test_get_pull_request_activities_success(self, pullrequests_mixin):
+        """Test successful retrieval of pull request activities/comments."""
+        activities_data = [
+            {"comment": "Looks good!", "user": "john"},
+            {"comment": "Needs changes.", "user": "jane"},
+        ]
+        with patch.object(
+            PullRequestsMixin,
+            "get_pull_request_activities",
+            return_value=activities_data,
+        ):
+            result = pullrequests_mixin.get_pull_request_activities(
+                "workspace", "repo", 1
+            )
+            assert result == activities_data
+
+    def test_get_pull_request_activities_authentication_error(self, pullrequests_mixin):
+        """Test authentication error in get_pull_request_activities."""
+        mock_response = Mock()
+        mock_response.status_code = 401
+        http_error = HTTPError(response=mock_response)
+        with patch(
+            "mcp_atlassian.bitbucket.client.BitbucketClient.get_pull_request_activities",
+            side_effect=http_error,
+        ):
+            with pytest.raises(MCPAtlassianAuthenticationError):
+                pullrequests_mixin.get_pull_request_activities("workspace", "repo", 1)
+
+    def test_get_pull_request_activities_general_exception(self, pullrequests_mixin):
+        """Test general exception in get_pull_request_activities."""
+        with patch(
+            "mcp_atlassian.bitbucket.client.BitbucketClient.get_pull_request_activities",
+            side_effect=Exception("API error"),
+        ):
+            with pytest.raises(Exception) as exc_info:
+                pullrequests_mixin.get_pull_request_activities("workspace", "repo", 1)
+            assert "Error getting PR comments" in str(exc_info.value)
+
+    def test_add_pull_request_comment_success(self, pullrequests_mixin):
+        """Test successful addition of a pull request comment."""
+        comment_data = {"content": "Nice work!"}
+        expected_response = {"id": 123, "content": "Nice work!"}
+        pullrequests_mixin.bitbucket.add_pull_request_comment.return_value = (
+            expected_response
+        )
+        result = pullrequests_mixin.add_pull_request_comment(
+            "workspace", "repo", 1, comment_data
+        )
+        assert result == expected_response
+        pullrequests_mixin.bitbucket.add_pull_request_comment.assert_called_once_with(
+            "workspace", "repo", 1, comment_data
+        )
+
+    def test_add_pull_request_comment_authentication_error(self, pullrequests_mixin):
+        """Test authentication error in add_pull_request_comment."""
+        mock_response = Mock()
+        mock_response.status_code = 401
+        http_error = HTTPError(response=mock_response)
+        pullrequests_mixin.bitbucket.add_pull_request_comment.side_effect = http_error
+        comment_data = {"content": "Nice work!"}
+        with pytest.raises(MCPAtlassianAuthenticationError):
+            pullrequests_mixin.add_pull_request_comment(
+                "workspace", "repo", 1, comment_data
+            )
+
+    def test_add_pull_request_comment_http_error_other(self, pullrequests_mixin):
+        """Test other HTTP error in add_pull_request_comment."""
+        mock_response = Mock()
+        mock_response.status_code = 500
+        http_error = HTTPError(response=mock_response)
+        pullrequests_mixin.bitbucket.add_pull_request_comment.side_effect = http_error
+        comment_data = {"content": "Nice work!"}
+        with pytest.raises(HTTPError):
+            pullrequests_mixin.add_pull_request_comment(
+                "workspace", "repo", 1, comment_data
+            )
+
+    def test_add_pull_request_comment_general_exception(self, pullrequests_mixin):
+        """Test general exception in add_pull_request_comment."""
+        pullrequests_mixin.bitbucket.add_pull_request_comment.side_effect = Exception(
+            "API error"
+        )
+        comment_data = {"content": "Nice work!"}
+        with pytest.raises(Exception) as exc_info:
+            pullrequests_mixin.add_pull_request_comment(
+                "workspace", "repo", 1, comment_data
+            )
+        assert "Error adding PR comment" in str(exc_info.value)
+
+    def test_add_pull_request_blocker_comment_success(self, pullrequests_mixin):
+        """Test successful addition of a blocker comment."""
+        expected_response = {"id": 456, "content": "Blocker!", "severity": "BLOCKER"}
+        pullrequests_mixin.bitbucket.add_pull_request_blocker_comment.return_value = (
+            expected_response
+        )
+        result = pullrequests_mixin.add_pull_request_blocker_comment(
+            "workspace", "repo", 1, "Blocker!", severity="BLOCKER"
+        )
+        assert result == expected_response
+        pullrequests_mixin.bitbucket.add_pull_request_blocker_comment.assert_called_once_with(
+            "workspace", "repo", 1, "Blocker!", severity="BLOCKER"
+        )
+
+    def test_add_pull_request_blocker_comment_authentication_error(
+        self, pullrequests_mixin
+    ):
+        """Test authentication error in add_pull_request_blocker_comment."""
+        mock_response = Mock()
+        mock_response.status_code = 403
+        http_error = HTTPError(response=mock_response)
+        pullrequests_mixin.bitbucket.add_pull_request_blocker_comment.side_effect = (
+            http_error
+        )
+        with pytest.raises(MCPAtlassianAuthenticationError):
+            pullrequests_mixin.add_pull_request_blocker_comment(
+                "workspace", "repo", 1, "Blocker!", severity="BLOCKER"
+            )
+
+    def test_add_pull_request_blocker_comment_http_error_other(
+        self, pullrequests_mixin
+    ):
+        """Test other HTTP error in add_pull_request_blocker_comment."""
+        mock_response = Mock()
+        mock_response.status_code = 500
+        http_error = HTTPError(response=mock_response)
+        pullrequests_mixin.bitbucket.add_pull_request_blocker_comment.side_effect = (
+            http_error
+        )
+        with pytest.raises(HTTPError):
+            pullrequests_mixin.add_pull_request_blocker_comment(
+                "workspace", "repo", 1, "Blocker!", severity="BLOCKER"
+            )
+
+    def test_add_pull_request_blocker_comment_general_exception(
+        self, pullrequests_mixin
+    ):
+        """Test general exception in add_pull_request_blocker_comment."""
+        pullrequests_mixin.bitbucket.add_pull_request_blocker_comment.side_effect = (
+            Exception("API error")
+        )
+        with pytest.raises(Exception) as exc_info:
+            pullrequests_mixin.add_pull_request_blocker_comment(
+                "workspace", "repo", 1, "Blocker!", severity="BLOCKER"
+            )
+        assert "Error blocker adding PR comment" in str(exc_info.value)

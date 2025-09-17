@@ -323,3 +323,151 @@ class TestBranchesMixin:
                 assert hasattr(mixin, "get_default_branch")
                 assert hasattr(mixin, "get_commits")
                 assert hasattr(mixin, "config")  # From parent class
+
+    def test_get_branches_success(self, branches_mixin, sample_branch_data):
+        """Test successful retrieval of branches using get_branches."""
+        branches_mixin.bitbucket.get_branches.return_value = sample_branch_data
+        with patch(
+            "mcp_atlassian.models.bitbucket.common.BitbucketBranch.from_api_response"
+        ) as mock_from_api:
+            mock_branches = []
+            for branch_data in sample_branch_data:
+                mock_branch = MagicMock(spec=BitbucketBranch)
+                mock_branch.name = branch_data["name"]
+                mock_branches.append(mock_branch)
+            mock_from_api.side_effect = mock_branches
+            result = branches_mixin.get_branches("workspace", "repo")
+            assert len(result) == 3
+            branches_mixin.bitbucket.get_branches.assert_called_once()
+
+    def test_get_branches_authentication_error_401(self, branches_mixin):
+        """Test authentication error (401) in get_branches."""
+        mock_response = Mock()
+        mock_response.status_code = 401
+        http_error = HTTPError(response=mock_response)
+        branches_mixin.bitbucket.get_branches.side_effect = http_error
+        with pytest.raises(MCPAtlassianAuthenticationError):
+            branches_mixin.get_branches("workspace", "repo")
+
+    def test_get_branches_authentication_error_403(self, branches_mixin):
+        """Test authentication error (403) in get_branches."""
+        mock_response = Mock()
+        mock_response.status_code = 403
+        http_error = HTTPError(response=mock_response)
+        branches_mixin.bitbucket.get_branches.side_effect = http_error
+        with pytest.raises(MCPAtlassianAuthenticationError):
+            branches_mixin.get_branches("workspace", "repo")
+
+    def test_get_branches_http_error_other(self, branches_mixin):
+        """Test other HTTP error in get_branches."""
+        mock_response = Mock()
+        mock_response.status_code = 500
+        http_error = HTTPError(response=mock_response)
+        branches_mixin.bitbucket.get_branches.side_effect = http_error
+        with pytest.raises(HTTPError):
+            branches_mixin.get_branches("workspace", "repo")
+
+    def test_get_branches_general_exception(self, branches_mixin):
+        """Test general exception in get_branches."""
+        branches_mixin.bitbucket.get_branches.side_effect = Exception("API error")
+        with pytest.raises(Exception) as exc_info:
+            branches_mixin.get_branches("workspace", "repo")
+        assert "Error getting branches" in str(exc_info.value)
+
+    def test_get_branches_empty_response(self, branches_mixin):
+        """Test get_branches with empty response."""
+        branches_mixin.bitbucket.get_branches.return_value = []
+        result = branches_mixin.get_branches("workspace", "repo")
+        assert result == []
+        assert isinstance(result, list)
+
+    def test_create_branch_success_minimal(self, branches_mixin):
+        """Test successful branch creation with minimal branch_data."""
+        branch_data = {"name": "feature/test"}
+        branches_mixin.bitbucket.create_branch.return_value = {
+            "name": "feature/test",
+            "start_point": "main",
+        }
+        result = branches_mixin.create_branch("workspace", "repo", branch_data)
+        assert result["name"] == "feature/test"
+        assert result["start_point"] == "main"
+        branches_mixin.bitbucket.create_branch.assert_called_once_with(
+            "workspace", "repo", "feature/test", "main"
+        )
+
+    def test_create_branch_success_full(self, branches_mixin):
+        """Test successful branch creation with full branch_data including target branch name."""
+        branch_data = {
+            "name": "feature/test",
+            "target": {"branch": {"name": "develop"}},
+        }
+        branches_mixin.bitbucket.create_branch.return_value = {
+            "name": "feature/test",
+            "start_point": "develop",
+        }
+        result = branches_mixin.create_branch("workspace", "repo", branch_data)
+        assert result["name"] == "feature/test"
+        assert result["start_point"] == "develop"
+        branches_mixin.bitbucket.create_branch.assert_called_once_with(
+            "workspace", "repo", "feature/test", "develop"
+        )
+
+    def test_create_branch_authentication_error_401(self, branches_mixin):
+        """Test authentication error (401) in create_branch."""
+        mock_response = Mock()
+        mock_response.status_code = 401
+        http_error = HTTPError(response=mock_response)
+        branches_mixin.bitbucket.create_branch.side_effect = http_error
+        branch_data = {"name": "feature/test"}
+        with pytest.raises(MCPAtlassianAuthenticationError):
+            branches_mixin.create_branch("workspace", "repo", branch_data)
+
+    def test_create_branch_authentication_error_403(self, branches_mixin):
+        """Test authentication error (403) in create_branch."""
+        mock_response = Mock()
+        mock_response.status_code = 403
+        http_error = HTTPError(response=mock_response)
+        branches_mixin.bitbucket.create_branch.side_effect = http_error
+        branch_data = {"name": "feature/test"}
+        with pytest.raises(MCPAtlassianAuthenticationError):
+            branches_mixin.create_branch("workspace", "repo", branch_data)
+
+    def test_create_branch_http_error_other(self, branches_mixin):
+        """Test other HTTP error in create_branch."""
+        mock_response = Mock()
+        mock_response.status_code = 500
+        http_error = HTTPError(response=mock_response)
+        branches_mixin.bitbucket.create_branch.side_effect = http_error
+        branch_data = {"name": "feature/test"}
+        with pytest.raises(HTTPError):
+            branches_mixin.create_branch("workspace", "repo", branch_data)
+
+    def test_create_branch_general_exception(self, branches_mixin):
+        """Test general exception in create_branch."""
+        branches_mixin.bitbucket.create_branch.side_effect = Exception("API error")
+        branch_data = {"name": "feature/test"}
+        with pytest.raises(Exception) as exc_info:
+            branches_mixin.create_branch("workspace", "repo", branch_data)
+        assert "Error creating branch" in str(exc_info.value)
+
+    def test_create_branch_missing_name(self, branches_mixin):
+        """Test create_branch with missing name in branch_data."""
+        branch_data = {"target": {"branch": {"name": "main"}}}
+        branches_mixin.bitbucket.create_branch.return_value = {
+            "name": "",
+            "start_point": "main",
+        }
+        result = branches_mixin.create_branch("workspace", "repo", branch_data)
+        assert result["name"] == ""
+        assert result["start_point"] == "main"
+
+    def test_create_branch_malformed_target(self, branches_mixin):
+        """Test create_branch with malformed target in branch_data."""
+        branch_data = {"name": "feature/test", "target": {"branch": "not_a_dict"}}
+        branches_mixin.bitbucket.create_branch.return_value = {
+            "name": "feature/test",
+            "start_point": "main",
+        }
+        result = branches_mixin.create_branch("workspace", "repo", branch_data)
+        assert result["name"] == "feature/test"
+        assert result["start_point"] == "main"
