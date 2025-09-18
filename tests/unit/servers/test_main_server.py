@@ -4,9 +4,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
-from mcp_atlassian.servers.main import UserTokenMiddleware, main_mcp
 from starlette.requests import Request
 from starlette.responses import JSONResponse
+
+from mcp_atlassian.servers.main import UserTokenMiddleware, main_mcp
 
 
 @pytest.mark.anyio
@@ -135,7 +136,7 @@ class TestUserTokenMiddleware:
                 (b"authorization", b"Bearer test-token"),
                 (b"x-atlassian-cloud-id", b"test-cloud-id-123"),
             ],
-            "state": {}
+            "state": {},
         }
 
         # Mock receive and send functions for ASGI
