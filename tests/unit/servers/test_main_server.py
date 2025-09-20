@@ -127,18 +127,34 @@ class TestUserTokenMiddleware:
         self, middleware, mock_request, mock_call_next
     ):
         """Test successful cloud ID header extraction."""
-        # Setup request with cloud ID header
-        mock_request.headers = {
-            "Authorization": "Bearer test-token",
-            "X-Atlassian-Cloud-Id": "test-cloud-id-123",
+        # Create a mock ASGI scope for the new ASGI middleware
+        scope = {
+            "type": "http",
+            "path": "/mcp",
+            "method": "POST",
+            "headers": [
+                (b"authorization", b"Bearer test-token"),
+                (b"x-atlassian-cloud-id", b"test-cloud-id-123"),
+            ],
+            "state": {},
         }
 
-        result = await middleware.dispatch(mock_request, mock_call_next)
+        # Mock receive and send functions for ASGI
+        async def mock_receive():
+            return {"type": "http.request", "body": b"", "more_body": False}
 
-        # Verify cloud ID was extracted and stored in request state
-        assert hasattr(mock_request.state, "user_atlassian_cloud_id")
-        assert mock_request.state.user_atlassian_cloud_id == "test-cloud-id-123"
+        async def mock_send(message):
+            pass
 
-        # Verify the request was processed normally
-        mock_call_next.assert_called_once_with(mock_request)
-        assert result is not None
+        # Mock the app to verify it gets called with modified scope
+        middleware.app = AsyncMock()
+
+        # Call the ASGI middleware
+        await middleware(scope, mock_receive, mock_send)
+
+        # Verify cloud ID was extracted and stored in scope state
+        assert "user_atlassian_cloud_id" in scope["state"]
+        assert scope["state"]["user_atlassian_cloud_id"] == "test-cloud-id-123"
+
+        # Verify the app was called with the modified scope
+        middleware.app.assert_called_once()
