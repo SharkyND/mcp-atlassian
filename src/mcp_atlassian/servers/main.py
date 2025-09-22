@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from typing import Any, Literal, Optional
 
 from cachetools import TTLCache
-from fastmcp import FastMCP
+from fastmcp import FastMCP, settings
 from fastmcp.tools import Tool as FastMCPTool
 from mcp.types import Tool as MCPTool
 from starlette.applications import Starlette
@@ -230,13 +230,19 @@ class AtlassianMCP(FastMCP[MainAppContext]):
         path: str | None = None,
         middleware: list[Middleware] | None = None,
         transport: Literal["streamable-http", "sse"] = "streamable-http",
+        stateless_http: bool = False,
+        **kwargs: Any,
     ) -> "Starlette":
         user_token_mw = Middleware(UserTokenMiddleware, mcp_server_ref=self)
         final_middleware_list = [user_token_mw]
         if middleware:
             final_middleware_list.extend(middleware)
         app = super().http_app(
-            path=path, middleware=final_middleware_list, transport=transport
+            path=path,
+            middleware=final_middleware_list,
+            transport=transport,
+            stateless_http=stateless_http,
+            **kwargs,
         )
         return app
 
@@ -290,7 +296,7 @@ class UserTokenMiddleware:
             await self.app(scope_copy, receive, send)
             return
 
-        mcp_path = mcp_server_instance.settings.streamable_http_path.rstrip("/")
+        mcp_path = settings.streamable_http_path.rstrip("/")
         request_path = scope.get("path", "").rstrip("/")
         method = scope.get("method", "")
 
@@ -532,8 +538,8 @@ class UserTokenMiddleware:
 
 
 main_mcp = AtlassianMCP(name="Atlassian MCP", lifespan=main_lifespan)
-main_mcp.mount("jira", jira_mcp)
-main_mcp.mount("confluence", confluence_mcp)
+main_mcp.mount(jira_mcp, prefix="jira")
+main_mcp.mount(confluence_mcp, prefix="confluence")
 
 
 @main_mcp.custom_route("/healthz", methods=["GET"], include_in_schema=False)
@@ -541,4 +547,7 @@ async def _health_check_route(request: Request) -> JSONResponse:
     return await health_check(request)
 
 
-logger.info("Added /healthz endpoint for Kubernetes probes")
+@main_mcp.custom_route("/readyz", methods=["GET"], include_in_schema=False)
+async def _ready_check_route(request: Request) -> JSONResponse:
+    """Readiness check for Kubernetes probes."""
+    return JSONResponse({"status": "ready", "server": "mcp-atlassian"})
