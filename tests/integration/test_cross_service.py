@@ -189,7 +189,7 @@ class TestCrossServiceErrorHandling:
     async def test_jira_failure_does_not_affect_confluence(self):
         """Test that Jira failure doesn't prevent Confluence from working."""
         with MockEnvironment.basic_auth_env():
-            app = AtlassianMCP("Test MCP")
+            app = AtlassianMCP(name="Test MCP")
 
             # Mock Jira to fail during initialization
             with patch(
@@ -208,7 +208,7 @@ class TestCrossServiceErrorHandling:
     async def test_confluence_failure_does_not_affect_jira(self):
         """Test that Confluence failure doesn't prevent Jira from working."""
         with MockEnvironment.basic_auth_env():
-            app = AtlassianMCP("Test MCP")
+            app = AtlassianMCP(name="Test MCP")
 
             # Mock Confluence to fail during initialization
             with patch(
@@ -321,7 +321,7 @@ class TestConcurrentServiceInitialization:
     async def test_concurrent_service_startup(self):
         """Test that both services can be initialized concurrently."""
         with MockEnvironment.basic_auth_env():
-            app = AtlassianMCP("Test MCP")
+            app = AtlassianMCP(name="Test MCP")
 
             # Track initialization order
             init_order = []
@@ -513,7 +513,7 @@ class TestServiceAvailabilityDetection:
             },
             clear=True,
         ):
-            app = AtlassianMCP("Test MCP")
+            app = AtlassianMCP(name="Test MCP")
 
             async with main_lifespan(app) as lifespan_data:
                 context = lifespan_data["app_lifespan_context"]

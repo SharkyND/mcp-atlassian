@@ -112,13 +112,19 @@ class ResourceTracker:
 @pytest.fixture
 def jira_config() -> JiraConfig:
     """Create a JiraConfig from environment variables."""
-    return JiraConfig.from_env()
+    try:
+        return JiraConfig.from_env()
+    except ValueError as e:
+        pytest.skip(f"Jira configuration not available: {e}")
 
 
 @pytest.fixture
 def confluence_config() -> ConfluenceConfig:
     """Create a ConfluenceConfig from environment variables."""
-    return ConfluenceConfig.from_env()
+    try:
+        return ConfluenceConfig.from_env()
+    except ValueError as e:
+        pytest.skip(f"Confluence configuration not available: {e}")
 
 
 @pytest.fixture
@@ -214,7 +220,7 @@ def cleanup_resources(
 pytestmark = pytest.mark.anyio(backends=["asyncio"])
 
 
-@pytest.fixture(scope="class")
+@pytest.fixture
 async def api_validation_client():
     """Provides a FastMCP client connected to the main server for tool calls."""
     transport = FastMCPTransport(main_mcp)
