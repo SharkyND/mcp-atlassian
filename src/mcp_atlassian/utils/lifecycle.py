@@ -36,11 +36,15 @@ def setup_signal_handlers() -> None:
     signal.signal(signal.SIGINT, signal_handler)
 
     # Handle SIGPIPE which occurs when parent process closes the pipe
-    try:
-        signal.signal(signal.SIGPIPE, signal_handler)
-        logger.debug("SIGPIPE handler registered")
-    except AttributeError:
-        # SIGPIPE may not be available on all platforms (e.g., Windows)
+    # SIGPIPE may not be available on all platforms (e.g., Windows)
+    sigpipe = getattr(signal, "SIGPIPE", None)
+    if sigpipe is not None:
+        try:
+            signal.signal(sigpipe, signal_handler)
+            logger.debug("SIGPIPE handler registered")
+        except (AttributeError, OSError):
+            logger.debug("SIGPIPE handler registration failed")
+    else:
         logger.debug("SIGPIPE not available on this platform")
 
 

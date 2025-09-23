@@ -14,6 +14,8 @@ from starlette.middleware import Middleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
+from mcp_atlassian.bitbucket import BitbucketFetcher
+from mcp_atlassian.bitbucket.config import BitbucketConfig
 from mcp_atlassian.confluence import ConfluenceFetcher
 from mcp_atlassian.confluence.config import ConfluenceConfig
 from mcp_atlassian.jira import JiraFetcher
@@ -23,6 +25,7 @@ from mcp_atlassian.utils.io import is_read_only_mode
 from mcp_atlassian.utils.logging import mask_sensitive
 from mcp_atlassian.utils.tools import get_enabled_tools, should_include_tool
 
+from .bitbucket import bitbucket_mcp
 from .confluence import confluence_mcp
 from .context import MainAppContext
 from .jira import jira_mcp
@@ -43,6 +46,7 @@ async def main_lifespan(app: FastMCP[MainAppContext]) -> AsyncIterator[dict]:
 
     loaded_jira_config: JiraConfig | None = None
     loaded_confluence_config: ConfluenceConfig | None = None
+    loaded_bitbucket_config: BitbucketConfig | None = None
 
     if services.get("jira"):
         try:
@@ -76,9 +80,20 @@ async def main_lifespan(app: FastMCP[MainAppContext]) -> AsyncIterator[dict]:
         except Exception as e:
             logger.error(f"Failed to load Confluence configuration: {e}", exc_info=True)
 
+    if services.get("bitbucket"):
+        try:
+            bitbucket_config = BitbucketConfig.from_env()
+            loaded_bitbucket_config = bitbucket_config
+            logger.info(
+                "Bitbucket configuration loaded and authentication is configured."
+            )
+        except Exception as e:
+            logger.error(f"Failed to load Bitbucket configuration: {e}", exc_info=True)
+
     app_context = MainAppContext(
         full_jira_config=loaded_jira_config,
         full_confluence_config=loaded_confluence_config,
+        full_bitbucket_config=loaded_bitbucket_config,
         read_only=read_only,
         enabled_tools=enabled_tools,
     )
@@ -99,6 +114,8 @@ async def main_lifespan(app: FastMCP[MainAppContext]) -> AsyncIterator[dict]:
                 logger.debug("Cleaning up Jira resources...")
             if loaded_confluence_config:
                 logger.debug("Cleaning up Confluence resources...")
+            if loaded_bitbucket_config:
+                logger.debug("Cleaning up Bitbucket resources...")
         except Exception as e:
             logger.error(f"Error during cleanup: {e}", exc_info=True)
         logger.info("Main Atlassian MCP server lifespan shutdown complete.")
@@ -134,7 +151,7 @@ class AtlassianMCP(FastMCP[MainAppContext]):
             else None
         )
 
-        header_based_services = {"jira": False, "confluence": False}
+        header_based_services = {"jira": False, "confluence": False, "bitbucket": False}
         if hasattr(req_context, "request") and hasattr(req_context.request, "state"):
             service_headers = getattr(
                 req_context.request.state, "atlassian_service_headers", {}
@@ -175,6 +192,7 @@ class AtlassianMCP(FastMCP[MainAppContext]):
             # Exclude Jira/Confluence tools if config is not fully authenticated
             is_jira_tool = "jira" in tool_tags
             is_confluence_tool = "confluence" in tool_tags
+            is_bitbucket_tool = "bitbucket" in tool_tags
             service_configured_and_available = True
             if app_lifespan_state:
                 jira_available = (
@@ -183,6 +201,9 @@ class AtlassianMCP(FastMCP[MainAppContext]):
                 confluence_available = (
                     app_lifespan_state.full_confluence_config is not None
                 ) or header_based_services.get("confluence", False)
+                bitbucket_available = (
+                    app_lifespan_state.full_bitbucket_config is not None
+                ) or header_based_services.get("bitbucket", False)
 
                 if is_jira_tool and not jira_available:
                     logger.debug(
@@ -191,6 +212,7 @@ class AtlassianMCP(FastMCP[MainAppContext]):
                         f"header-based auth available."
                     )
                     service_configured_and_available = False
+
                 if is_confluence_tool and not confluence_available:
                     logger.debug(
                         f"Excluding Confluence tool '{registered_name}' as Confluence "
@@ -198,9 +220,17 @@ class AtlassianMCP(FastMCP[MainAppContext]):
                         f"header-based auth available."
                     )
                     service_configured_and_available = False
-            elif is_jira_tool or is_confluence_tool:
+
+                if is_bitbucket_tool and not bitbucket_available:
+                    logger.debug(
+                        f"Excluding Bitbucket tool '{registered_name}' as Bitbucket configuration/authentication is incomplete and no header-based auth available."
+                    )
+                    service_configured_and_available = False
+
+            elif is_jira_tool or is_confluence_tool or is_bitbucket_tool:
                 jira_available = header_based_services.get("jira", False)
                 confluence_available = header_based_services.get("confluence", False)
+                bitbucket_available = header_based_services.get("bitbucket", False)
 
                 if is_jira_tool and not jira_available:
                     logger.debug(
@@ -212,6 +242,11 @@ class AtlassianMCP(FastMCP[MainAppContext]):
                     logger.debug(
                         f"Excluding Confluence tool '{registered_name}' as no "
                         f"Confluence authentication available."
+                    )
+                    service_configured_and_available = False
+                if is_bitbucket_tool and not bitbucket_available:
+                    logger.debug(
+                        f"Excluding Bitbucket tool '{registered_name}' as no Bitbucket authentication available."
                     )
                     service_configured_and_available = False
 
@@ -248,7 +283,14 @@ class AtlassianMCP(FastMCP[MainAppContext]):
 
 
 token_validation_cache: TTLCache[
-    int, tuple[bool, str | None, JiraFetcher | None, ConfluenceFetcher | None]
+    int,
+    tuple[
+        bool,
+        str | None,
+        JiraFetcher | None,
+        ConfluenceFetcher | None,
+        BitbucketFetcher | None,
+    ],
 ] = TTLCache(maxsize=100, ttl=300)
 
 
@@ -337,12 +379,24 @@ class UserTokenMiddleware:
                 if confluence_token_header
                 else None
             )
-
             confluence_url_header = headers.get(b"x-atlassian-confluence-url")
             confluence_url_header_str = (
                 confluence_url_header.decode("latin-1")
                 if confluence_url_header
                 else None
+            )
+
+            bitbucket_token_header = headers.get(
+                b"x-atlassian-bitbucket-personal-token"
+            )
+            bitbucket_token_header_str = (
+                bitbucket_token_header.decode("latin-1")
+                if bitbucket_token_header
+                else None
+            )
+            bitbucket_url_header = headers.get(b"x-atlassian-bitbucket-url")
+            bitbucket_url_header_str = (
+                bitbucket_url_header.decode("latin-1") if bitbucket_url_header else None
             )
 
             token_for_log = mask_sensitive(
@@ -388,6 +442,12 @@ class UserTokenMiddleware:
                 service_headers["X-Atlassian-Confluence-Url"] = (
                     confluence_url_header_str
                 )
+            if bitbucket_token_header_str:
+                service_headers["X-Atlassian-Bitbucket-Personal-Token"] = (
+                    bitbucket_token_header_str
+                )
+            if bitbucket_url_header_str:
+                service_headers["X-Atlassian-Bitbucket-Url"] = bitbucket_url_header_str
 
             scope_copy["state"]["atlassian_service_headers"] = service_headers
             if service_headers:
@@ -537,9 +597,13 @@ class UserTokenMiddleware:
             raise
 
 
-main_mcp = AtlassianMCP(name="Atlassian MCP", lifespan=main_lifespan)
+main_mcp = AtlassianMCP(name="Atlassian MCP")
+# Set the lifespan after construction to avoid deprecation warnings
+main_mcp._lifespan = main_lifespan
+main_mcp = AtlassianMCP(name="Atlassian MCP")
 main_mcp.mount(jira_mcp, prefix="jira")
 main_mcp.mount(confluence_mcp, prefix="confluence")
+main_mcp.mount(bitbucket_mcp, prefix="bitbucket")
 
 
 @main_mcp.custom_route("/healthz", methods=["GET"], include_in_schema=False)
