@@ -1,7 +1,6 @@
 """Base client module for Bitbucket API interactions."""
 
 import logging
-from typing import Any
 
 from atlassian import Bitbucket
 from requests import Session
@@ -127,40 +126,3 @@ class BitbucketClient:
             logger.debug(
                 f"Added custom headers: {get_masked_session_headers(self.config.custom_headers)}"
             )
-
-    def get_pull_request_activities(
-        self, workspace: str, repository: str, pull_request_id: int
-    ) -> list[dict[str, Any]]:
-        """Get comments for a pull request.
-
-        Args:
-            workspace: Workspace name (Cloud) or project key (Server/DC)
-            repository: Repository name
-            pull_request_id: Pull request ID
-
-        Returns:
-            List of comment dictionaries
-        """
-        try:
-            # Use the generic get method with the appropriate endpoint
-            if self.config.is_cloud:
-                # Bitbucket Cloud API 2.0
-                endpoint = f"repositories/{workspace}/{repository}/pullrequests/{pull_request_id}/activities"
-            else:
-                # Bitbucket Server/DC API 1.0
-                endpoint = f"projects/{workspace}/repos/{repository}/pull-requests/{pull_request_id}/activities"
-
-            response = self.bitbucket.get(endpoint)
-
-            # Handle paginated response
-            if isinstance(response, dict) and "values" in response:
-                return response["values"]
-            elif isinstance(response, list):
-                return response
-            else:
-                return []
-        except Exception as e:
-            logger.error(
-                f"Failed to get pull request comments for {workspace}/{repository}/PR-{pull_request_id}: {e}"
-            )
-            raise

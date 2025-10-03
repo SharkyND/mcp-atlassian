@@ -38,8 +38,8 @@ https://github.com/user-attachments/assets/7fe9c488-ad0c-4876-9b54-120b666bb785
 | **Confluence** | Server/Data Center | ✅ Supported (version 6.0+)  |
 | **Jira**       | Cloud              | ✅ Fully supported           |
 | **Jira**       | Server/Data Center | ✅ Supported (version 8.14+) |
-| **Bitbucket**  | Cloud              | ✅ Fully supported           |
-| **Bitbucket**  | Server/Data Center | ✅ Supported (version 7.0+)  |
+| **Bitbucket**  | Cloud              | Not Tested                   |
+| **Bitbucket**  | Server/Data Center | ✅ Supported (version 9.0+)  |
 
 ## Quick Start Guide
 
@@ -890,6 +890,16 @@ Here's a complete example of setting up multi-user authentication with streamabl
 - `list_branches`: List all branches in a repository
 - `get_default_branch`: Get the default branch of a repository
 - `get_file_content`: Get content of a specific file from a repository
+- `list_directory`: List contents of a directory in a repository
+- `list_pull_requests`: List pull requests for a repository
+- `pull_request_activities`: Get activities/comments for a pull request
+- `get_pull_request`: Get detailed information about a specific pull request
+- `get_commit_changes`: Get changes made in a specific commit
+- `get_commits`: Get commit history for a repository
+- `create_pull_request`: Create a new pull request
+- `create_branch`: Create a new branch in a repository
+- `add_pull_request_blocker_comment`: Add a blocking comment to a pull request
+- `add_pull_request_comment`: Add a regular comment to a pull request
 
 <details> <summary>View All Tools</summary>
 

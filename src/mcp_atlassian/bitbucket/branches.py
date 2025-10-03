@@ -303,14 +303,20 @@ class BranchesMixin(BitbucketClient):
         """
         try:
             name = branch_data.get("name", "")
-            start_point = "main"
+            start_point = None
 
+            # First, try to get start_point from branch_data
             if "target" in branch_data:
                 target = branch_data["target"]
                 if isinstance(target, dict) and "branch" in target:
                     branch_info = target["branch"]
                     if isinstance(branch_info, dict) and "name" in branch_info:
                         start_point = branch_info["name"]
+
+            # If no start_point specified, get the repository's default branch
+            if not start_point:
+                default_branch = self.get_default_branch(workspace, repository)
+                start_point = default_branch.name if default_branch else "main"
 
             return self.bitbucket.create_branch(
                 workspace, repository, name, start_point

@@ -1,7 +1,7 @@
 """Bitbucket API constants and default values."""
 
 # Default branch names to try when branch is not specified
-DEFAULT_BRANCH_NAMES = ["main", "master", "develop"]
+DEFAULT_BRANCH_NAMES = ["develop", "main", "master"]
 
 # Pull request states
 PR_STATES = {
