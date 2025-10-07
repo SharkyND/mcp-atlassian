@@ -162,6 +162,36 @@ MCP Atlassian is distributed as a Docker image. This is the recommended way to r
 docker pull ghcr.io/SharkyND/mcp-atlassian:latest
 ```
 
+<summary>Alternative: Using uvx</summary>
+
+For a lightweight alternative to Docker, you can use `uvx` to run mcp-atlassian directly:
+
+```json
+{
+  "mcpServers": {
+    "mcp-atlassian": {
+      "command": "uvx",
+      "args": [
+        "mcp-atlassian",
+        "-v"
+      ],
+      "env": {
+        "CONFLUENCE_URL": "https://your-company.atlassian.net/wiki",
+        "CONFLUENCE_USERNAME": "your.email@company.com",
+        "CONFLUENCE_API_TOKEN": "your_confluence_api_token",
+        "JIRA_URL": "https://your-company.atlassian.net",
+        "JIRA_USERNAME": "your.email@company.com",
+        "JIRA_API_TOKEN": "your_jira_api_token"
+      }
+    }
+  }
+}
+```
+
+> - `uvx` automatically downloads and runs the latest version of mcp-atlassian in an isolated environment
+> - No Docker installation required
+> - Requires Python 3.10+ to be installed on your system
+
 ## 🛠️ IDE Integration
 
 MCP Atlassian is designed to be used with AI assistants through IDE integration.

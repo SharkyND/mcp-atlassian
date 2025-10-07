@@ -75,3 +75,7 @@ playground/
 
 # Claude
 .claude/
+CLAUDE.md
+
+# Repomix
+repomix-output.xml
