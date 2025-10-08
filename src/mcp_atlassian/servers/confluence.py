@@ -160,6 +160,15 @@ async def get_page(
             default=True,
         ),
     ] = True,
+    sample: Annotated[
+        int,
+        Field(
+            description=(
+                "Return only the first N lines of the page for inspection. Set to -1 for full page content."
+            ),
+            default=-1,
+        ),
+    ] = -1,
 ) -> str:
     """Get content of a specific Confluence page by its ID, or by its title and space key.
 
@@ -170,12 +179,12 @@ async def get_page(
         space_key: The key of the space. Must be used with 'title'.
         include_metadata: Whether to include page metadata.
         convert_to_markdown: Convert content to markdown (true) or keep raw HTML (false).
+        sample: Return only top N lines or the whole page when set to -1.
 
     Returns:
         JSON string representing the page content and/or metadata, or an error if not found or parameters are invalid.
     """
     confluence_fetcher = await get_confluence_fetcher(ctx)
-    page_object = None
 
     if page_id:
         if title or space_key:
@@ -184,7 +193,7 @@ async def get_page(
             )
         try:
             page_object = confluence_fetcher.get_page_content(
-                page_id, convert_to_markdown=convert_to_markdown
+                page_id, convert_to_markdown=convert_to_markdown, top_n=sample
             )
         except Exception as e:
             logger.error(f"Error fetching page by ID '{page_id}': {e}")
@@ -195,7 +204,7 @@ async def get_page(
             )
     elif title and space_key:
         page_object = confluence_fetcher.get_page_by_title(
-            space_key, title, convert_to_markdown=convert_to_markdown
+            space_key, title, convert_to_markdown=convert_to_markdown, top_n=sample
         )
         if not page_object:
             return json.dumps(
@@ -220,7 +229,10 @@ async def get_page(
     if include_metadata:
         result = {"metadata": page_object.to_simplified_dict()}
     else:
-        result = {"content": {"value": page_object.content}}
+        content = page_object.content
+        if sample > 0:
+            content = "\n".join(content.splitlines()[:sample])
+        result = {"content": {"value": content}}
 
     return json.dumps(result, indent=2, ensure_ascii=False)
 
