@@ -24,6 +24,7 @@ import uuid
 from collections.abc import Callable, Generator, Sequence
 
 import pytest
+import pytest_asyncio
 from fastmcp import Client
 from fastmcp.client import FastMCPTransport
 from mcp.types import TextContent
@@ -110,32 +111,36 @@ class ResourceTracker:
 
 
 @pytest.fixture
-def jira_config() -> JiraConfig:
+def jira_config(use_real_jira_data) -> JiraConfig:
     """Create a JiraConfig from environment variables."""
-    try:
-        return JiraConfig.from_env()
-    except ValueError as e:
-        pytest.skip(f"Jira configuration not available: {e}")
+    if not use_real_jira_data:
+        pytest.skip("Real Jira data testing is disabled")
+    return JiraConfig.from_env()
 
 
 @pytest.fixture
-def confluence_config() -> ConfluenceConfig:
+def confluence_config(use_real_confluence_data) -> ConfluenceConfig:
     """Create a ConfluenceConfig from environment variables."""
-    try:
-        return ConfluenceConfig.from_env()
-    except ValueError as e:
-        pytest.skip(f"Confluence configuration not available: {e}")
+    if not use_real_confluence_data:
+        pytest.skip("Real Confluence data testing is disabled")
+    return ConfluenceConfig.from_env()
 
 
 @pytest.fixture
-def jira_client(jira_config: JiraConfig) -> JiraFetcher:
+def jira_client(use_real_jira_data, jira_config: JiraConfig) -> JiraFetcher:
     """Create a JiraFetcher instance."""
+    if not use_real_jira_data:
+        pytest.skip("Real Jira data testing is disabled")
     return JiraFetcher(config=jira_config)
 
 
 @pytest.fixture
-def confluence_client(confluence_config: ConfluenceConfig) -> ConfluenceFetcher:
+def confluence_client(
+    use_real_confluence_data, confluence_config: ConfluenceConfig
+) -> ConfluenceFetcher:
     """Create a ConfluenceFetcher instance."""
+    if not use_real_confluence_data:
+        pytest.skip("Real Confluence data testing is disabled")
     return ConfluenceFetcher(config=confluence_config)
 
 
@@ -220,9 +225,11 @@ def cleanup_resources(
 pytestmark = pytest.mark.anyio(backends=["asyncio"])
 
 
-@pytest.fixture
-async def api_validation_client():
+@pytest_asyncio.fixture
+async def api_validation_client(request) -> Client:
     """Provides a FastMCP client connected to the main server for tool calls."""
+    if not request.config.getoption("--use-real-data"):
+        pytest.skip("Real data testing is disabled")
     transport = FastMCPTransport(main_mcp)
     client = Client(transport=transport)
     async with client as connected_client:

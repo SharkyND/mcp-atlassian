@@ -30,7 +30,7 @@ class PagesMixin(ConfluenceClient):
         return None
 
     def get_page_content(
-        self, page_id: str, *, convert_to_markdown: bool = True
+        self, page_id: str, *, convert_to_markdown: bool = True, top_n: int = -1
     ) -> ConfluencePage:
         """
         Get content of a specific page.
@@ -39,6 +39,7 @@ class PagesMixin(ConfluenceClient):
             page_id: The ID of the page to retrieve
             convert_to_markdown: When True, returns content in markdown format,
                                otherwise returns raw HTML (keyword-only)
+            top_n: When greater than -1, return first N lines of the file.
 
         Returns:
             ConfluencePage model containing the page content and metadata
@@ -75,7 +76,8 @@ class PagesMixin(ConfluenceClient):
 
             # Use the appropriate content format based on the convert_to_markdown flag
             page_content = processed_markdown if convert_to_markdown else processed_html
-
+            if top_n > 0:
+                page_content = "\n".join(page_content.splitlines()[:top_n])
             # Create and return the ConfluencePage model
             return ConfluencePage.from_api_response(
                 page,
@@ -156,7 +158,12 @@ class PagesMixin(ConfluenceClient):
             return []
 
     def get_page_by_title(
-        self, space_key: str, title: str, *, convert_to_markdown: bool = True
+        self,
+        space_key: str,
+        title: str,
+        *,
+        convert_to_markdown: bool = True,
+        top_n: int = -1,
     ) -> ConfluencePage | None:
         """
         Get a specific page by its title from a Confluence space.
@@ -166,6 +173,7 @@ class PagesMixin(ConfluenceClient):
             title: The title of the page to retrieve
             convert_to_markdown: When True, returns content in markdown format,
                                otherwise returns raw HTML (keyword-only)
+            top_n: When greater than -1, returns the top N lines of the file.
 
         Returns:
             ConfluencePage model containing the page content and metadata, or None if not found
@@ -190,7 +198,8 @@ class PagesMixin(ConfluenceClient):
 
             # Use the appropriate content format based on the convert_to_markdown flag
             page_content = processed_markdown if convert_to_markdown else processed_html
-
+            if top_n > 0:
+                page_content = "\n".join(page_content.splitlines()[:top_n])
             # Create and return the ConfluencePage model
             return ConfluencePage.from_api_response(
                 page,
