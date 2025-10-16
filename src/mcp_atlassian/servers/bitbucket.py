@@ -8,9 +8,9 @@ from fastmcp import Context, FastMCP
 from pydantic import Field
 from requests.exceptions import HTTPError
 
-from mcp_atlassian.exceptions import MCPAtlassianAuthenticationError
-from mcp_atlassian.servers.dependencies import get_bitbucket_fetcher
-from mcp_atlassian.utils.decorators import check_write_access
+from ..exceptions import MCPAtlassianAuthenticationError
+from ..utils.decorators import check_write_access
+from .dependencies import get_bitbucket_fetcher
 
 logger = logging.getLogger(__name__)
 
@@ -320,6 +320,13 @@ async def get_file_content(
             default=-1,
         ),
     ] = -1,
+    starting_line: Annotated[
+        int,
+        Field(
+            description="The line to start sampling from. -1 to start sampling from the start.",
+            default=-1,
+        ),
+    ] = -1,
 ) -> str:
     """
     Get the content of a specific file from a repository.
@@ -329,6 +336,8 @@ async def get_file_content(
         repository: Repository name.
         file_path: Path to the file in the repository.
         branch: Branch name to read from (default: main).
+        sample: Number of lines from the top to read.
+        starting_line: The line to start sampling from. -1 to sample from the start.
 
     Returns:
         JSON string containing file content and metadata.
@@ -340,18 +349,57 @@ async def get_file_content(
         bitbucket = await get_bitbucket_fetcher(ctx)
         content = bitbucket.get_file_content(workspace, repository, file_path, branch)
         content = content.decode("utf-8")
+
+        # Split content into lines for processing
+        lines = content.splitlines()
+        total_lines = len(lines)
+
+        # Handle starting_line parameter
+        if starting_line != -1:
+            # Check if starting_line is out of range
+            if starting_line > total_lines:
+                error_result = {
+                    "success": False,
+                    "error": f"Starting line {starting_line} is out of range. File has only {total_lines} lines.",
+                    "total_lines": total_lines,
+                    "workspace": workspace,
+                    "repository": repository,
+                    "file_path": file_path,
+                    "branch": branch,
+                }
+                logger.warning(
+                    f"Starting line {starting_line} out of range for {workspace}/{repository}/{file_path}. "
+                    f"File has {total_lines} lines."
+                )
+                return json.dumps(error_result, indent=2)
+
+            # Adjust for 1-based line numbering (starting_line is 1-based, but list indexing is 0-based)
+            start_index = max(0, starting_line - 1)
+            lines = lines[start_index:]
+
+        # Handle sample parameter (number of lines to return)
         if sample and sample > 0:
-            content = "\n".join(content.splitlines()[:sample])
-        return json.dumps(
-            {
-                "workspace": workspace,
-                "repository": repository,
-                "file_path": file_path,
-                "branch": branch,
-                "content": content,
-            },
-            indent=2,
-        )
+            lines = lines[:sample]
+
+        # Reconstruct content from processed lines
+        processed_content = "\n".join(lines)
+
+        result = {
+            "workspace": workspace,
+            "repository": repository,
+            "file_path": file_path,
+            "branch": branch,
+            "content": processed_content,
+            "total_lines": total_lines,
+        }
+
+        # Add sampling information if applicable
+        if starting_line != -1:
+            result["started_from_line"] = starting_line
+        if sample and sample > 0:
+            result["lines_returned"] = len(lines)
+
+        return json.dumps(result, indent=2)
     except Exception as e:
         error_message = ""
         log_level = logging.ERROR
@@ -370,6 +418,170 @@ async def get_file_content(
             "error": error_message,
         }
         logger.log(log_level, f"bitbucket_get_file_content failed: {error_message}")
+        return json.dumps(error_result, indent=2)
+
+
+@bitbucket_mcp.tool(tags={"bitbucket", "read"})
+async def code_search(
+    ctx: Context,
+    bitbucket_project_key: Annotated[
+        str,
+        Field(description="Bitbucket project key (Server/DC) or workspace (Cloud)."),
+    ],
+    repository_slug: Annotated[
+        str,
+        Field(description="Repository slug to search within."),
+    ],
+    search_query: Annotated[
+        str,
+        Field(
+            description=(
+                "Text to search for within repository files. "
+                "For basic searches, use simple text. "
+                "For multi_term searches, separate terms with SPACES and use quotes for exact phrases: "
+                "'error timeout connection' (space-separated terms) or "
+                "'error \"database connection\" timeout' (quoted phrases mixed with terms). "
+                "The multi_term_operator determines if ALL terms must match (AND) or ANY term can match (OR)."
+            )
+        ),
+    ],
+    branch_name: Annotated[
+        str | None,
+        Field(
+            description="Optional branch override; defaults to the repository default.",
+            default=None,
+        ),
+    ] = None,
+    surrounding_lines: Annotated[
+        int,
+        Field(
+            description="Context lines before and after each match.",
+            ge=0,
+            default=25,
+        ),
+    ] = 25,
+    max_results: Annotated[
+        int,
+        Field(
+            description="Number of search results to return.",
+            ge=0,
+            default=10,
+        ),
+    ] = 10,
+    case_sensitive: Annotated[
+        bool,
+        Field(
+            description="Whether to perform case-sensitive matching.",
+            default=False,
+        ),
+    ] = False,
+    search_type: Annotated[
+        Literal["substring", "regex", "whole_word", "multi_term"],
+        Field(
+            description="Type of search: 'substring' (default), 'regex' (regular expressions), 'whole_word' (complete words only), 'multi_term' (multiple terms with AND/OR logic).",
+            default="substring",
+        ),
+    ] = "substring",
+    multi_term_operator: Annotated[
+        Literal["and", "or"],
+        Field(
+            description="For multi_term searches: 'and' (all terms must match), 'or' (any term can match). Default is 'or'.",
+            default="or",
+        ),
+    ] = "or",
+    file_extensions: Annotated[
+        list[str] | None,
+        Field(
+            description="Optional list of file extensions to search (e.g., ['.py', '.js', '.ts']). If not provided, searches all text files excluding .git.",
+            default=None,
+        ),
+    ] = None,
+    exclude_paths: Annotated[
+        list[str] | None,
+        Field(
+            description="Optional list of path patterns to exclude (e.g., ['test/', 'node_modules/', '__pycache__/']). Paths are matched as substrings.",
+            default=None,
+        ),
+    ] = None,
+) -> str:
+    """
+    Search repository code with advanced search capabilities including regex, whole word, and multi-term search.
+
+    This tool provides powerful code search functionality with multiple search types:
+    - substring: Simple text matching (default)
+    - regex: Regular expression pattern matching
+    - whole_word: Match complete words only (great for variable/function names)
+    - multi_term: Search for multiple terms with AND/OR logic, supports quoted phrases
+
+    Performance features:
+    - File extension filtering for faster searches on large repos
+    - Path exclusion to skip irrelevant directories
+    - Binary file detection and skipping
+    - Automatic .git directory exclusion
+
+    Args:
+        bitbucket_project_key: Bitbucket project key (Server/DC) or workspace (Cloud).
+        repository_slug: Repository slug to search.
+        search_query: Text to search for. For multi_term, supports quoted phrases like: 'error "database connection" timeout'
+        branch_name: Optional branch name override.
+        surrounding_lines: Number of context lines around each match.
+        max_results: Number of search results to return.
+        case_sensitive: Whether to perform case-sensitive matching.
+        search_type: Type of search to perform.
+        multi_term_operator: For multi_term searches, whether all terms or any term must match.
+        file_extensions: File extensions to search (searches all text files if not specified).
+        exclude_paths: Path patterns to exclude from search.
+
+    Returns:
+        JSON string containing the search results with enhanced metadata.
+
+    Raises:
+        ValueError: If Bitbucket client configuration is invalid.
+    """
+    try:
+        # Import the search enums
+        from ..bitbucket.client import MultiTermOperator, SearchType
+
+        # Convert string literals to enums
+        search_type_enum = SearchType(search_type)
+        multi_term_operator_enum = MultiTermOperator(multi_term_operator)
+
+        bitbucket = await get_bitbucket_fetcher(ctx)
+        search_result = bitbucket.code_search(
+            project_key=bitbucket_project_key,
+            repository_slug=repository_slug,
+            search_query=search_query,
+            branch_name=branch_name,
+            surrounding_lines=surrounding_lines,
+            case_sensitive=case_sensitive,
+            max_results=max_results,
+            search_type=search_type_enum,
+            multi_term_operator=multi_term_operator_enum,
+            file_extensions=file_extensions,
+            exclude_paths=exclude_paths,
+        )
+        return json.dumps({"success": True, **search_result}, indent=2)
+    except Exception as e:
+        error_message = ""
+        log_level = logging.ERROR
+        if isinstance(e, MCPAtlassianAuthenticationError):
+            error_message = f"Authentication/Permission Error: {str(e)}"
+        elif isinstance(e, OSError | HTTPError):
+            error_message = f"Network or API Error: {str(e)}"
+        elif isinstance(e, ValueError):
+            error_message = f"Configuration Error: {str(e)}"
+        else:
+            error_message = (
+                f"An unexpected error occurred while running code search in "
+                f"{bitbucket_project_key}/{repository_slug}. Error: {e}"
+            )
+            logger.exception("Unexpected error in bitbucket_code_search:")
+
+        error_result = {
+            "success": False,
+            "error": error_message,
+        }
+        logger.log(log_level, f"bitbucket_code_search failed: {error_message}")
         return json.dumps(error_result, indent=2)
 
 
