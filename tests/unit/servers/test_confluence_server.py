@@ -479,3 +479,35 @@ async def test_update_page_with_string_parent_id(client, mock_confluence_fetcher
     result_data = json.loads(response.content[0].text)
     assert result_data["message"] == "Page updated successfully"
     assert result_data["page"]["title"] == "Test Page Mock Title"
+
+
+@pytest.mark.anyio
+def test_instance_mcp_with_options():
+    """Test that ConfluenceMCPServerConfig properly controls error masking."""
+    import os
+
+    from src.mcp_atlassian.servers.confluence import ConfluenceMCPServerConfig
+
+    # Test 1: Default behavior (should mask errors)
+    config = ConfluenceMCPServerConfig()
+    assert config.mask_error_details, "Default should mask error details"
+
+    # Test 2: Explicit "true" environment variable
+    with patch.dict(os.environ, {"CONFLUENCE_MCP_MASK_ERROR_DETAILS": "true"}):
+        config = ConfluenceMCPServerConfig()
+        assert config.mask_error_details, "Should mask when env is 'true'"
+
+    # Test 3: "false" environment variable (debugging mode)
+    with patch.dict(os.environ, {"CONFLUENCE_MCP_MASK_ERROR_DETAILS": "false"}):
+        config = ConfluenceMCPServerConfig()
+        assert not config.mask_error_details, "Should not mask when env is 'false'"
+
+    # Test 4: "1" should be treated as true
+    with patch.dict(os.environ, {"CONFLUENCE_MCP_MASK_ERROR_DETAILS": "1"}):
+        config = ConfluenceMCPServerConfig()
+        assert config.mask_error_details, "Should mask when env is '1'"
+
+    # Test 5: "yes" should be treated as true
+    with patch.dict(os.environ, {"CONFLUENCE_MCP_MASK_ERROR_DETAILS": "yes"}):
+        config = ConfluenceMCPServerConfig()
+        assert config.mask_error_details, "Should mask when env is 'yes'"

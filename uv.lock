@@ -1059,7 +1059,7 @@ requires-dist = [
     { name = "beautifulsoup4", specifier = ">=4.12.3" },
     { name = "cachetools", specifier = ">=5.0.0" },
     { name = "click", specifier = ">=8.1.7" },
-    { name = "fastmcp", specifier = ">=2.4.0,<3.0.0" },
+    { name = "fastmcp", specifier = ">=2.5.0,<3.0.0" },
     { name = "httpx", specifier = ">=0.28.0" },
     { name = "keyring", specifier = ">=25.6.0" },
     { name = "markdown", specifier = ">=3.7.0" },

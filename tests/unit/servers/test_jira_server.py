@@ -1116,3 +1116,35 @@ async def test_batch_create_versions_empty(jira_client, mock_jira_fetcher):
     )
     content = json.loads(response.content[0].text)
     assert content == []
+
+
+@pytest.mark.anyio
+def test_instance_mcp_with_options():
+    """Test that JiraMCPServerConfig properly controls error masking."""
+    import os
+
+    from src.mcp_atlassian.servers.jira import JiraMCPServerConfig
+
+    # Test 1: Default behavior (should mask errors)
+    config = JiraMCPServerConfig()
+    assert config.mask_error_details, "Default should mask error details"
+
+    # Test 2: Explicit "true" environment variable
+    with patch.dict(os.environ, {"JIRA_MCP_MASK_ERROR_DETAILS": "true"}):
+        config = JiraMCPServerConfig()
+        assert config.mask_error_details, "Should mask when env is 'true'"
+
+    # Test 3: "false" environment variable (debugging mode)
+    with patch.dict(os.environ, {"JIRA_MCP_MASK_ERROR_DETAILS": "false"}):
+        config = JiraMCPServerConfig()
+        assert not config.mask_error_details, "Should not mask when env is 'false'"
+
+    # Test 4: "1" should be treated as true
+    with patch.dict(os.environ, {"JIRA_MCP_MASK_ERROR_DETAILS": "1"}):
+        config = JiraMCPServerConfig()
+        assert config.mask_error_details, "Should mask when env is '1'"
+
+    # Test 5: "yes" should be treated as true
+    with patch.dict(os.environ, {"JIRA_MCP_MASK_ERROR_DETAILS": "yes"}):
+        config = JiraMCPServerConfig()
+        assert config.mask_error_details, "Should mask when env is 'yes'"

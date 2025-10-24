@@ -2,9 +2,10 @@
 
 import json
 import logging
+import os
+from dataclasses import dataclass, field
 from typing import Annotated
 
-from fastmcp import Context, FastMCP
 from pydantic import BeforeValidator, Field
 
 from mcp_atlassian.exceptions import MCPAtlassianAuthenticationError
@@ -12,8 +13,31 @@ from mcp_atlassian.servers.dependencies import get_confluence_fetcher
 from mcp_atlassian.utils.decorators import (
     check_write_access,
 )
+from mcp_atlassian.utils.env import is_env_truthy
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ConfluenceMCPServerConfig:
+    """Configuration for Confluence MCP server error handling."""
+
+    mask_error_details: bool = field(
+        default_factory=lambda: is_env_truthy(
+            "CONFLUENCE_MCP_MASK_ERROR_DETAILS", "true"
+        )
+    )
+
+
+# Set FastMCP environment variable based on our configuration
+_confluence_config = ConfluenceMCPServerConfig()
+if not _confluence_config.mask_error_details:
+    os.environ["FASTMCP_MASK_ERROR_DETAILS"] = "false"
+elif "FASTMCP_MASK_ERROR_DETAILS" not in os.environ:
+    os.environ["FASTMCP_MASK_ERROR_DETAILS"] = "true"
+
+# Import FastMCP after setting the environment variable
+from fastmcp import Context, FastMCP  # noqa: E402
 
 confluence_mcp = FastMCP(
     name="Confluence MCP Service",
