@@ -763,7 +763,8 @@ async def batch_create_issues(
     except json.JSONDecodeError:
         raise ValueError("Invalid JSON in issues")
     except Exception as e:
-        raise ValueError(f"Invalid input for issues: {e}") from e
+        msg = f"Invalid input for issues: {e}"
+        raise ValueError(msg) from e
 
     # Create issues in batch
     created_issues = jira.batch_create_issues(issues_list, validate_only=validate_only)
@@ -950,7 +951,8 @@ async def update_issue(
         )
     except Exception as e:
         logger.error(f"Error updating issue {issue_key}: {str(e)}", exc_info=True)
-        raise ValueError(f"Failed to update issue {issue_key}: {str(e)}")
+        msg = f"Failed to update issue {issue_key}: {str(e)}"
+        raise ValueError(msg)
 
 
 @jira_mcp.tool(tags={"jira", "write"})
@@ -972,7 +974,7 @@ async def delete_issue(
         ValueError: If in read-only mode or Jira client unavailable.
     """
     jira = await get_jira_fetcher(ctx)
-    deleted = jira.delete_issue(issue_key)
+    jira.delete_issue(issue_key)
     result = {"message": f"Issue {issue_key} has been deleted successfully."}
     # The underlying method raises on failure, so if we reach here, it's success.
     return json.dumps(result, indent=2, ensure_ascii=False)
@@ -1620,7 +1622,8 @@ async def batch_create_versions(
     except json.JSONDecodeError:
         raise ValueError("Invalid JSON in versions")
     except Exception as e:
-        raise ValueError(f"Invalid input for versions: {e}") from e
+        msg = f"Invalid input for versions: {e}"
+        raise ValueError(msg) from e
 
     results = []
     if not version_list:

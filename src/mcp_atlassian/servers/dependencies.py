@@ -53,9 +53,8 @@ def _create_user_config_for_fetcher(
         TypeError: If base_config is not a supported type.
     """
     if auth_type not in ["oauth", "pat"]:
-        raise ValueError(
-            f"Unsupported auth_type '{auth_type}' for user-specific config creation. Expected 'oauth' or 'pat'."
-        )
+        msg = f"Unsupported auth_type '{auth_type}' for user-specific config creation. Expected 'oauth' or 'pat'."
+        raise ValueError(msg)
 
     username_for_config: str | None = credentials.get("user_email_context")
 
@@ -84,10 +83,11 @@ def _create_user_config_for_fetcher(
             or not hasattr(base_config, "oauth_config")
             or not getattr(base_config, "oauth_config", None)
         ):
-            raise ValueError(
+            msg = (
                 f"Global OAuth config for {type(base_config).__name__} is missing, "
                 "but user auth_type is 'oauth'."
             )
+            raise ValueError(msg)
         global_oauth_cfg = base_config.oauth_config
 
         # Use provided cloud_id or fall back to global config cloud_id
@@ -173,7 +173,8 @@ def _create_user_config_for_fetcher(
         user_bitbucket_config.workspaces_filter = base_config.workspaces_filter
         return user_bitbucket_config
     else:
-        raise TypeError(f"Unsupported base_config type: {type(base_config)}")
+        msg = f"Unsupported base_config type: {type(base_config)}"
+        raise TypeError(msg)
 
 
 async def get_jira_fetcher(ctx: Context) -> JiraFetcher:
@@ -242,9 +243,8 @@ async def get_jira_fetcher(ctx: Context) -> JiraFetcher:
                     f"get_jira_fetcher: Failed to create/validate header-based JiraFetcher: {e}",
                     exc_info=True,
                 )
-                raise ValueError(
-                    f"Invalid header-based Jira token or configuration: {e}"
-                )
+                msg = f"Invalid header-based Jira token or configuration: {e}"
+                raise ValueError(msg)
 
         elif user_auth_type in ["oauth", "pat"] and hasattr(
             request.state, "user_atlassian_token"
@@ -294,7 +294,8 @@ async def get_jira_fetcher(ctx: Context) -> JiraFetcher:
                     f"get_jira_fetcher: Failed to create/validate user-specific JiraFetcher: {e}",
                     exc_info=True,
                 )
-                raise ValueError(f"Invalid user Jira token or configuration: {e}")
+                msg = f"Invalid user Jira token or configuration: {e}"
+                raise ValueError(msg)
         else:
             logger.debug(
                 f"get_jira_fetcher: No user-specific JiraFetcher. Auth type: {user_auth_type}. Token present: {hasattr(request.state, 'user_atlassian_token')}. Will use global fallback."
@@ -410,9 +411,8 @@ async def get_confluence_fetcher(ctx: Context) -> ConfluenceFetcher:
                     f"get_confluence_fetcher: Failed to create/validate header-based ConfluenceFetcher: {e}",
                     exc_info=True,
                 )
-                raise ValueError(
-                    f"Invalid header-based Confluence token or configuration: {e}"
-                )
+                msg = f"Invalid header-based Confluence token or configuration: {e}"
+                raise ValueError(msg)
 
         elif user_auth_type in ["oauth", "pat"] and hasattr(
             request.state, "user_atlassian_token"
@@ -480,7 +480,8 @@ async def get_confluence_fetcher(ctx: Context) -> ConfluenceFetcher:
                 logger.error(
                     f"get_confluence_fetcher: Failed to create/validate user-specific ConfluenceFetcher: {e}"
                 )
-                raise ValueError(f"Invalid user Confluence token or configuration: {e}")
+                msg = f"Invalid user Confluence token or configuration: {e}"
+                raise ValueError(msg)
         else:
             logger.debug(
                 f"get_confluence_fetcher: No user-specific ConfluenceFetcher. Auth type: {user_auth_type}. Token present: {hasattr(request.state, 'user_atlassian_token')}. Will use global fallback."
@@ -595,9 +596,8 @@ async def get_bitbucket_fetcher(ctx: Context) -> BitbucketFetcher:
                     f"get_bitbucket_fetcher: Failed to create/validate header-based BitbucketFetcher: {e}",
                     exc_info=True,
                 )
-                raise ValueError(
-                    f"Invalid header-based Bitbucket token or configuration: {e}"
-                )
+                msg = f"Invalid header-based Bitbucket token or configuration: {e}"
+                raise ValueError(msg)
 
         elif user_auth_type in ["oauth", "pat"] and hasattr(
             request.state, "user_atlassian_token"
@@ -664,7 +664,8 @@ async def get_bitbucket_fetcher(ctx: Context) -> BitbucketFetcher:
                 logger.error(
                     f"get_bitbucket_fetcher: Failed to create/validate user-specific BitbucketFetcher: {e}"
                 )
-                raise ValueError(f"Invalid user Bitbucket token or configuration: {e}")
+                msg = f"Invalid user Bitbucket token or configuration: {e}"
+                raise ValueError(msg)
         else:
             logger.debug(
                 f"get_bitbucket_fetcher: No user-specific BitbucketFetcher. Auth type: {user_auth_type}. Token present: {hasattr(request.state, 'user_atlassian_token')}. Will use global fallback."

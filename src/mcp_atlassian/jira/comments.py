@@ -50,7 +50,8 @@ class CommentsMixin(JiraClient):
             return processed_comments
         except Exception as e:
             logger.error(f"Error getting comments for issue {issue_key}: {str(e)}")
-            raise Exception(f"Error getting comments: {str(e)}") from e
+            msg = f"Error getting comments: {str(e)}"
+            raise Exception(msg) from e
 
     def add_comment(self, issue_key: str, comment: str) -> dict[str, Any]:
         """
@@ -84,7 +85,8 @@ class CommentsMixin(JiraClient):
             }
         except Exception as e:
             logger.error(f"Error adding comment to issue {issue_key}: {str(e)}")
-            raise Exception(f"Error adding comment: {str(e)}") from e
+            msg = f"Error adding comment: {str(e)}"
+            raise Exception(msg) from e
 
     def _markdown_to_jira(self, markdown_text: str) -> str:
         """

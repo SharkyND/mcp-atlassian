@@ -55,7 +55,8 @@ class RepositoriesMixin(BitbucketClient):
         except Exception as e:
             error_msg = f"Error getting repositories: {str(e)}"
             logger.error(error_msg)
-            raise Exception(f"Error getting repositories: {str(e)}") from e
+            msg = f"Error getting repositories: {str(e)}"
+            raise Exception(msg) from e
 
     def get_repository_info(
         self, workspace: str, repository: str
@@ -95,7 +96,8 @@ class RepositoriesMixin(BitbucketClient):
                 f"Error getting repository info for {workspace}/{repository}: {str(e)}"
             )
             logger.error(error_msg)
-            raise Exception(f"Error getting repository info: {str(e)}") from e
+            msg = f"Error getting repository info: {str(e)}"
+            raise Exception(msg) from e
 
     def get_file_content(
         self, workspace: str, repository: str, path: str, branch: str = "main"
@@ -136,7 +138,8 @@ class RepositoriesMixin(BitbucketClient):
         except Exception as e:
             error_msg = f"Error getting file content for {workspace}/{repository}/{path}: {str(e)}"
             logger.error(error_msg)
-            raise Exception(f"Error getting file content: {str(e)}") from e
+            msg = f"Error getting file content: {str(e)}"
+            raise Exception(msg) from e
 
     def get_directory_content(
         self, workspace: str, repository: str, path: str = "", branch: str = "main"
@@ -175,7 +178,8 @@ class RepositoriesMixin(BitbucketClient):
         except Exception as e:
             error_msg = f"Error getting directory content for {workspace}/{repository}/{path}: {str(e)}"
             logger.error(error_msg)
-            raise Exception(f"Error getting directory content: {str(e)}") from e
+            msg = f"Error getting directory content: {str(e)}"
+            raise Exception(msg) from e
 
     def get_repositories(self, workspace: str) -> list[BitbucketRepository]:
         """Get list of repositories.
@@ -206,4 +210,5 @@ class RepositoriesMixin(BitbucketClient):
         except Exception as e:
             error_msg = f"Error getting repos in {workspace}: {str(e)}"
             logger.error(error_msg)
-            raise Exception(f"Error getting repos: {str(e)}") from e
+            msg = f"Error getting repos: {str(e)}"
+            raise Exception(msg) from e

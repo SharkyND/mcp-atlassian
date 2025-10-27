@@ -79,7 +79,9 @@ def test_configure_ssl_verification_disabled():
             mock_adapter_class.return_value = mock_adapter
 
             # Act
-            configure_ssl_verification(service_name, url, session, ssl_verify)
+            configure_ssl_verification(
+                service_name, url, session, ssl_verify=ssl_verify
+            )
 
             # Assert
             mock_adapter_class.assert_called_once()
@@ -99,7 +101,7 @@ def test_configure_ssl_verification_enabled():
 
     with patch("mcp_atlassian.utils.ssl.SSLIgnoreAdapter") as mock_adapter_class:
         # Act
-        configure_ssl_verification(service_name, url, session, ssl_verify)
+        configure_ssl_verification(service_name, url, session, ssl_verify=ssl_verify)
 
         # Assert
         mock_adapter_class.assert_not_called()

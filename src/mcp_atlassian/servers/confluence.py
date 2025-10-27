@@ -470,9 +470,8 @@ async def create_page(
 
     # Validate content_format
     if content_format not in ["markdown", "wiki", "storage"]:
-        raise ValueError(
-            f"Invalid content_format: {content_format}. Must be 'markdown', 'wiki', or 'storage'"
-        )
+        msg = f"Invalid content_format: {content_format}. Must be 'markdown', 'wiki', or 'storage'"
+        raise ValueError(msg)
 
     # Determine parameters based on content format
     if content_format == "markdown":
@@ -562,9 +561,8 @@ async def update_page(
 
     # Validate content_format
     if content_format not in ["markdown", "wiki", "storage"]:
-        raise ValueError(
-            f"Invalid content_format: {content_format}. Must be 'markdown', 'wiki', or 'storage'"
-        )
+        msg = f"Invalid content_format: {content_format}. Must be 'markdown', 'wiki', or 'storage'"
+        raise ValueError(msg)
 
     # Determine parameters based on content format
     if content_format == "markdown":

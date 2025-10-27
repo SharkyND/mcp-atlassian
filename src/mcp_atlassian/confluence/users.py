@@ -80,21 +80,18 @@ class UsersMixin(ConfluenceClient):
                 logger.warning(
                     f"Confluence token validation failed with HTTP {http_err.response.status_code} for /rest/api/user/current."
                 )
-                raise MCPAtlassianAuthenticationError(
-                    f"Confluence token validation failed: {http_err.response.status_code} from /rest/api/user/current"
-                ) from http_err
+                msg = f"Confluence token validation failed: {http_err.response.status_code} from /rest/api/user/current"
+                raise MCPAtlassianAuthenticationError(msg) from http_err
             logger.error(
                 f"HTTPError when calling Confluence /rest/api/user/current: {http_err}",
                 exc_info=True,
             )
-            raise MCPAtlassianAuthenticationError(
-                f"Confluence token validation failed with HTTPError: {http_err}"
-            ) from http_err
+            msg = f"Confluence token validation failed with HTTPError: {http_err}"
+            raise MCPAtlassianAuthenticationError(msg) from http_err
         except Exception as e:
             logger.error(
                 f"Unexpected error fetching current Confluence user details: {e}",
                 exc_info=True,
             )
-            raise MCPAtlassianAuthenticationError(
-                f"Confluence token validation failed: {e}"
-            ) from e
+            msg = f"Confluence token validation failed: {e}"
+            raise MCPAtlassianAuthenticationError(msg) from e

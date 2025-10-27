@@ -7,6 +7,9 @@ import requests
 
 from .client import ConfluenceClient
 
+SPACES_PATH = "/spaces/"
+
+
 logger = logging.getLogger("mcp-atlassian")
 
 
@@ -54,8 +57,8 @@ class SpacesMixin(ConfluenceClient):
                     container = result.get("resultGlobalContainer", {})
                     space_name = container.get("title")
                     display_url = container.get("displayUrl", "")
-                    if display_url and "/spaces/" in display_url:
-                        space_key = display_url.split("/spaces/")[1].split("/")[0]
+                    if display_url and SPACES_PATH in display_url:
+                        space_key = display_url.split(SPACES_PATH)[1].split("/")[0]
 
                 # Try to extract from content expandable
                 if (
@@ -71,8 +74,8 @@ class SpacesMixin(ConfluenceClient):
                 # Try to extract from URL
                 if not space_key and "url" in result:
                     url = result.get("url", "")
-                    if url and url.startswith("/spaces/"):
-                        space_key = url.split("/spaces/")[1].split("/")[0]
+                    if url and url.startswith(SPACES_PATH):
+                        space_key = url.split(SPACES_PATH)[1].split("/")[0]
 
                 # Only add if we found a space key and it's not already in our results
                 if space_key and space_key not in spaces:

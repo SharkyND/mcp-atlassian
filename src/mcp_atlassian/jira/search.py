@@ -170,7 +170,8 @@ class SearchMixin(JiraClient, IssueOperationsProto):
                 raise http_err
         except Exception as e:
             logger.error(f"Error searching issues with JQL '{jql}': {str(e)}")
-            raise Exception(f"Error searching issues: {str(e)}") from e
+            msg = f"Error searching issues: {str(e)}"
+            raise Exception(msg) from e
 
     def get_board_issues(
         self,
@@ -226,14 +227,14 @@ class SearchMixin(JiraClient, IssueOperationsProto):
             logger.error(
                 f"Error searching issues for board with JQL '{board_id}': {str(e.response.content)}"
             )
-            raise Exception(
+            msg = (
                 f"Error searching issues for board with JQL: {str(e.response.content)}"
-            ) from e
+            )
+            raise Exception(msg) from e
         except Exception as e:
             logger.error(f"Error searching issues for board with JQL '{jql}': {str(e)}")
-            raise Exception(
-                f"Error searching issues for board with JQL {str(e)}"
-            ) from e
+            msg = f"Error searching issues for board with JQL {str(e)}"
+            raise Exception(msg) from e
 
     def get_sprint_issues(
         self,
@@ -282,9 +283,9 @@ class SearchMixin(JiraClient, IssueOperationsProto):
             logger.error(
                 f"Error searching issues for sprint '{sprint_id}': {str(e.response.content)}"
             )
-            raise Exception(
-                f"Error searching issues for sprint: {str(e.response.content)}"
-            ) from e
+            msg = f"Error searching issues for sprint: {str(e.response.content)}"
+            raise Exception(msg) from e
         except Exception as e:
             logger.error(f"Error searching issues for sprint: {sprint_id}': {str(e)}")
-            raise Exception(f"Error searching issues for sprint: {str(e)}") from e
+            msg = f"Error searching issues for sprint: {str(e)}"
+            raise Exception(msg) from e

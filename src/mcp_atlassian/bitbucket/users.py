@@ -82,21 +82,18 @@ class UsersMixin(BitbucketClient):
                     f"Bitbucket authentication failed with HTTP {http_err.response.status_code}. "
                     f"Check that access is correct and have proper permissions."
                 )
-                raise MCPAtlassianAuthenticationError(
-                    f"Bitbucket authentication failed: {http_err.response.status_code} - verify access"
-                ) from http_err
+                msg = f"Bitbucket authentication failed: {http_err.response.status_code} - verify access"
+                raise MCPAtlassianAuthenticationError(msg) from http_err
             logger.error(
                 f"HTTPError when calling Bitbucket user endpoint: {http_err}",
                 exc_info=True,
             )
-            raise MCPAtlassianAuthenticationError(
-                f"Bitbucket API call failed with HTTPError: {http_err}"
-            ) from http_err
+            msg = f"Bitbucket API call failed with HTTPError: {http_err}"
+            raise MCPAtlassianAuthenticationError(msg) from http_err
         except Exception as e:
             logger.error(
                 f"Unexpected error fetching current Bitbucket user details: {e}",
                 exc_info=True,
             )
-            raise MCPAtlassianAuthenticationError(
-                f"Bitbucket user info retrieval failed: {e}"
-            ) from e
+            msg = f"Bitbucket user info retrieval failed: {e}"
+            raise MCPAtlassianAuthenticationError(msg) from e

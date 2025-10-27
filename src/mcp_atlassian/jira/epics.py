@@ -414,9 +414,8 @@ class EpicsMixin(
                 logger.error(f"Error creating issue link: {str(link_error)}")
 
             # If we get here, none of our attempts worked
-            raise ValueError(
-                f"Could not link issue {issue_key} to epic {epic_key}. Your Jira instance might use a different field for epic links."
-            )
+            msg = f"Could not link issue {issue_key} to epic {epic_key}. Your Jira instance might use a different field for epic links."
+            raise ValueError(msg)
 
         except ValueError:
             # Re-raise ValueError as is
@@ -425,7 +424,8 @@ class EpicsMixin(
             logger.error(f"Error linking {issue_key} to epic {epic_key}: {str(e)}")
             # Ensure exception messages follow the expected format for tests
             if "API error" in str(e):
-                raise Exception(f"Error linking issue to epic: {str(e)}")
+                msg = f"Error linking issue to epic: {str(e)}"
+                raise Exception(msg)
             raise
 
     def get_epic_issues(
@@ -646,7 +646,8 @@ class EpicsMixin(
         except Exception as e:
             # Wrap other exceptions
             logger.error(f"Error getting issues for epic {epic_key}: {str(e)}")
-            raise Exception(f"Error getting epic issues: {str(e)}") from e
+            msg = f"Error getting epic issues: {str(e)}"
+            raise Exception(msg) from e
 
     def _find_epic_link_field(self, field_ids: dict[str, str]) -> str | None:
         """

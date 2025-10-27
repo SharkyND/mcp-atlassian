@@ -51,20 +51,24 @@ class ConfluenceV2Adapter:
             results = data.get("results", [])
 
             if not results:
-                raise ValueError(f"Space with key '{space_key}' not found")
+                msg = f"Space with key '{space_key}' not found"
+                raise ValueError(msg)
 
             space_id = results[0].get("id")
             if not space_id:
-                raise ValueError(f"No ID found for space '{space_key}'")
+                msg = f"No ID found for space '{space_key}'"
+                raise ValueError(msg)
 
             return space_id
 
         except HTTPError as e:
             logger.error(f"HTTP error getting space ID for '{space_key}': {e}")
-            raise ValueError(f"Failed to get space ID for '{space_key}': {e}") from e
+            msg = f"Failed to get space ID for '{space_key}': {e}"
+            raise ValueError(msg) from e
         except Exception as e:
             logger.error(f"Error getting space ID for '{space_key}': {e}")
-            raise ValueError(f"Failed to get space ID for '{space_key}': {e}") from e
+            msg = f"Failed to get space ID for '{space_key}': {e}"
+            raise ValueError(msg) from e
 
     def create_page(
         self,
@@ -125,10 +129,12 @@ class ConfluenceV2Adapter:
             logger.error(f"HTTP error creating page '{title}': {e}")
             if e.response is not None:
                 logger.error(f"Response content: {e.response.text}")
-            raise ValueError(f"Failed to create page '{title}': {e}") from e
+            msg = f"Failed to create page '{title}': {e}"
+            raise ValueError(msg) from e
         except Exception as e:
             logger.error(f"Error creating page '{title}': {e}")
-            raise ValueError(f"Failed to create page '{title}': {e}") from e
+            msg = f"Failed to create page '{title}': {e}"
+            raise ValueError(msg) from e
 
     def _get_page_version(self, page_id: str) -> int:
         """Get the current version number of a page.
@@ -153,16 +159,19 @@ class ConfluenceV2Adapter:
             version_number = data.get("version", {}).get("number")
 
             if version_number is None:
-                raise ValueError(f"No version number found for page '{page_id}'")
+                msg = f"No version number found for page '{page_id}'"
+                raise ValueError(msg)
 
             return version_number
 
         except HTTPError as e:
             logger.error(f"HTTP error getting page version for '{page_id}': {e}")
-            raise ValueError(f"Failed to get page version for '{page_id}': {e}") from e
+            msg = f"Failed to get page version for '{page_id}': {e}"
+            raise ValueError(msg) from e
         except Exception as e:
             logger.error(f"Error getting page version for '{page_id}': {e}")
-            raise ValueError(f"Failed to get page version for '{page_id}': {e}") from e
+            msg = f"Failed to get page version for '{page_id}': {e}"
+            raise ValueError(msg) from e
 
     def update_page(
         self,
@@ -231,10 +240,12 @@ class ConfluenceV2Adapter:
             logger.error(f"HTTP error updating page '{page_id}': {e}")
             if e.response is not None:
                 logger.error(f"Response content: {e.response.text}")
-            raise ValueError(f"Failed to update page '{page_id}': {e}") from e
+            msg = f"Failed to update page '{page_id}': {e}"
+            raise ValueError(msg) from e
         except Exception as e:
             logger.error(f"Error updating page '{page_id}': {e}")
-            raise ValueError(f"Failed to update page '{page_id}': {e}") from e
+            msg = f"Failed to update page '{page_id}': {e}"
+            raise ValueError(msg) from e
 
     def _get_space_key_from_id(self, space_id: str) -> str:
         """Get space key from space ID using v2 API.
@@ -259,7 +270,8 @@ class ConfluenceV2Adapter:
             space_key = data.get("key")
 
             if not space_key:
-                raise ValueError(f"No key found for space ID '{space_id}'")
+                msg = f"No key found for space ID '{space_id}'"
+                raise ValueError(msg)
 
             return space_key
 
@@ -335,10 +347,12 @@ class ConfluenceV2Adapter:
             logger.error(f"HTTP error getting page '{page_id}': {e}")
             if e.response is not None:
                 logger.error(f"Response content: {e.response.text}")
-            raise ValueError(f"Failed to get page '{page_id}': {e}") from e
+            msg = f"Failed to get page '{page_id}': {e}"
+            raise ValueError(msg) from e
         except Exception as e:
             logger.error(f"Error getting page '{page_id}': {e}")
-            raise ValueError(f"Failed to get page '{page_id}': {e}") from e
+            msg = f"Failed to get page '{page_id}': {e}"
+            raise ValueError(msg) from e
 
     def delete_page(self, page_id: str) -> bool:
         """Delete a page using the v2 API.
@@ -374,10 +388,12 @@ class ConfluenceV2Adapter:
             logger.error(f"HTTP error deleting page '{page_id}': {e}")
             if e.response is not None:
                 logger.error(f"Response content: {e.response.text}")
-            raise ValueError(f"Failed to delete page '{page_id}': {e}") from e
+            msg = f"Failed to delete page '{page_id}': {e}"
+            raise ValueError(msg) from e
         except Exception as e:
             logger.error(f"Error deleting page '{page_id}': {e}")
-            raise ValueError(f"Failed to delete page '{page_id}': {e}") from e
+            msg = f"Failed to delete page '{page_id}': {e}"
+            raise ValueError(msg) from e
 
     def _convert_v2_to_v1_format(
         self, v2_response: dict[str, Any], space_key: str

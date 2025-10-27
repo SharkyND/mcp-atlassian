@@ -73,7 +73,8 @@ class WorkspacesMixin(BitbucketClient):
         except Exception as e:
             error_msg = f"Error getting workspaces: {str(e)}"
             logger.error(error_msg)
-            raise Exception(f"Error getting workspaces: {str(e)}") from e
+            msg = f"Error getting workspaces: {str(e)}"
+            raise Exception(msg) from e
 
     def get_workspace_by_id(self, workspace_id: str) -> BitbucketWorkspace | None:
         """
@@ -101,4 +102,5 @@ class WorkspacesMixin(BitbucketClient):
         except Exception as e:
             error_msg = f"Error getting workspace {workspace_id}: {str(e)}"
             logger.error(error_msg)
-            raise Exception(f"Error getting workspace: {str(e)}") from e
+            msg = f"Error getting workspace: {str(e)}"
+            raise Exception(msg) from e
