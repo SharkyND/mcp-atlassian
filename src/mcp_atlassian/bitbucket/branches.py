@@ -59,7 +59,8 @@ class BranchesMixin(BitbucketClient):
         except Exception as e:
             error_msg = f"Error getting branches for {workspace}/{repository}: {str(e)}"
             logger.error(error_msg)
-            raise Exception(f"Error getting branches: {str(e)}") from e
+            msg = f"Error getting branches: {str(e)}"
+            raise Exception(msg) from e
 
     def get_branches(
         self,
@@ -112,7 +113,8 @@ class BranchesMixin(BitbucketClient):
         except Exception as e:
             error_msg = f"Error getting brnches for {workspace}/{repository}: {str(e)}"
             logger.error(error_msg)
-            raise Exception(f"Error getting branches: {str(e)}") from e
+            msg = f"Error getting branches: {str(e)}"
+            raise Exception(msg) from e
 
     def get_default_branch(
         self, workspace: str, repository: str
@@ -180,7 +182,8 @@ class BranchesMixin(BitbucketClient):
                 f"Error getting default branch for {workspace}/{repository}: {str(e)}"
             )
             logger.error(error_msg)
-            raise Exception(f"Error getting default branch: {str(e)}") from e
+            msg = f"Error getting default branch: {str(e)}"
+            raise Exception(msg) from e
 
     def get_commits(
         self,
@@ -227,7 +230,8 @@ class BranchesMixin(BitbucketClient):
         except Exception as e:
             error_msg = f"Error getting commits for {workspace}/{repository} : {str(e)}"
             logger.error(error_msg)
-            raise Exception(f"Error getting commits: {str(e)}") from e
+            msg = f"Error getting commits: {str(e)}"
+            raise Exception(msg) from e
 
     def get_commit_changes(
         self,
@@ -282,7 +286,8 @@ class BranchesMixin(BitbucketClient):
                 f"Error getting commit changes for {workspace}/{repository}: {str(e)}"
             )
             logger.error(error_msg)
-            raise Exception(f"Error getting commit changes: {str(e)}") from e
+            msg = f"Error getting commit changes: {str(e)}"
+            raise Exception(msg) from e
 
     def create_branch(
         self, workspace: str, repository: str, branch_data: dict[str, Any]
@@ -337,4 +342,5 @@ class BranchesMixin(BitbucketClient):
         except Exception as e:
             error_msg = f"Error creating branch in {workspace}/{repository}: {str(e)}"
             logger.error(error_msg)
-            raise Exception(f"Error creating branch: {str(e)}") from e
+            msg = f"Error creating branch: {str(e)}"
+            raise Exception(msg) from e

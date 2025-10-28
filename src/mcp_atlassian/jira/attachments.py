@@ -105,7 +105,6 @@ class AttachmentsMixin(JiraClient, AttachmentsOperationsProto):
 
         # Process attachments
         attachments = []
-        results = []
 
         # Extract attachments from the API response
         attachment_data = issue_data.get("fields", {}).get("attachment", [])
@@ -196,7 +195,7 @@ class AttachmentsMixin(JiraClient, AttachmentsOperationsProto):
 
             # Use the Jira API to upload the file
             filename = os.path.basename(file_path)
-            with open(file_path, "rb") as file:
+            with open(file_path, "rb"):
                 attachment = self.jira.add_attachment(
                     issue_key=issue_key, filename=file_path
                 )

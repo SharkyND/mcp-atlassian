@@ -65,7 +65,8 @@ class PullRequestsMixin(BitbucketClient):
                 f"Error getting pull requests for {workspace}/{repository}: {str(e)}"
             )
             logger.error(error_msg)
-            raise Exception(f"Error getting pull requests: {str(e)}") from e
+            msg = f"Error getting pull requests: {str(e)}"
+            raise Exception(msg) from e
 
     def get_pull_request(
         self, workspace: str, repository: str, pull_request_id: int
@@ -106,7 +107,8 @@ class PullRequestsMixin(BitbucketClient):
         except Exception as e:
             error_msg = f"Error getting pull request {pull_request_id} for {workspace}/{repository}: {str(e)}"
             logger.error(error_msg)
-            raise Exception(f"Error getting pull request: {str(e)}") from e
+            msg = f"Error getting pull request: {str(e)}"
+            raise Exception(msg) from e
 
     def get_pull_request_commits(
         self, workspace: str, repository: str, pull_request_id: int
@@ -147,7 +149,8 @@ class PullRequestsMixin(BitbucketClient):
         except Exception as e:
             error_msg = f"Error getting commits for PR {pull_request_id} in {workspace}/{repository}: {str(e)}"
             logger.error(error_msg)
-            raise Exception(f"Error getting PR commits: {str(e)}") from e
+            msg = f"Error getting PR commits: {str(e)}"
+            raise Exception(msg) from e
 
     def get_pull_requests(
         self, workspace: str, repository: str, state: str = "OPEN"
@@ -183,7 +186,8 @@ class PullRequestsMixin(BitbucketClient):
                 f"Error getting pull requests in {workspace}/{repository}: {str(e)}"
             )
             logger.error(error_msg)
-            raise Exception(f"Error getting PRs: {str(e)}") from e
+            msg = f"Error getting PRs: {str(e)}"
+            raise Exception(msg) from e
 
     def get_pull_request_activities(
         self, workspace: str, repository: str, pull_request_id: int
@@ -223,7 +227,8 @@ class PullRequestsMixin(BitbucketClient):
         except Exception as e:
             error_msg = f"Error getting comments for PR {pull_request_id} in {workspace}/{repository}: {str(e)}"
             logger.error(error_msg)
-            raise Exception(f"Error getting PR comments: {str(e)}") from e
+            msg = f"Error getting PR comments: {str(e)}"
+            raise Exception(msg) from e
 
     def create_pull_request(
         self, workspace: str, repository: str, pr_data: dict[str, Any]
@@ -263,7 +268,8 @@ class PullRequestsMixin(BitbucketClient):
                 f"Error creating pull request in {workspace}/{repository}: {str(e)}"
             )
             logger.error(error_msg)
-            raise Exception(f"Error creating pull request: {str(e)}") from e
+            msg = f"Error creating pull request: {str(e)}"
+            raise Exception(msg) from e
 
     def add_pull_request_comment(
         self,
@@ -308,7 +314,8 @@ class PullRequestsMixin(BitbucketClient):
         except Exception as e:
             error_msg = f"Error adding comment to PR {pull_request_id} in {workspace}/{repository}: {str(e)}"
             logger.error(error_msg)
-            raise Exception(f"Error adding PR comment: {str(e)}") from e
+            msg = f"Error adding PR comment: {str(e)}"
+            raise Exception(msg) from e
 
     def add_pull_request_blocker_comment(
         self,
@@ -354,4 +361,5 @@ class PullRequestsMixin(BitbucketClient):
         except Exception as e:
             error_msg = f"Error adding blocker comment to PR {pull_request_id} in {workspace}/{repository}: {str(e)}"
             logger.error(error_msg)
-            raise Exception(f"Error blocker adding PR comment: {str(e)}") from e
+            msg = f"Error blocker adding PR comment: {str(e)}"
+            raise Exception(msg) from e

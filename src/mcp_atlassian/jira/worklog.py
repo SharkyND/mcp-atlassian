@@ -40,7 +40,7 @@ class WorklogMixin(JiraClient):
         }
 
         # Regular expression to find time components like 1w, 2d, 3h, 4m
-        pattern = r"(\d+)([wdhm])"
+        pattern = r"(\d{1,5})([wdhm])"  # Limit to max 5 digits for safety
         matches = re.findall(pattern, time_spent)
 
         for value, unit in matches:
@@ -152,7 +152,8 @@ class WorklogMixin(JiraClient):
             }
         except Exception as e:
             logger.error(f"Error adding worklog to issue {issue_key}: {str(e)}")
-            raise Exception(f"Error adding worklog: {str(e)}") from e
+            msg = f"Error adding worklog: {str(e)}"
+            raise Exception(msg) from e
 
     def get_worklog(self, issue_key: str) -> dict[str, Any]:
         """
@@ -231,4 +232,5 @@ class WorklogMixin(JiraClient):
             return worklogs
         except Exception as e:
             logger.error(f"Error getting worklogs for issue {issue_key}: {str(e)}")
-            raise Exception(f"Error getting worklogs: {str(e)}") from e
+            msg = f"Error getting worklogs: {str(e)}"
+            raise Exception(msg) from e

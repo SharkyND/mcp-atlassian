@@ -10,6 +10,8 @@ from ..models.confluence import ConfluencePage
 from .client import ConfluenceClient
 from .v2_adapter import ConfluenceV2Adapter
 
+FULL_EXCEPTION_DETAILS_MSG = "Full exception details:"
+
 logger = logging.getLogger("mcp-atlassian")
 
 
@@ -106,7 +108,8 @@ class PagesMixin(ConfluenceClient):
             logger.error(
                 f"Error retrieving page content for page ID {page_id}: {str(e)}"
             )
-            raise Exception(f"Error retrieving page content: {str(e)}") from e
+            msg = f"Error retrieving page content: {str(e)}"
+            raise Exception(msg) from e
 
     def get_page_ancestors(self, page_id: str) -> list[ConfluencePage]:
         """
@@ -154,7 +157,7 @@ class PagesMixin(ConfluenceClient):
                 raise http_err
         except Exception as e:
             logger.error(f"Error fetching ancestors for page {page_id}: {str(e)}")
-            logger.debug("Full exception details:", exc_info=True)
+            logger.debug(FULL_EXCEPTION_DETAILS_MSG, exc_info=True)
             return []
 
     def get_page_by_title(
@@ -223,7 +226,7 @@ class PagesMixin(ConfluenceClient):
         except Exception as e:  # noqa: BLE001 - Intentional fallback with full logging
             logger.error(f"Unexpected error fetching page: {str(e)}")
             # Log the full traceback at debug level for troubleshooting
-            logger.debug("Full exception details:", exc_info=True)
+            logger.debug(FULL_EXCEPTION_DETAILS_MSG, exc_info=True)
             return None
 
     def get_space_pages(
@@ -360,9 +363,8 @@ class PagesMixin(ConfluenceClient):
             logger.error(
                 f"Error creating page '{title}' in space {space_key}: {str(e)}"
             )
-            raise Exception(
-                f"Failed to create page '{title}' in space {space_key}: {str(e)}"
-            ) from e
+            msg = f"Failed to create page '{title}' in space {space_key}: {str(e)}"
+            raise Exception(msg) from e
 
     def update_page(
         self,
@@ -418,7 +420,7 @@ class PagesMixin(ConfluenceClient):
                 logger.debug(
                     f"Using v2 API for OAuth authentication to update page '{page_id}'"
                 )
-                response = v2_adapter.update_page(
+                v2_adapter.update_page(
                     page_id=page_id,
                     title=title,
                     body=final_body,
@@ -448,7 +450,8 @@ class PagesMixin(ConfluenceClient):
             return self.get_page_content(page_id)
         except Exception as e:
             logger.error(f"Error updating page {page_id}: {str(e)}")
-            raise Exception(f"Failed to update page {page_id}: {str(e)}") from e
+            msg = f"Failed to update page {page_id}: {str(e)}"
+            raise Exception(msg) from e
 
     def get_page_children(
         self,
@@ -523,7 +526,7 @@ class PagesMixin(ConfluenceClient):
 
         except Exception as e:
             logger.error(f"Error fetching child pages for page {page_id}: {str(e)}")
-            logger.debug("Full exception details:", exc_info=True)
+            logger.debug(FULL_EXCEPTION_DETAILS_MSG, exc_info=True)
             return []
 
     def delete_page(self, page_id: str) -> bool:
@@ -577,4 +580,5 @@ class PagesMixin(ConfluenceClient):
 
         except Exception as e:
             logger.error(f"Error deleting page {page_id}: {str(e)}")
-            raise Exception(f"Failed to delete page {page_id}: {str(e)}") from e
+            msg = f"Failed to delete page {page_id}: {str(e)}"
+            raise Exception(msg) from e
