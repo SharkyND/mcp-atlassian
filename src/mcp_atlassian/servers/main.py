@@ -14,17 +14,16 @@ from starlette.middleware import Middleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from mcp_atlassian.bitbucket import BitbucketFetcher
-from mcp_atlassian.bitbucket.config import BitbucketConfig
-from mcp_atlassian.confluence import ConfluenceFetcher
-from mcp_atlassian.confluence.config import ConfluenceConfig
-from mcp_atlassian.jira import JiraFetcher
-from mcp_atlassian.jira.config import JiraConfig
-from mcp_atlassian.utils.environment import get_available_services
-from mcp_atlassian.utils.io import is_read_only_mode
-from mcp_atlassian.utils.logging import mask_sensitive
-from mcp_atlassian.utils.tools import get_enabled_tools, should_include_tool
-
+from ..bitbucket import BitbucketFetcher
+from ..bitbucket.config import BitbucketConfig
+from ..confluence import ConfluenceFetcher
+from ..confluence.config import ConfluenceConfig
+from ..jira import JiraFetcher
+from ..jira.config import JiraConfig
+from ..utils.environment import get_available_services
+from ..utils.io import is_read_only_mode
+from ..utils.logging import mask_sensitive
+from ..utils.tools import get_enabled_tools, should_include_tool
 from .bitbucket import bitbucket_mcp
 from .confluence import confluence_mcp
 from .context import MainAppContext
@@ -87,6 +86,20 @@ async def main_lifespan(app: FastMCP[MainAppContext]) -> AsyncIterator[dict]:
             logger.info(
                 "Bitbucket configuration loaded and authentication is configured."
             )
+
+            # Eagerly initialize Bitbucket code search cleanup worker
+            # This ensures expired repository clones are cleaned up even if no Bitbucket operations are requested
+            try:
+                from mcp_atlassian.bitbucket.client import BitbucketClient
+
+                BitbucketClient._ensure_code_search_initialized()
+                logger.debug(
+                    "Bitbucket code search cleanup worker initialized during server startup"
+                )
+            except Exception as cleanup_exc:
+                logger.warning(
+                    f"Failed to initialize Bitbucket cleanup worker during startup: {cleanup_exc}"
+                )
         except Exception as e:
             logger.error(f"Failed to load Bitbucket configuration: {e}", exc_info=True)
 

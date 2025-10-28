@@ -183,3 +183,16 @@ secrets:
     # scope: ""
     # cloudId: ""
     # accessToken: ""
+
+# Storage configuration for sharing the clone directory and cache data.
+# This must use a storage class that allows ReadWriteMany access.
+persistence:
+  enabled: false
+  size: 8Gi
+  accessModes:
+    - ReadWriteMany
+  storageClassName: "efs-sc"
+  # selectorLabels: {}
+  # extraPvcLabels: {}
+  # annotations: {}
+  # finalizers: []

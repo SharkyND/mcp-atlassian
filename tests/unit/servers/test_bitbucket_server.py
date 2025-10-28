@@ -85,6 +85,7 @@ success_cases = [
             "file_path": "README.md",
             "branch": "main",
             "content": "hello world",
+            "total_lines": 1,
         },
     },
     {

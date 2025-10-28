@@ -4,13 +4,17 @@ A Helm chart for deploying the MCP (Model Context Protocol) Atlassian server, wh
 
 ## Description
 
-This chart deploys the MCP Atlassian server on a Kubernetes cluster using Helm. The MCP Atlassian server enables AI assistants and applications to interact with Atlassian services (Jira and Confluence) through the Model Context Protocol.
+This chart deploys the MCP Atlassian server on a Kubernetes cluster using Helm.
+The MCP Atlassian server enables AI assistants and applications to interact with Atlassian services through the Model Context Protocol.
+In order to optimize disk usage and maintain consistent performance when executing code search operations, it implements an on-disk LRU cache. This cache can be
+shared among deployments in a HA scenario using persistence settings.
+
 
 ## Prerequisites
 
 - Kubernetes 1.19+
 - Helm 3.2.0+
-- Access to Atlassian services (Jira and/or Confluence)
+- Access to Atlassian services
 
 ### Install the chart
 
@@ -28,6 +32,7 @@ helm install mcp-atlassian oci://ghcr.io/sharkynd/charts/mcp-atlassian --namespa
 ## Configuration
 
 The following table lists the configurable parameters and their default values.
+
 
 ### Application Configuration
 
@@ -77,14 +82,14 @@ The following table lists the configurable parameters and their default values.
 
 ### Security Configuration
 
-| Parameter | Description | Default |
-|-----------|-------------|---------|
-| `serviceAccount.create` | Create service account | `true` |
-| `serviceAccount.automount` | Automount service account token | `true` |
-| `serviceAccount.annotations` | Service account annotations | `{}` |
-| `serviceAccount.name` | Service account name | `""` |
-| `podSecurityContext` | Pod security context | `{}` |
-| `securityContext` | Container security context | `{}` |
+| Parameter | Description                                                                                                      | Default |
+|-----------|------------------------------------------------------------------------------------------------------------------|---------|
+| `serviceAccount.create` | Create service account. When persistence is enabled, this has to be true to allow IRSA to access shared storage. | `true` |
+| `serviceAccount.automount` | Automount service account token                                                                                  | `true` |
+| `serviceAccount.annotations` | Service account annotations                                                                                      | `{}` |
+| `serviceAccount.name` | Service account name                                                                                             | `""` |
+| `podSecurityContext` | Pod security context                                                                                             | `{}` |
+| `securityContext` | Container security context                                                                                       | `{}` |
 
 ### Resource Configuration
 
@@ -114,6 +119,16 @@ The following table lists the configurable parameters and their default values.
 | `readinessProbe.httpGet.port` | Readiness probe port | `http` |
 | `readinessProbe.initialDelaySeconds` | Readiness probe initial delay | `5` |
 | `readinessProbe.periodSeconds` | Readiness probe period | `5` |
+
+### Shared Cache Configuration
+
+| Parameter                            | Description                                                                                                                                                                 | Default         |
+|--------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------|
+| `persistence.enabled`                | Enable/disable shared storage for cache. When disabled, each pod maintains its own cache. Cache directory can be set via environment variables (default: /tmp/cloned_repos) | `false`         |
+| `persistence.size`                   | Size of the shared storage volume.                                                                                                                                          | `8Gi`           |
+| `persistence.accessMode`             | How many pods are allowed to access the shared volume. This must always be ReadWriteMany.                                                                                   | `ReadWriteMany` |
+| `persistence.storageClassName`       | Storage class to use.                                                                                                                                                       | `efs-sc`        |
+
 
 ## Authentication
 
@@ -195,6 +210,10 @@ autoscaling:
   minReplicas: 2
   maxReplicas: 10
   targetCPUUtilizationPercentage: 70
+
+persistence:
+  enabled: true
+  storageClassName: efs-sc # or the name of your storage class that allows ReadWriteMany access mode.
 ```
 
 ### High Availability Deployment with Sticky Sessions
@@ -253,7 +272,14 @@ resources:
   requests:
     cpu: 100m
     memory: 128Mi
+
+# Enable sharing cache storage among all replicas.
+persistence:
+  enabled: true
+  storageClassName: efs-sc # or the name of your storage class that allows ReadWriteMany access mode.
 ```
+
+
 ### Autoscaling Deployment
 
 ```yaml
@@ -274,6 +300,11 @@ resources:
   requests:
     cpu: 100m
     memory: 128Mi
+
+# Enable sharing cache storage among all replicas.
+persistence:
+  enabled: true
+  storageClassName: efs-sc # or the name of your storage class that allows ReadWriteMany access mode.
 ```
 
 ### High-Security Deployment

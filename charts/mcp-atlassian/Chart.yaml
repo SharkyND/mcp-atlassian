@@ -19,6 +19,7 @@ keywords:
   - jira
   - confluence
   - model-context-protocol
+  - bitbucket
 
 annotations:
   category: Integration

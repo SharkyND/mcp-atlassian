@@ -359,7 +359,7 @@ This configuration is for when you use the server's built-in OAuth client and ha
 > - For the Standard Flow:
 >   - `ATLASSIAN_OAUTH_CLOUD_ID` is obtained from the `--oauth-setup` wizard output or is known for your instance.
 >   - Other `ATLASSIAN_OAUTH_*` client variables are from your OAuth app in the Atlassian Developer Console.
->   - `JIRA_URL` and `CONFLUENCE_URL` for your Cloud instances are always required.
+>   - `JIRA_URL`, `CONFLUENCE_URL` and `BITBUCKET_URL` for your Cloud instances are always required.
 >   - The volume mount (`-v .../.mcp-atlassian:/home/app/.mcp-atlassian`) is crucial for persisting the OAuth tokens obtained by the wizard, enabling automatic refresh.
 
 **Example for Pre-existing Access Token (BYOT - Bring Your Own Token):**
@@ -900,6 +900,7 @@ Here's a complete example of setting up multi-user authentication with streamabl
 - `create_branch`: Create a new branch in a repository
 - `add_pull_request_blocker_comment`: Add a blocking comment to a pull request
 - `add_pull_request_comment`: Add a regular comment to a pull request
+- `code_search`: Search for a code snippet and its surrounding context inside a repository
 
 
 <details> <summary>View All Tools</summary>
@@ -918,7 +919,7 @@ Here's a complete example of setting up multi-user authentication with streamabl
 |           | `jira_get_sprints_from_board` |                                | `get_pull_request`                 |
 |           | `jira_get_sprint_issues`      |                                | `get_commit_changes`               |
 |           | `jira_get_issue_link_types`   |                                | `get_commits`                      |
-|           | `jira_batch_get_changelogs`*  |                                |                                    |
+|           | `jira_batch_get_changelogs`*  |                                | `code_search`                      |
 |           | `jira_get_user_profile`       |                                |                                    |
 |           | `jira_download_attachments`   |                                |                                    |
 |           | `jira_get_project_versions`   |                                |                                    |
