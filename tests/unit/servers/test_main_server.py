@@ -160,3 +160,159 @@ class TestUserTokenMiddleware:
 
         # Verify the app was called with the modified scope
         middleware.app.assert_called_once()
+
+    @pytest.mark.anyio
+    async def test_username_requirement_disabled_by_default(self, middleware):
+        """Test that username requirement is disabled by default."""
+        scope = {
+            "type": "http",
+            "path": "/mcp",
+            "method": "POST",
+            "headers": [
+                (b"authorization", b"Bearer test-token"),
+            ],
+            "state": {},
+        }
+
+        async def mock_receive():
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        async def mock_send(message):
+            pass
+
+        middleware.app = AsyncMock()
+        await middleware(scope, mock_receive, mock_send)
+
+        # Should proceed normally without username requirement
+        middleware.app.assert_called_once()
+
+    @pytest.mark.anyio
+    async def test_username_requirement_enabled_with_username(
+        self, middleware, monkeypatch
+    ):
+        """Test username requirement passes when username header is present."""
+        monkeypatch.setenv("REQUIRE_USERNAME", "true")
+
+        scope = {
+            "type": "http",
+            "path": "/mcp",
+            "method": "POST",
+            "headers": [
+                (b"authorization", b"Bearer test-token"),
+                (b"x-atlassian-jira-username", b"test-user"),
+            ],
+            "state": {},
+        }
+
+        async def mock_receive():
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        async def mock_send(message):
+            pass
+
+        middleware.app = AsyncMock()
+        await middleware(scope, mock_receive, mock_send)
+
+        # Should proceed normally with username present
+        middleware.app.assert_called_once()
+
+    @pytest.mark.anyio
+    async def test_username_requirement_enabled_without_username(
+        self, middleware, monkeypatch
+    ):
+        """Test username requirement fails when username header is missing."""
+        monkeypatch.setenv("REQUIRE_USERNAME", "true")
+
+        scope = {
+            "type": "http",
+            "path": "/mcp",
+            "method": "POST",
+            "headers": [
+                (b"authorization", b"Bearer test-token"),
+            ],
+            "state": {},
+        }
+
+        async def mock_receive():
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        sent_messages = []
+
+        async def mock_send(message):
+            sent_messages.append(message)
+
+        middleware.app = AsyncMock()
+        await middleware(scope, mock_receive, mock_send)
+
+        # Should not call the app
+        middleware.app.assert_not_called()
+
+        # Should send 400 error response
+        assert len(sent_messages) >= 2
+        response_start = sent_messages[0]
+        assert response_start["type"] == "http.response.start"
+        assert response_start["status"] == 400
+
+        response_body = sent_messages[1]
+        assert response_body["type"] == "http.response.body"
+        assert b"Username required" in response_body["body"]
+
+    @pytest.mark.anyio
+    async def test_username_requirement_with_confluence_username(
+        self, middleware, monkeypatch
+    ):
+        """Test username requirement accepts Confluence username header."""
+        monkeypatch.setenv("REQUIRE_USERNAME", "true")
+
+        scope = {
+            "type": "http",
+            "path": "/mcp",
+            "method": "POST",
+            "headers": [
+                (b"authorization", b"Bearer test-token"),
+                (b"x-atlassian-confluence-username", b"confluence-user"),
+            ],
+            "state": {},
+        }
+
+        async def mock_receive():
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        async def mock_send(message):
+            pass
+
+        middleware.app = AsyncMock()
+        await middleware(scope, mock_receive, mock_send)
+
+        # Should proceed normally with Confluence username present
+        middleware.app.assert_called_once()
+
+    @pytest.mark.anyio
+    async def test_username_requirement_with_bitbucket_username(
+        self, middleware, monkeypatch
+    ):
+        """Test username requirement accepts Bitbucket username header."""
+        monkeypatch.setenv("REQUIRE_USERNAME", "true")
+
+        scope = {
+            "type": "http",
+            "path": "/mcp",
+            "method": "POST",
+            "headers": [
+                (b"authorization", b"Bearer test-token"),
+                (b"x-atlassian-bitbucket-username", b"bitbucket-user"),
+            ],
+            "state": {},
+        }
+
+        async def mock_receive():
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        async def mock_send(message):
+            pass
+
+        middleware.app = AsyncMock()
+        await middleware(scope, mock_receive, mock_send)
+
+        # Should proceed normally with Bitbucket username present
+        middleware.app.assert_called_once()

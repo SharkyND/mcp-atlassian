@@ -438,6 +438,7 @@ class UserTokenMiddleware:
                 if confluence_user_header
                 else None
             )
+
             confluence_url_header = headers.get(b"x-atlassian-confluence-url")
             confluence_url_header_str = (
                 confluence_url_header.decode("latin-1")
@@ -459,6 +460,30 @@ class UserTokenMiddleware:
                 if bitbucket_user_header
                 else None
             )
+
+            # Check username requirement - validate that at least one username is provided
+            if os.environ.get("REQUIRE_USERNAME") == "true":
+                has_username = any([jira_username, confluence_user, bitbucket_user])
+                if not has_username:
+                    logger.error(
+                        "Username validation failed: REQUIRE_USERNAME is enabled but no username header provided"
+                    )
+                    error_response = json.dumps(
+                        {
+                            "error": "Username required",
+                            "message": "Username must be provided in headers when REQUIRE_USERNAME is enabled. Use X-Atlassian-Jira-Username, X-Atlassian-Confluence-Username, or X-Atlassian-Bitbucket-Username headers.",
+                        }
+                    ).encode()
+
+                    await send(
+                        {
+                            "type": "http.response.start",
+                            "status": 400,
+                            "headers": [(b"content-type", b"application/json")],
+                        }
+                    )
+                    await send({"type": "http.response.body", "body": error_response})
+                    return
             bitbucket_url_header = headers.get(b"x-atlassian-bitbucket-url")
             bitbucket_url_header_str = (
                 bitbucket_url_header.decode("latin-1") if bitbucket_url_header else None
@@ -592,7 +617,6 @@ class UserTokenMiddleware:
                     "UserTokenMiddleware: No cloudId header provided, "
                     "will use global config"
                 )
-
             service_headers = {}
             if jira_token_header_str:
                 service_headers["X-Atlassian-Jira-Personal-Token"] = (

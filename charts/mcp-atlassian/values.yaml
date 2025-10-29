@@ -160,6 +160,9 @@ env:
   # Optional: Read-only mode
   # READ_ONLY_MODE: "false"
 
+  # Optional: Require username in request headers
+  # REQUIRE_USERNAME: "false"
+
   # Optional: Custom headers
   # JIRA_CUSTOM_HEADERS: ""
   # CONFLUENCE_CUSTOM_HEADERS: ""

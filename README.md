@@ -862,6 +862,44 @@ Here's a complete example of setting up multi-user authentication with streamabl
 
 </details>
 
+## Security & Monitoring
+
+### Username Requirement
+
+Enforce username headers in requests by setting `REQUIRE_USERNAME=true`:
+
+```bash
+# Environment variable
+REQUIRE_USERNAME=true
+
+# Helm chart
+env:
+  REQUIRE_USERNAME: "true"
+```
+
+When enabled, requests must include at least one username header:
+- `X-Atlassian-Jira-Username`
+- `X-Atlassian-Confluence-Username`
+- `X-Atlassian-Bitbucket-Username`
+
+Returns 400 error if missing when enabled.
+
+### Monitoring & Metrics
+
+**Prometheus Metrics** available at `/metrics` endpoint:
+- Request counts, duration, errors by service
+- User activity tracking (when username headers provided)
+- Pod-specific metrics for Kubernetes deployments
+
+**Health Checks**:
+- `/healthz` - Basic health status
+- `/readyz` - Kubernetes readiness probe
+
+**Kubernetes Integration**:
+- Helm chart with monitoring configuration
+- Grafana dashboard provisioning via ConfigMaps
+- ServiceMonitor for Prometheus Operator
+
 ## Tools
 
 ### Key Tools
