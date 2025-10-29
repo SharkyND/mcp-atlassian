@@ -183,3 +183,41 @@ secrets:
     # scope: ""
     # cloudId: ""
     # accessToken: ""
+
+# Monitoring and metrics configuration
+monitoring:
+  # Enable Prometheus metrics collection
+  # Requires prometheus-client package (included by default)
+  enabled: true
+
+  # ServiceMonitor configuration for Prometheus Operator
+  serviceMonitor:
+    # Enable ServiceMonitor creation for Prometheus discovery
+    enabled: false
+
+    # Scraping interval for metrics collection
+    interval: 30s
+
+    # Timeout for each scrape request
+    scrapeTimeout: 10s
+
+    # Additional labels for ServiceMonitor
+    labels: {}
+      # prometheus: kube-prometheus
+
+    # Additional annotations for ServiceMonitor
+    annotations: {}
+
+    # Metric relabeling rules (optional)
+    # Used to modify metrics before storing in Prometheus
+    metricRelabelings: []
+    # - sourceLabels: [__name__]
+    #   targetLabel: __name__
+    #   replacement: mcp_${1}
+
+    # Relabeling rules (optional)
+    # Used to modify target labels before scraping
+    relabelings: []
+    # - sourceLabels: [__meta_kubernetes_pod_name]
+    #   targetLabel: pod
+    #   replacement: ${1}
