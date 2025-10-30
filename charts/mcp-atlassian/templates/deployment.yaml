@@ -13,10 +13,15 @@ spec:
       {{- include "mcp-atlassian.selectorLabels" . | nindent 6 }}
   template:
     metadata:
-      {{- with .Values.podAnnotations }}
       annotations:
+        {{- if .Values.monitoring.enabled }}
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "{{ .Values.service.targetPort }}"
+        prometheus.io/path: "/metrics"
+        {{- end }}
+        {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
-      {{- end }}
+        {{- end }}
       labels:
         {{- include "mcp-atlassian.selectorLabels" . | nindent 8 }}
         {{- with .Values.podLabels }}
@@ -87,6 +92,11 @@ spec:
                   name: {{ include "mcp-atlassian.fullname" . }}-secrets
                   key: oauth-client-secret
             {{- end }}
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.name
           livenessProbe:
             {{- toYaml .Values.livenessProbe | nindent 12 }}
           readinessProbe:
