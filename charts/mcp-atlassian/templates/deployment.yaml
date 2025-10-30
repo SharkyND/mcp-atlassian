@@ -92,6 +92,11 @@ spec:
                   name: {{ include "mcp-atlassian.fullname" . }}-secrets
                   key: oauth-client-secret
             {{- end }}
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.name
           livenessProbe:
             {{- toYaml .Values.livenessProbe | nindent 12 }}
           readinessProbe:

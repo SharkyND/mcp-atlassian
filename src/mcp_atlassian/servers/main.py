@@ -37,7 +37,7 @@ from .jira import jira_mcp
 logger = logging.getLogger("mcp-atlassian.server.main")
 
 # Initialize metrics immediately when module is loaded
-pod_name = os.environ.get("HOSTNAME", "mcp-atlassian-unknown")
+pod_name = os.environ.get("POD_NAME")
 initialize_metrics(pod_name)
 logger.info(f"Metrics collection initialized for pod: {pod_name}")
 
@@ -400,6 +400,34 @@ class UserTokenMiddleware:
             )
             user_agent = user_agent.lower() if user_agent else None
 
+            # get username if present
+            username_header = headers.get(b"x-atlassian-username")
+            username = username_header.decode("latin-1") if username_header else None
+            username = username.lower() if username else None
+
+            # Check username requirement - validate that at least one username is provided
+            if os.environ.get("REQUIRE_USERNAME") == "true":
+                if not username:
+                    logger.error(
+                        "Username validation failed: REQUIRE_USERNAME is enabled but no username header provided"
+                    )
+                    error_response = json.dumps(
+                        {
+                            "error": "Username required",
+                            "message": '"X-Atlassian-Username" must be provided in headers when REQUIRE_USERNAME is enabled',
+                        }
+                    ).encode()
+
+                    await send(
+                        {
+                            "type": "http.response.start",
+                            "status": 400,
+                            "headers": [(b"content-type", b"application/json")],
+                        }
+                    )
+                    await send({"type": "http.response.body", "body": error_response})
+                    return
+
             # Convert bytes to strings (ASGI headers are always bytes)
             auth_header = headers.get(b"authorization")
             auth_header_str = auth_header.decode("latin-1") if auth_header else None
@@ -413,10 +441,6 @@ class UserTokenMiddleware:
             jira_token_header = headers.get(b"x-atlassian-jira-personal-token")
             jira_token_header_str = (
                 jira_token_header.decode("latin-1") if jira_token_header else None
-            )
-            jira_username_header = headers.get(b"x-atlassian-jira-username")
-            jira_username = (
-                jira_username_header.decode("latin-1") if jira_username_header else None
             )
 
             jira_url_header = headers.get(b"x-atlassian-jira-url")
@@ -432,12 +456,7 @@ class UserTokenMiddleware:
                 if confluence_token_header
                 else None
             )
-            confluence_user_header = headers.get(b"x-atlassian-confluence-username")
-            confluence_user = (
-                confluence_user_header.decode("latin-1")
-                if confluence_user_header
-                else None
-            )
+
             confluence_url_header = headers.get(b"x-atlassian-confluence-url")
             confluence_url_header_str = (
                 confluence_url_header.decode("latin-1")
@@ -453,12 +472,7 @@ class UserTokenMiddleware:
                 if bitbucket_token_header
                 else None
             )
-            bitbucket_user_header = headers.get(b"x-atlassian-bitbucket-username")
-            bitbucket_user = (
-                bitbucket_user_header.decode("latin-1")
-                if bitbucket_user_header
-                else None
-            )
+
             bitbucket_url_header = headers.get(b"x-atlassian-bitbucket-url")
             bitbucket_url_header_str = (
                 bitbucket_url_header.decode("latin-1") if bitbucket_url_header else None
@@ -526,35 +540,35 @@ class UserTokenMiddleware:
                         and jira_url_header_str
                     ):
                         service_to_use = "jira"
-                        username_to_use = jira_username
+                        username_to_use = username
                     elif (
                         activity_type.startswith("confluence_")
                         and confluence_token_header_str
                         and confluence_url_header_str
                     ):
                         service_to_use = "confluence"
-                        username_to_use = confluence_user
+                        username_to_use = username
                     elif (
                         activity_type.startswith("bitbucket_")
                         and bitbucket_token_header_str
                         and bitbucket_url_header_str
                     ):
                         service_to_use = "bitbucket"
-                        username_to_use = bitbucket_user
+                        username_to_use = username
 
                 # If no specific service determined from activity type, use first available service
                 if not service_to_use:
                     if jira_token_header_str and jira_url_header_str:
                         service_to_use = "jira"
-                        username_to_use = jira_username
+                        username_to_use = username
                         activity_type = activity_type or "jira_access"
                     elif confluence_token_header_str and confluence_url_header_str:
                         service_to_use = "confluence"
-                        username_to_use = confluence_user
+                        username_to_use = username
                         activity_type = activity_type or "confluence_access"
                     elif bitbucket_token_header_str and bitbucket_url_header_str:
                         service_to_use = "bitbucket"
-                        username_to_use = bitbucket_user
+                        username_to_use = username
                         activity_type = activity_type or "bitbucket_access"
 
                 # Track the activity for the determined service
@@ -592,7 +606,6 @@ class UserTokenMiddleware:
                     "UserTokenMiddleware: No cloudId header provided, "
                     "will use global config"
                 )
-
             service_headers = {}
             if jira_token_header_str:
                 service_headers["X-Atlassian-Jira-Personal-Token"] = (
