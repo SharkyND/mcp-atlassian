@@ -166,105 +166,106 @@ def no_fetcher_test_confluence_mcp(mock_base_confluence_config):
     return test_mcp
 
 
-@pytest.fixture
-def mock_request():
-    """Provides a mock Starlette Request object with a state."""
-    request = MagicMock(spec=Request)
-    request.state = MagicMock()
-    return request
+# Removed unused mock_request fixture
 
 
-class DirectToolCaller:
-    """Direct tool caller that bypasses FastMCP transport to avoid hanging."""
-
-    def __init__(self, mock_confluence_fetcher):
-        self.mock_confluence_fetcher = mock_confluence_fetcher
-
-    async def call_tool(self, tool_name: str, parameters: dict):
-        """Call server tools directly without FastMCP transport."""
-        from fastmcp.server.context import Context
-        from starlette.requests import Request
-
-        from src.mcp_atlassian.servers.confluence import (
-            add_comment,
-            add_label,
-            create_page,
-            delete_page,
-            get_comments,
-            get_labels,
-            get_page,
-            get_page_children,
-            search,
-            search_user,
-            update_page,
-        )
-
-        # Create mock context
-        mock_context = MagicMock(spec=Context)
-        mock_request = MagicMock(spec=Request)
-        mock_request.state = MagicMock()
-        mock_context.session = {"request": mock_request}
-
-        # Map tool names to functions
-        tools = {
-            "confluence_search": search.fn,
-            "confluence_get_page": get_page.fn,
-            "confluence_get_page_children": get_page_children.fn,
-            "confluence_create_page": create_page.fn,
-            "confluence_update_page": update_page.fn,
-            "confluence_delete_page": delete_page.fn,
-            "confluence_add_comment": add_comment.fn,
-            "confluence_get_comments": get_comments.fn,
-            "confluence_add_label": add_label.fn,
-            "confluence_get_labels": get_labels.fn,
-            "confluence_search_user": search_user.fn,
-        }
-
-        if tool_name not in tools:
-            raise ValueError(f"Unknown tool: {tool_name}")
-
-        tool_fn = tools[tool_name]
-
-        # Mock the result format to match FastMCP response structure
-        class MockContent:
-            def __init__(self, text):
-                self.text = text
-                self.type = "text"
-
-        class MockResponse:
-            def __init__(self, text):
-                self.content = [MockContent(text)]
-
-        # Convert parent_id to string if present (to match BeforeValidator behavior)
-        if "parent_id" in parameters and parameters["parent_id"] is not None:
-            parameters["parent_id"] = str(parameters["parent_id"])
-
-        # Call the tool function directly with parameters
-        result = await tool_fn(mock_context, **parameters)
-        return MockResponse(result)
+# Removed unused DirectToolCaller class
 
 
 @pytest.fixture
-async def client(test_confluence_mcp, mock_confluence_fetcher):
-    """Create a direct tool caller that avoids FastMCP transport hanging."""
-    with (
-        patch(
-            "src.mcp_atlassian.servers.confluence.get_confluence_fetcher",
-            AsyncMock(return_value=mock_confluence_fetcher),
-        ),
-        patch(
-            "src.mcp_atlassian.servers.dependencies.get_http_request",
-            MagicMock(spec=Request, state=MagicMock()),
-        ),
-    ):
-        yield DirectToolCaller(mock_confluence_fetcher)
+async def client(mock_confluence_fetcher):
+    """Create a client that calls the confluence tools directly with mocked dependencies."""
+    from fastmcp.server.context import Context
+
+    # Import the actual tool functions
+    from src.mcp_atlassian.servers.confluence import (
+        add_comment,
+        add_label,
+        create_page,
+        delete_page,
+        get_comments,
+        get_labels,
+        get_page,
+        get_page_children,
+        get_user_details,
+        search,
+        search_user,
+        update_page,
+    )
+
+    # Create a class to wrap the tools
+    class ConfluenceToolClient:
+        def __init__(self, mock_fetcher):
+            self.mock_fetcher = mock_fetcher
+
+        async def call_tool(self, tool_name: str, parameters: dict):
+            # Create mock context
+            mock_context = MagicMock(spec=Context)
+            mock_request = MagicMock(spec=Request)
+            mock_request.state = MagicMock()
+            mock_context.session = {"request": mock_request}
+
+            # Convert parent_id to string if present (to match BeforeValidator behavior)
+            if "parent_id" in parameters and parameters["parent_id"] is not None:
+                parameters["parent_id"] = str(parameters["parent_id"])
+
+            # Mock response format
+            class MockContent:
+                def __init__(self, text):
+                    self.text = text
+                    self.type = "text"
+
+            class MockResponse:
+                def __init__(self, text):
+                    self.content = [MockContent(text)]
+
+            # Map tool names to actual function calls
+            with patch(
+                "src.mcp_atlassian.servers.confluence.get_confluence_fetcher",
+                AsyncMock(return_value=self.mock_fetcher),
+            ):
+                if tool_name == "confluence_search":
+                    result = await search.fn(mock_context, **parameters)
+                elif tool_name == "confluence_get_page":
+                    result = await get_page.fn(mock_context, **parameters)
+                elif tool_name == "confluence_get_page_children":
+                    result = await get_page_children.fn(mock_context, **parameters)
+                elif tool_name == "confluence_create_page":
+                    result = await create_page.fn(mock_context, **parameters)
+                elif tool_name == "confluence_update_page":
+                    result = await update_page.fn(mock_context, **parameters)
+                elif tool_name == "confluence_delete_page":
+                    result = await delete_page.fn(mock_context, **parameters)
+                elif tool_name == "confluence_add_comment":
+                    result = await add_comment.fn(mock_context, **parameters)
+                elif tool_name == "confluence_get_comments":
+                    result = await get_comments.fn(mock_context, **parameters)
+                elif tool_name == "confluence_add_label":
+                    result = await add_label.fn(mock_context, **parameters)
+                elif tool_name == "confluence_get_labels":
+                    result = await get_labels.fn(mock_context, **parameters)
+                elif tool_name == "confluence_search_user":
+                    result = await search_user.fn(mock_context, **parameters)
+                elif tool_name == "confluence_get_user_details":
+                    result = await get_user_details.fn(mock_context, **parameters)
+                else:
+                    raise ValueError(f"Unknown tool: {tool_name}")
+
+                return MockResponse(result)
+
+    yield ConfluenceToolClient(mock_confluence_fetcher)
 
 
 @pytest.fixture
-async def no_fetcher_client_fixture(no_fetcher_test_confluence_mcp, mock_request):
+async def no_fetcher_client_fixture(no_fetcher_test_confluence_mcp):
     """Create a client that simulates missing Confluence fetcher configuration."""
-    # Use direct tool caller to avoid FastMCP transport hanging
-    yield DirectToolCaller(None)  # No fetcher for this test case
+
+    # Create a simple client for testing no-fetcher scenarios
+    class NoFetcherClient:
+        async def call_tool(self, tool_name: str, parameters: dict):
+            raise Exception("No confluence fetcher configured")
+
+    yield NoFetcherClient()
 
 
 @pytest.mark.anyio
@@ -535,7 +536,7 @@ async def test_get_user_details_by_userkey(client, mock_confluence_fetcher):
         {"identifier": "testuser-key-12345", "identifier_type": "userKey"},
     )
 
-    result_data = json.loads(response[0].text)
+    result_data = json.loads(response.content[0].text)
     assert result_data["display_name"] == "Test User"
 
 
@@ -549,7 +550,7 @@ async def test_get_user_details_invalid_userkey(client, mock_confluence_fetcher)
         {"identifier": "invalid-userkey", "identifier_type": "userKey"},
     )
 
-    result_data = json.loads(response[0].text)
+    result_data = json.loads(response.content[0].text)
     assert result_data["success"] is False
     assert "User not found" in result_data["message"]
 
@@ -567,7 +568,7 @@ async def test_get_user_details_by_account_id(client, mock_confluence_fetcher):
         {"identifier": "12345", "identifier_type": "accountId"},
     )
 
-    result_data = json.loads(response[0].text)
+    result_data = json.loads(response.content[0].text)
     assert result_data["display_name"] == "Test User"
 
 
@@ -584,7 +585,7 @@ async def test_get_user_details_by_username(client, mock_confluence_fetcher):
         {"identifier": "testuser", "identifier_type": "username"},
     )
 
-    result_data = json.loads(response[0].text)
+    result_data = json.loads(response.content[0].text)
     assert result_data["display_name"] == "Test User"
 
 
