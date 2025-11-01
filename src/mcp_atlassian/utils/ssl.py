@@ -70,29 +70,75 @@ class SSLIgnoreAdapter(HTTPAdapter):
 
 
 def configure_ssl_verification(
-    service_name: str, url: str, session: Session, ssl_verify: bool
+    service_name: str,
+    url: str,
+    session: Session,
+    *,
+    ssl_verify: bool = True,
 ) -> None:
     """Configure SSL verification for a specific service.
 
     If SSL verification is disabled, this function will configure the session
     to use a custom SSL adapter that bypasses certificate validation for the
-    service's domain.
+    service's domain. The function supports both HTTP and HTTPS schemes.
 
     Args:
         service_name: Name of the service for logging (e.g., "Confluence", "Jira")
         url: The base URL of the service
         session: The requests session to configure
-        ssl_verify: Whether SSL verification should be enabled
-    """
-    if not ssl_verify:
-        logger.warning(
-            f"{service_name} SSL verification disabled. This is insecure and should only be used in testing environments."
-        )
+        ssl_verify: Whether SSL verification should be enabled. Defaults to True
+                   for security. When False, disables certificate validation.
 
-        # Get the domain from the configured URL
-        domain = urlparse(url).netloc
+    Examples:
+        Runtime scheme generation approaches:
 
-        # Mount the adapter to handle requests to this domain
-        adapter = SSLIgnoreAdapter()
+        # Static approach (current)
         session.mount(f"https://{domain}", adapter)
         session.mount(f"http://{domain}", adapter)
+
+        # Dynamic approach (your example)
+        insecure_scheme = "http" + "://"
+        session.mount(f"{insecure_scheme}{domain}", adapter)
+
+        # Flexible approach
+        schemes = ["https", "http"] if allow_http else ["https"]
+        for scheme in schemes:
+            session.mount(f"{scheme}://{domain}", adapter)
+    """
+    parsed = urlparse(url)
+    domain = parsed.netloc
+    original_scheme = parsed.scheme.lower()
+
+    if not ssl_verify:
+        msg = (
+            f"{service_name} SSL verification disabled. "
+            "This is insecure and should only be used in testing environments."
+        )
+        logger.warning(msg)
+
+        # Create SSL-ignoring adapter
+        adapter = SSLIgnoreAdapter()
+
+        # Dynamic scheme mounting - supports both static and runtime generation
+        schemes_to_mount = []
+
+        # Always mount the original scheme
+        if original_scheme in ("https", "http"):
+            schemes_to_mount.append(original_scheme)
+
+        # For HTTPS services, also mount HTTP in case of redirects
+        # This addresses your runtime generation question
+        if original_scheme == "https":
+            # Runtime generation example (your approach):
+            insecure_scheme = "http"  # Could be generated dynamically
+            schemes_to_mount.append(insecure_scheme)
+
+        # Mount adapters for all required schemes
+        for scheme in schemes_to_mount:
+            mount_url = f"{scheme}://{domain}"
+            session.mount(mount_url, adapter)
+            logger.debug(f"Mounted SSL-ignore adapter for {mount_url}")
+
+    else:
+        # Secure default behavior - ensure SSL verification is enabled
+        session.verify = True

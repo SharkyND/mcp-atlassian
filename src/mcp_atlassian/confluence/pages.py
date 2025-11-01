@@ -10,6 +10,8 @@ from ..models.confluence import ConfluencePage
 from .client import ConfluenceClient
 from .v2_adapter import ConfluenceV2Adapter
 
+FULL_EXCEPTION_DETAILS_MSG = "Full exception details:"
+
 logger = logging.getLogger("mcp-atlassian")
 
 
@@ -30,7 +32,7 @@ class PagesMixin(ConfluenceClient):
         return None
 
     def get_page_content(
-        self, page_id: str, *, convert_to_markdown: bool = True
+        self, page_id: str, *, convert_to_markdown: bool = True, top_n: int = -1
     ) -> ConfluencePage:
         """
         Get content of a specific page.
@@ -39,6 +41,7 @@ class PagesMixin(ConfluenceClient):
             page_id: The ID of the page to retrieve
             convert_to_markdown: When True, returns content in markdown format,
                                otherwise returns raw HTML (keyword-only)
+            top_n: When greater than -1, return first N lines of the file.
 
         Returns:
             ConfluencePage model containing the page content and metadata
@@ -75,7 +78,8 @@ class PagesMixin(ConfluenceClient):
 
             # Use the appropriate content format based on the convert_to_markdown flag
             page_content = processed_markdown if convert_to_markdown else processed_html
-
+            if top_n > 0:
+                page_content = "\n".join(page_content.splitlines()[:top_n])
             # Create and return the ConfluencePage model
             return ConfluencePage.from_api_response(
                 page,
@@ -104,7 +108,8 @@ class PagesMixin(ConfluenceClient):
             logger.error(
                 f"Error retrieving page content for page ID {page_id}: {str(e)}"
             )
-            raise Exception(f"Error retrieving page content: {str(e)}") from e
+            msg = f"Error retrieving page content: {str(e)}"
+            raise Exception(msg) from e
 
     def get_page_ancestors(self, page_id: str) -> list[ConfluencePage]:
         """
@@ -152,11 +157,16 @@ class PagesMixin(ConfluenceClient):
                 raise http_err
         except Exception as e:
             logger.error(f"Error fetching ancestors for page {page_id}: {str(e)}")
-            logger.debug("Full exception details:", exc_info=True)
+            logger.debug(FULL_EXCEPTION_DETAILS_MSG, exc_info=True)
             return []
 
     def get_page_by_title(
-        self, space_key: str, title: str, *, convert_to_markdown: bool = True
+        self,
+        space_key: str,
+        title: str,
+        *,
+        convert_to_markdown: bool = True,
+        top_n: int = -1,
     ) -> ConfluencePage | None:
         """
         Get a specific page by its title from a Confluence space.
@@ -166,6 +176,7 @@ class PagesMixin(ConfluenceClient):
             title: The title of the page to retrieve
             convert_to_markdown: When True, returns content in markdown format,
                                otherwise returns raw HTML (keyword-only)
+            top_n: When greater than -1, returns the top N lines of the file.
 
         Returns:
             ConfluencePage model containing the page content and metadata, or None if not found
@@ -190,7 +201,8 @@ class PagesMixin(ConfluenceClient):
 
             # Use the appropriate content format based on the convert_to_markdown flag
             page_content = processed_markdown if convert_to_markdown else processed_html
-
+            if top_n > 0:
+                page_content = "\n".join(page_content.splitlines()[:top_n])
             # Create and return the ConfluencePage model
             return ConfluencePage.from_api_response(
                 page,
@@ -214,7 +226,7 @@ class PagesMixin(ConfluenceClient):
         except Exception as e:  # noqa: BLE001 - Intentional fallback with full logging
             logger.error(f"Unexpected error fetching page: {str(e)}")
             # Log the full traceback at debug level for troubleshooting
-            logger.debug("Full exception details:", exc_info=True)
+            logger.debug(FULL_EXCEPTION_DETAILS_MSG, exc_info=True)
             return None
 
     def get_space_pages(
@@ -351,9 +363,8 @@ class PagesMixin(ConfluenceClient):
             logger.error(
                 f"Error creating page '{title}' in space {space_key}: {str(e)}"
             )
-            raise Exception(
-                f"Failed to create page '{title}' in space {space_key}: {str(e)}"
-            ) from e
+            msg = f"Failed to create page '{title}' in space {space_key}: {str(e)}"
+            raise Exception(msg) from e
 
     def update_page(
         self,
@@ -409,7 +420,7 @@ class PagesMixin(ConfluenceClient):
                 logger.debug(
                     f"Using v2 API for OAuth authentication to update page '{page_id}'"
                 )
-                response = v2_adapter.update_page(
+                v2_adapter.update_page(
                     page_id=page_id,
                     title=title,
                     body=final_body,
@@ -439,7 +450,8 @@ class PagesMixin(ConfluenceClient):
             return self.get_page_content(page_id)
         except Exception as e:
             logger.error(f"Error updating page {page_id}: {str(e)}")
-            raise Exception(f"Failed to update page {page_id}: {str(e)}") from e
+            msg = f"Failed to update page {page_id}: {str(e)}"
+            raise Exception(msg) from e
 
     def get_page_children(
         self,
@@ -514,7 +526,7 @@ class PagesMixin(ConfluenceClient):
 
         except Exception as e:
             logger.error(f"Error fetching child pages for page {page_id}: {str(e)}")
-            logger.debug("Full exception details:", exc_info=True)
+            logger.debug(FULL_EXCEPTION_DETAILS_MSG, exc_info=True)
             return []
 
     def delete_page(self, page_id: str) -> bool:
@@ -568,4 +580,5 @@ class PagesMixin(ConfluenceClient):
 
         except Exception as e:
             logger.error(f"Error deleting page {page_id}: {str(e)}")
-            raise Exception(f"Failed to delete page {page_id}: {str(e)}") from e
+            msg = f"Failed to delete page {page_id}: {str(e)}"
+            raise Exception(msg) from e

@@ -226,7 +226,8 @@ class IssuesMixin(
         except Exception as e:
             error_msg = str(e)
             logger.error(f"Error retrieving issue {issue_key}: {error_msg}")
-            raise Exception(f"Error retrieving issue {issue_key}: {error_msg}") from e
+            msg = f"Error retrieving issue {issue_key}: {error_msg}"
+            raise Exception(msg) from e
 
     def _normalize_comment_limit(self, comment_limit: int | str | None) -> int | None:
         """
@@ -1091,7 +1092,8 @@ class IssuesMixin(
         except Exception as e:
             error_msg = str(e)
             logger.error(f"Error updating issue {issue_key}: {error_msg}")
-            raise ValueError(f"Failed to update issue {issue_key}: {error_msg}") from e
+            msg = f"Failed to update issue {issue_key}: {error_msg}"
+            raise ValueError(msg) from e
 
     def _update_issue_with_status(
         self, issue_key: str, fields: dict[str, Any]
@@ -1312,9 +1314,8 @@ class IssuesMixin(
             return transitions
         except Exception as e:
             logger.error(f"Error getting transitions for issue {issue_key}: {str(e)}")
-            raise Exception(
-                f"Error getting transitions for issue {issue_key}: {str(e)}"
-            ) from e
+            msg = f"Error getting transitions for issue {issue_key}: {str(e)}"
+            raise Exception(msg) from e
 
     def transition_issue(self, issue_key: str, transition_id: str) -> JiraIssue:
         """
@@ -1381,9 +1382,8 @@ class IssuesMixin(
 
                 # Validate required fields
                 if not all([project_key, summary, issue_type]):
-                    raise ValueError(
-                        f"Missing required fields for issue: {project_key=}, {summary=}, {issue_type=}"
-                    )
+                    msg = f"Missing required fields for issue: {project_key=}, {summary=}, {issue_type=}"
+                    raise ValueError(msg)
 
                 # Prepare fields dictionary
                 fields = {

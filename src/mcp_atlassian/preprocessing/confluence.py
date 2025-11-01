@@ -67,6 +67,7 @@ class ConfluencePreprocessor(BasePreprocessor):
                     path=Path(temp_dir) / "temp.md",
                     root_dir=Path(temp_dir),
                     page_metadata={},
+                    site_metadata={},  # Add missing site_metadata parameter
                 )
 
                 # Transform the HTML to Confluence storage format

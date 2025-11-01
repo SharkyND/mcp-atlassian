@@ -3,10 +3,12 @@
 ![PyPI Version](https://img.shields.io/pypi/v/mcp-atlassian)
 ![PyPI - Downloads](https://img.shields.io/pypi/dm/mcp-atlassian)
 ![PePy - Total Downloads](https://static.pepy.tech/personalized-badge/mcp-atlassian?period=total&units=international_system&left_color=grey&right_color=blue&left_text=Total%20Downloads)
-[![Run Tests](https://github.com/sooperset/mcp-atlassian/actions/workflows/tests.yml/badge.svg)](https://github.com/sooperset/mcp-atlassian/actions/workflows/tests.yml)
-![License](https://img.shields.io/github/license/sooperset/mcp-atlassian)
+[![Run Tests](https://github.com/SharkyND/mcp-atlassian/actions/workflows/tests.yml/badge.svg)](https://github.com/SharkyND/mcp-atlassian/actions/workflows/tests.yml)
+![License](https://img.shields.io/github/license/SharkyND/mcp-atlassian)
 
-Model Context Protocol (MCP) server for Atlassian products (Confluence and Jira). This integration supports both Confluence & Jira Cloud and Server/Data Center deployments.
+Model Context Protocol (MCP) server for Atlassian products (Confluence, Jira and Bitbucket). This integration supports both Confluence, Jira and Bitbucket Cloud and Server/Data Center deployments.
+
+Note: This project is a fork from [mcp-atlassian](https://github.com/sooperset/mcp-atlassian). The project at the time of making a fork has not been maintained for a while with couple of dozen pull requests and a few issues on the github project. Hence, it was about time to fork the project and make some fixes.
 
 ## Example Usage
 
@@ -16,6 +18,7 @@ Ask your AI assistant to:
 - **🔍 AI-Powered Confluence Search** - "Find our OKR guide in Confluence and summarize it"
 - **🐛 Smart Jira Issue Filtering** - "Show me urgent bugs in PROJ project from last week"
 - **📄 Content Creation & Management** - "Create a tech design doc for XYZ feature"
+
 
 ### Feature Demo
 
@@ -35,12 +38,14 @@ https://github.com/user-attachments/assets/7fe9c488-ad0c-4876-9b54-120b666bb785
 | **Confluence** | Server/Data Center | ✅ Supported (version 6.0+)  |
 | **Jira**       | Cloud              | ✅ Fully supported           |
 | **Jira**       | Server/Data Center | ✅ Supported (version 8.14+) |
+| **Bitbucket**  | Cloud              | ⚠️ Not Tested                |
+| **Bitbucket**  | Server/Data Center | ✅ Supported (version 9.0+)  |
 
 ## Quick Start Guide
 
 ### 🔐 1. Authentication Setup
 
-MCP Atlassian supports three authentication methods:
+MCP Atlassian supports four authentication methods:
 
 #### A. API Token Authentication (Cloud) - **Recommended**
 
@@ -68,7 +73,7 @@ MCP Atlassian supports three authentication methods:
    docker run --rm -i \
      -p 8080:8080 \
      -v "${HOME}/.mcp-atlassian:/home/app/.mcp-atlassian" \
-     ghcr.io/sooperset/mcp-atlassian:latest --oauth-setup -v
+     ghcr.io/SharkyND/mcp-atlassian:latest --oauth-setup -v
    ```
 6. Follow prompts for `Client ID`, `Secret`, `URI`, and `Scope`
 7. Complete browser authorization
@@ -106,6 +111,54 @@ To use this method, set the following environment variables (or use the correspo
 This option is useful in scenarios where OAuth credential management is centralized or handled by other infrastructure components.
 </details>
 
+#### D. Dynamic Header-Based Authentication - **Multi-Tenant**
+
+> [!NOTE]
+> Header-based authentication enables dynamic, per-request credential management without requiring environment variables or server restarts. This is ideal for multi-tenant applications, serverless environments, or when credentials need to be managed dynamically.
+
+With header-based authentication, you can pass Jira, Confluence, and Bitbucket credentials directly through HTTP headers on each request. This method supports both Personal Access Tokens (PAT) for Server/Data Center and API tokens for Cloud deployments.
+
+**Required Headers:**
+
+For **Jira authentication**:
+- `X-Atlassian-Jira-Personal-Token`: Your Jira PAT or API token
+- `X-Atlassian-Jira-Url`: Your Jira instance URL
+
+For **Confluence authentication**:
+- `X-Atlassian-Confluence-Personal-Token`: Your Confluence PAT or API token
+- `X-Atlassian-Confluence-Url`: Your Confluence instance URL
+
+For **Bitbucket authentication**:
+- `X-Atlassian-Bitbucket-Personal-Token`: Your Bitbucket PAT or app password
+- `X-Atlassian-Bitbucket-Url`: Your Bitbucket instance URL
+
+**Benefits:**
+- ✅ No environment variables required
+- ✅ Per-request authentication
+- ✅ Multi-tenant support
+- ✅ Dynamic credential management
+- ✅ Zero server configuration needed
+- ✅ Works with both Cloud and Server/Data Center
+
+**Example MCP Client Configuration:**
+```json
+{
+  "Atlassian": {
+    "url": "http://localhost:8000/mcp",
+    "headers": {
+      "X-Atlassian-Read-Only-Mode": "true",
+      "X-Atlassian-Jira-Personal-Token": "your_jira_pat_or_api_token",
+      "X-Atlassian-Jira-Url": "https://your-jira-instance.com",
+      "X-Atlassian-Confluence-Personal-Token": "your_confluence_pat_or_api_token",
+      "X-Atlassian-Confluence-Url": "https://your-confluence-instance.com",
+      "X-Atlassian-Bitbucket-Personal-Token": "your_bitbucket_pat_or_app_password",
+      "X-Atlassian-Bitbucket-Url": "https://your-bitbucket-instance.com"
+    },
+    "type": "http"
+  }
+}
+```
+
 > [!TIP]
 > **Multi-Cloud OAuth Support**: If you're building a multi-tenant application where users provide their own OAuth tokens, see the [Multi-Cloud OAuth Support](#multi-cloud-oauth-support) section for minimal configuration setup.
 
@@ -115,7 +168,7 @@ MCP Atlassian is distributed as a Docker image. This is the recommended way to r
 
 ```bash
 # Pull Pre-built Image
-docker pull ghcr.io/sooperset/mcp-atlassian:latest
+docker pull ghcr.io/SharkyND/mcp-atlassian:latest
 ```
 
 ## 🛠️ IDE Integration
@@ -132,10 +185,11 @@ MCP Atlassian is designed to be used with AI assistants through IDE integration.
 
 ### ⚙️ Configuration Methods
 
-There are two main approaches to configure the Docker container:
+There are three main approaches to configure the Docker container:
 
 1. **Passing Variables Directly** (shown in examples below)
 2. **Using an Environment File** with `--env-file` flag (shown in collapsible sections)
+3. **Header-Based Authentication** (no environment variables required - see [Header-Based Authentication Configuration](#header-based-authentication-configuration))
 
 > [!NOTE]
 > Common environment variables include:
@@ -147,7 +201,14 @@ There are two main approaches to configure the Docker container:
 > - `MCP_LOGGING_STDOUT`: Set to "true" to log to stdout instead of stderr
 > - `ENABLED_TOOLS`: Comma-separated list of tool names to enable (e.g., "confluence_search,jira_get_issue")
 >
-> See the [.env.example](https://github.com/sooperset/mcp-atlassian/blob/main/.env.example) file for all available options.
+> **New: Header-Based Authentication Headers** (no environment variables needed):
+> - `X-Atlassian-Jira-Personal-Token`: Jira PAT/API token (passed as HTTP header)
+> - `X-Atlassian-Jira-Url`: Jira instance URL (passed as HTTP header)
+> - `X-Atlassian-Confluence-Personal-Token`: Confluence PAT/API token (passed as HTTP header)
+> - `X-Atlassian-Confluence-Url`: Confluence instance URL (passed as HTTP header)
+> - `X-Atlassian-Read-Only-Mode`: Per-request read-only mode (passed as HTTP header)
+>
+> See the [.env.example](https://github.com/SharkyND/mcp-atlassian/blob/main/.env.example) file for all available options.
 
 
 ### 📝 Configuration Examples
@@ -168,7 +229,10 @@ There are two main approaches to configure the Docker container:
         "-e", "JIRA_URL",
         "-e", "JIRA_USERNAME",
         "-e", "JIRA_API_TOKEN",
-        "ghcr.io/sooperset/mcp-atlassian:latest"
+        "-e", "BITBUCKET_URL",
+        "-e", "BITBUCKET_USERNAME",
+        "-e", "BITBUCKET_APP_PASSWORD",
+        "ghcr.io/SharkyND/mcp-atlassian:latest"
       ],
       "env": {
         "CONFLUENCE_URL": "https://your-company.atlassian.net/wiki",
@@ -176,7 +240,10 @@ There are two main approaches to configure the Docker container:
         "CONFLUENCE_API_TOKEN": "your_confluence_api_token",
         "JIRA_URL": "https://your-company.atlassian.net",
         "JIRA_USERNAME": "your.email@company.com",
-        "JIRA_API_TOKEN": "your_jira_api_token"
+        "JIRA_API_TOKEN": "your_jira_api_token",
+        "BITBUCKET_URL": "https://bitbucket.org",
+        "BITBUCKET_USERNAME": "your.email@company.com",
+        "BITBUCKET_APP_PASSWORD": "your_bitbucket_app_password"
       }
     }
   }
@@ -197,7 +264,7 @@ There are two main approaches to configure the Docker container:
         "-i",
         "--env-file",
         "/path/to/your/mcp-atlassian.env",
-        "ghcr.io/sooperset/mcp-atlassian:latest"
+        "ghcr.io/SharkyND/mcp-atlassian:latest"
       ]
     }
   }
@@ -225,7 +292,7 @@ For Server/Data Center deployments, use direct variable passing:
         "-e", "JIRA_URL",
         "-e", "JIRA_PERSONAL_TOKEN",
         "-e", "JIRA_SSL_VERIFY",
-        "ghcr.io/sooperset/mcp-atlassian:latest"
+        "ghcr.io/SharkyND/mcp-atlassian:latest"
       ],
       "env": {
         "CONFLUENCE_URL": "https://confluence.your-company.com",
@@ -272,7 +339,7 @@ This configuration is for when you use the server's built-in OAuth client and ha
         "-e", "ATLASSIAN_OAUTH_REDIRECT_URI",
         "-e", "ATLASSIAN_OAUTH_SCOPE",
         "-e", "ATLASSIAN_OAUTH_CLOUD_ID",
-        "ghcr.io/sooperset/mcp-atlassian:latest"
+        "ghcr.io/SharkyND/mcp-atlassian:latest"
       ],
       "env": {
         "JIRA_URL": "https://your-company.atlassian.net",
@@ -312,7 +379,7 @@ This configuration is for when you are providing your own externally managed OAu
         "-e", "CONFLUENCE_URL",
         "-e", "ATLASSIAN_OAUTH_CLOUD_ID",
         "-e", "ATLASSIAN_OAUTH_ACCESS_TOKEN",
-        "ghcr.io/sooperset/mcp-atlassian:latest"
+        "ghcr.io/SharkyND/mcp-atlassian:latest"
       ],
       "env": {
         "JIRA_URL": "https://your-company.atlassian.net",
@@ -334,11 +401,88 @@ This configuration is for when you are providing your own externally managed OAu
 </details>
 
 <details>
+<summary>Header-Based Authentication Configuration</summary>
+
+This configuration uses the new [dynamic header-based authentication](#d-dynamic-header-based-authentication---multi-tenant) feature. **No environment variables are required** - credentials are passed through HTTP headers on each request.
+
+**Minimal Docker Configuration (No Environment Variables Needed):**
+
+```json
+{
+  "mcpServers": {
+    "mcp-atlassian": {
+      "command": "docker",
+      "args": [
+        "run",
+        "--rm",
+        "-i",
+        "ghcr.io/SharkyND/mcp-atlassian:latest"
+      ]
+    }
+  }
+}
+```
+
+**MCP Client Configuration with Headers:**
+
+Configure your MCP client to send authentication headers with each request:
+
+```json
+{
+  "Atlassian": {
+    "url": "http://localhost:8000/mcp",
+    "headers": {
+      "X-Atlassian-Read-Only-Mode": "true",
+      "X-Atlassian-Jira-Personal-Token": "your_jira_pat_or_api_token",
+      "X-Atlassian-Jira-Url": "https://your-jira-instance.com",
+      "X-Atlassian-Confluence-Personal-Token": "your_confluence_pat_or_api_token",
+      "X-Atlassian-Confluence-Url": "https://your-confluence-instance.com"
+    },
+    "type": "http"
+  }
+}
+```
+
+**Optional Docker Configuration with Read-Only Mode:**
+
+If you want to enable read-only mode globally (rather than per-request), you can still use environment variables:
+
+```json
+{
+  "mcpServers": {
+    "mcp-atlassian": {
+      "command": "docker",
+      "args": [
+        "run",
+        "--rm",
+        "-i",
+        "-e", "READ_ONLY_MODE",
+        "ghcr.io/SharkyND/mcp-atlassian:latest"
+      ],
+      "env": {
+        "READ_ONLY_MODE": "true"
+      }
+    }
+  }
+}
+```
+
+> [!NOTE]
+> **Header-Based Authentication Benefits:**
+> - ✅ **Zero Configuration**: No environment variables required
+> - ✅ **Multi-Tenant Ready**: Different credentials per request
+> - ✅ **Dynamic**: Credentials can change without server restart
+> - ✅ **Flexible**: Mix and match Jira/Confluence authentication
+> - ✅ **Secure**: Credentials are not stored in environment or files
+
+> [!TIP]
+> **Selective Service Authentication**: You can authenticate with just Jira or just Confluence by providing only the relevant headers. The server will automatically detect available services based on the headers provided.
+
+</details>
+<details>
 <summary>Proxy Configuration</summary>
-
-MCP Atlassian supports routing API requests through standard HTTP/HTTPS/SOCKS proxies. Configure using environment variables:
-
 - Supports standard `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, `SOCKS_PROXY`.
+
 - Service-specific overrides are available (e.g., `JIRA_HTTPS_PROXY`, `CONFLUENCE_NO_PROXY`).
 - Service-specific variables override global ones for that service.
 
@@ -357,7 +501,7 @@ Add the relevant proxy variables to the `args` (using `-e`) and `env` sections o
         "-e", "HTTP_PROXY",
         "-e", "HTTPS_PROXY",
         "-e", "NO_PROXY",
-        "ghcr.io/sooperset/mcp-atlassian:latest"
+        "ghcr.io/SharkyND/mcp-atlassian:latest"
       ],
       "env": {
         "... existing Confluence/Jira vars": "...",
@@ -397,7 +541,7 @@ Custom headers are configured using environment variables with comma-separated k
         "-e", "JIRA_USERNAME",
         "-e", "JIRA_API_TOKEN",
         "-e", "JIRA_CUSTOM_HEADERS",
-        "ghcr.io/sooperset/mcp-atlassian:latest"
+        "ghcr.io/SharkyND/mcp-atlassian:latest"
       ],
       "env": {
         "CONFLUENCE_URL": "https://your-company.atlassian.net/wiki",
@@ -434,7 +578,7 @@ MCP Atlassian supports multi-cloud OAuth scenarios where each user connects to t
 1. Enable minimal OAuth mode (no client credentials required):
    ```bash
    docker run -e ATLASSIAN_OAUTH_ENABLE=true -p 9000:9000 \
-     ghcr.io/sooperset/mcp-atlassian:latest \
+     ghcr.io/SharkyND/mcp-atlassian:latest \
      --transport streamable-http --port 9000
    ```
 
@@ -499,7 +643,7 @@ asyncio.run(main())
         "-e", "CONFLUENCE_URL",
         "-e", "CONFLUENCE_USERNAME",
         "-e", "CONFLUENCE_API_TOKEN",
-        "ghcr.io/sooperset/mcp-atlassian:latest"
+        "ghcr.io/SharkyND/mcp-atlassian:latest"
       ],
       "env": {
         "CONFLUENCE_URL": "https://your-company.atlassian.net/wiki",
@@ -523,7 +667,7 @@ For Confluence Server/DC, use:
         "-i",
         "-e", "CONFLUENCE_URL",
         "-e", "CONFLUENCE_PERSONAL_TOKEN",
-        "ghcr.io/sooperset/mcp-atlassian:latest"
+        "ghcr.io/SharkyND/mcp-atlassian:latest"
       ],
       "env": {
         "CONFLUENCE_URL": "https://confluence.your-company.com",
@@ -548,7 +692,7 @@ For Confluence Server/DC, use:
         "-e", "JIRA_URL",
         "-e", "JIRA_USERNAME",
         "-e", "JIRA_API_TOKEN",
-        "ghcr.io/sooperset/mcp-atlassian:latest"
+        "ghcr.io/SharkyND/mcp-atlassian:latest"
       ],
       "env": {
         "JIRA_URL": "https://your-company.atlassian.net",
@@ -572,7 +716,7 @@ For Jira Server/DC, use:
         "-i",
         "-e", "JIRA_URL",
         "-e", "JIRA_PERSONAL_TOKEN",
-        "ghcr.io/sooperset/mcp-atlassian:latest"
+        "ghcr.io/SharkyND/mcp-atlassian:latest"
       ],
       "env": {
         "JIRA_URL": "https://jira.your-company.com",
@@ -607,13 +751,13 @@ Both transport types support single-user and multi-user authentication:
     # For SSE transport
     docker run --rm -p 9000:9000 \
       --env-file /path/to/your/.env \
-      ghcr.io/sooperset/mcp-atlassian:latest \
+      ghcr.io/SharkyND/mcp-atlassian:latest \
       --transport sse --port 9000 -vv
 
     # OR for streamable-http transport
     docker run --rm -p 9000:9000 \
       --env-file /path/to/your/.env \
-      ghcr.io/sooperset/mcp-atlassian:latest \
+      ghcr.io/SharkyND/mcp-atlassian:latest \
       --transport streamable-http --port 9000 -vv
     ```
 
@@ -651,14 +795,14 @@ Here's a complete example of setting up multi-user authentication with streamabl
    docker run --rm -i \
      -p 8080:8080 \
      -v "${HOME}/.mcp-atlassian:/home/app/.mcp-atlassian" \
-     ghcr.io/sooperset/mcp-atlassian:latest --oauth-setup -v
+     ghcr.io/SharkyND/mcp-atlassian:latest --oauth-setup -v
    ```
 
 2. Start the server with streamable-HTTP transport:
    ```bash
    docker run --rm -p 9000:9000 \
      --env-file /path/to/your/.env \
-     ghcr.io/sooperset/mcp-atlassian:latest \
+     ghcr.io/SharkyND/mcp-atlassian:latest \
      --transport streamable-http --port 9000 -vv
    ```
 
@@ -718,6 +862,42 @@ Here's a complete example of setting up multi-user authentication with streamabl
 
 </details>
 
+## Monitoring
+
+### Username Requirement
+
+Enforce username headers in requests by setting `REQUIRE_USERNAME=true` only for monitoring purpose. When the enviroment variable is passed in as true, it will be enable prometheus client to caputre username from the header and avalible to scrape through the service monitor:
+
+```bash
+# Environment variable
+REQUIRE_USERNAME=true
+
+# Helm chart
+env:
+  REQUIRE_USERNAME: "true"
+```
+
+When enabled, requests must include at least one username header:
+- `X-Atlassian-Username`
+
+Returns 400 error if missing when enabled.
+
+### Monitoring & Metrics
+
+**Prometheus Metrics** available at `/metrics` endpoint:
+- Request counts, duration, errors by service
+- User activity tracking (when username headers provided)
+- Pod-specific metrics for Kubernetes deployments
+
+**Health Checks**:
+- `/healthz` - Basic health status
+- `/readyz` - Kubernetes readiness probe
+
+**Kubernetes Integration**:
+- Helm chart with monitoring configuration
+- Grafana dashboard provisioning via ConfigMaps
+- ServiceMonitor for Prometheus Operator
+
 ## Tools
 
 ### Key Tools
@@ -739,46 +919,65 @@ Here's a complete example of setting up multi-user authentication with streamabl
 - `confluence_update_page`: Update an existing page
 - `confluence_get_user_details`: Gets information about a conflunce user
 
+#### Bitbucket Tools
+
+- `list_workspaces_or_projects`: List all accessible workspaces/projects
+- `list_repositories`: List repositories in a workspace or all accessible repositories
+- `get_repository_info`: Get detailed information about a specific repository
+- `list_branches`: List all branches in a repository
+- `get_default_branch`: Get the default branch of a repository
+- `get_file_content`: Get content of a specific file from a repository
+- `list_directory`: List contents of a directory in a repository
+- `list_pull_requests`: List pull requests for a repository
+- `pull_request_activities`: Get activities/comments for a pull request
+- `get_pull_request`: Get detailed information about a specific pull request
+- `get_commit_changes`: Get changes made in a specific commit
+- `get_commits`: Get commit history for a repository
+- `create_pull_request`: Create a new pull request
+- `create_branch`: Create a new branch in a repository
+- `add_pull_request_blocker_comment`: Add a blocking comment to a pull request
+- `add_pull_request_comment`: Add a regular comment to a pull request
+
+
 <details> <summary>View All Tools</summary>
 
-| Operation | Jira Tools                          | Confluence Tools               |
-|-----------|-------------------------------------|--------------------------------|
-| **Read**  | `jira_search`                       | `confluence_search`            |
-|           | `jira_get_issue`                    | `confluence_get_page`          |
-|           | `jira_get_all_projects`             | `confluence_get_page_children` |
-|           | `jira_get_project_issues`           | `confluence_get_comments`      |
-|           | `jira_get_worklog`                  | `confluence_get_labels`        |
-|           | `jira_get_transitions`              | `confluence_search_user`       |
-|           | `jira_search_fields`                | `confluence_get_user_details`                                 |
-|           | `jira_get_agile_boards`             |                                |
-|           | `jira_get_board_issues`             |                                |
-|           | `jira_get_sprints_from_board`       |                                |
-|           | `jira_get_sprint_issues`            |                                |
-|           | `jira_get_issue_link_types`         |                                |
-|           | `jira_batch_get_changelogs`*        |                                |
-|           | `jira_get_user_profile`             |                                |
-|           | `jira_download_attachments`         |                                |
-|           | `jira_get_project_versions`         |                                |
-| **Write** | `jira_create_issue`                 | `confluence_create_page`       |
-|           | `jira_update_issue`                 | `confluence_update_page`       |
-|           | `jira_delete_issue`                 | `confluence_delete_page`       |
-|           | `jira_batch_create_issues`          | `confluence_add_label`         |
-|           | `jira_add_comment`                  | `confluence_add_comment`       |
-|           | `jira_transition_issue`             |                                |
-|           | `jira_add_worklog`                  |                                |
-|           | `jira_link_to_epic`                 |                                |
-|           | `jira_create_sprint`                |                                |
-|           | `jira_update_sprint`                |                                |
-|           | `jira_create_issue_link`            |                                |
-|           | `jira_remove_issue_link`            |                                |
-|           | `jira_create_version`               |                                |
-|           | `jira_batch_create_versions`        |                                |
+| Operation | Jira Tools                    | Confluence Tools               | Bitbucket Tools                    |
+|-----------|-------------------------------|--------------------------------|------------------------------------|
+| **Read**  | `jira_search`                 | `confluence_search`            | `list_workspaces_or_projects`      |
+|           | `jira_get_issue`              | `confluence_get_page`          | `list_repositories`                |
+|           | `jira_get_all_projects`       | `confluence_get_page_children` | `get_repository_info`              |
+|           | `jira_get_project_issues`     | `confluence_get_comments`      | `list_branches`                    |
+|           | `jira_get_worklog`            | `confluence_get_labels`        | `get_default_branch`               |
+|           | `jira_get_transitions`        | `confluence_search_user`       | `get_file_content`                 |
+|           | `jira_search_fields`          | `confluence_get_user_details`  | `list_directory`                   |
+|           | `jira_get_agile_boards`       |                                | `list_pull_requests`               |
+|           | `jira_get_board_issues`       |                                | `pull_request_activities`          |
+|           | `jira_get_sprints_from_board` |                                | `get_pull_request`                 |
+|           | `jira_get_sprint_issues`      |                                | `get_commit_changes`               |
+|           | `jira_get_issue_link_types`   |                                | `get_commits`                      |
+|           | `jira_batch_get_changelogs`*  |                                |                                    |
+|           | `jira_get_user_profile`       |                                |                                    |
+|           | `jira_download_attachments`   |                                |                                    |
+|           | `jira_get_project_versions`   |                                |                                    |
+| **Write** | `jira_create_issue`           | `confluence_create_page`       | `create_pull_request`              |
+|           | `jira_update_issue`           | `confluence_update_page`       | `create_branch`                    |
+|           | `jira_delete_issue`           | `confluence_delete_page`       | `add_pull_request_blocker_comment` |
+|           | `jira_batch_create_issues`    | `confluence_add_label`         | `add_pull_request_comment`         |
+|           | `jira_add_comment`            | `confluence_add_comment`       |                                    |
+|           | `jira_transition_issue`       |                                |                                    |
+|           | `jira_add_worklog`            |                                |                                    |
+|           | `jira_link_to_epic`           |                                |                                    |
+|           | `jira_create_sprint`          |                                |                                    |
+|           | `jira_update_sprint`          |                                |                                    |
+|           | `jira_create_issue_link`      |                                |                                    |
+|           | `jira_remove_issue_link`      |                                |                                    |
+|           | `jira_create_version`         |                                |                                    |
+|           | `jira_batch_create_versions`  |                                |                                    |
 
 </details>
 
 *Tool only available on Jira Cloud
 
-</details>
 
 ### Tool Filtering and Access Control
 

@@ -81,7 +81,8 @@ class TransitionsMixin(JiraClient, IssueOperationsProto, UsersOperationsProto):
         except Exception as e:
             error_msg = f"Error getting transitions for {issue_key}: {str(e)}"
             logger.error(error_msg)
-            raise Exception(f"Error getting transitions: {str(e)}") from e
+            msg = f"Error getting transitions: {str(e)}"
+            raise Exception(msg) from e
 
     def get_transitions(self, issue_key: str) -> list[dict[str, Any]]:
         """

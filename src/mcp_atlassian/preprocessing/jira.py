@@ -71,7 +71,7 @@ class JiraPreprocessor(BasePreprocessor):
     def _process_smart_links(self, text: str) -> str:
         """Process Jira/Confluence smart links."""
         # Pattern matches: [text|url|smart-link]
-        link_pattern = r"\[(.*?)\|(.*?)\|smart-link\]"
+        link_pattern = r"\[([^\[\]\|]*)\|([^\[\]\|]*)\|smart-link\]"
         matches = re.finditer(link_pattern, text)
 
         for match in matches:
@@ -117,9 +117,9 @@ class JiraPreprocessor(BasePreprocessor):
         # Block quotes
         output = re.sub(r"^bq\.(.*?)$", r"> \1\n", input_text, flags=re.MULTILINE)
 
-        # Text formatting (bold, italic)
+        # Text formatting (bold, italic) - safe version
         output = re.sub(
-            r"([*_])(.*?)\1",
+            r"([*_]{1,3})([^*_]+)\1",
             lambda match: ("**" if match.group(1) == "*" else "*")
             + match.group(2)
             + ("**" if match.group(1) == "*" else "*"),
@@ -145,8 +145,8 @@ class JiraPreprocessor(BasePreprocessor):
         # Inline code
         output = re.sub(r"\{\{([^}]+)\}\}", r"`\1`", output)
 
-        # Citation
-        output = re.sub(r"\?\?((?:.[^?]|[^?].)+)\?\?", r"<cite>\1</cite>", output)
+        # Citation (safe version: match anything except '?')
+        output = re.sub(r"\?\?([^?]+)\?\?", r"<cite>\1</cite>", output)
 
         # Inserted text
         output = re.sub(r"\+([^+]*)\+", r"<ins>\1</ins>", output)
@@ -181,13 +181,25 @@ class JiraPreprocessor(BasePreprocessor):
             flags=re.MULTILINE,
         )
 
-        # Images with alt text
+        # Images with alt text (multi-pass for safety)
+        def _replace_img_alt(match: re.Match) -> str:
+            img_path = match.group(1)
+            params = match.group(2)
+            alt_text = None
+            if params:
+                # Split params by comma, then trim spaces
+                for param in params.split(","):
+                    param = param.strip()
+                    if param.startswith("alt="):
+                        alt_text = param[4:]
+                        break
+            return f"![{alt_text if alt_text else ''}]({img_path})"
+
         output = re.sub(
-            r"!([^|\n\s]+)\|([^\n!]*)alt=([^\n!\,]+?)(,([^\n!]*))?!",
-            r"![\3](\1)",
+            r"!([^|\n\s]+)\|([^!]*)!",
+            _replace_img_alt,
             output,
         )
-
         # Images with other parameters (ignore them)
         output = re.sub(r"!([^|\n\s]+)\|([^\n!]*)!", r"![](\1)", output)
 
@@ -232,7 +244,7 @@ class JiraPreprocessor(BasePreprocessor):
 
     def markdown_to_jira(self, input_text: str) -> str:
         """
-        Convert Markdown syntax to Jira markup syntax.
+        Convert Markdown text to Jira markup format.
 
         Args:
             input_text: Text in Markdown format
@@ -295,20 +307,34 @@ class JiraPreprocessor(BasePreprocessor):
             flags=re.MULTILINE,
         )
 
-        # Headers with # prefix
+        # Headers with # prefix (safe version: avoid nested quantifiers)
         output = re.sub(
-            r"^([#]+)(.*?)$",
+            r"^(#+)([^\n]*)$",
             lambda match: f"h{len(match.group(1))}." + match.group(2),
             output,
             flags=re.MULTILINE,
         )
 
         # Bold and italic
+        # Process double markers first (bold), then single markers (italic)
         output = re.sub(
-            r"([*_]+)(.*?)\1",
-            lambda match: ("_" if len(match.group(1)) == 1 else "*")
-            + match.group(2)
-            + ("_" if len(match.group(1)) == 1 else "*"),
+            r"\*\*([^*\n]+?)\*\*",
+            r"*\1*",
+            output,
+        )
+        output = re.sub(
+            r"__([^_\n]+?)__",
+            r"*\1*",
+            output,
+        )
+        output = re.sub(
+            r"\*([^*\n]+?)\*",
+            r"_\1_",
+            output,
+        )
+        output = re.sub(
+            r"_([^_\n]+?)_",
+            r"_\1_",
             output,
         )
 

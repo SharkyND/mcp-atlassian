@@ -325,9 +325,13 @@ def main(
         log_display_path = final_path
         if log_display_path is None:
             if final_transport == "sse":
-                log_display_path = main_mcp.settings.sse_path or "/sse"
+                from fastmcp import settings
+
+                log_display_path = settings.sse_path or "/sse"
             else:
-                log_display_path = main_mcp.settings.streamable_http_path or "/mcp"
+                from fastmcp import settings
+
+                log_display_path = settings.streamable_http_path or "/mcp"
 
         logger.info(
             f"Starting server with {final_transport.upper()} transport on http://{final_host}:{final_port}{log_display_path}"
@@ -362,6 +366,7 @@ def main(
             asyncio.run(main_mcp.run_async(**run_kwargs))
     except (KeyboardInterrupt, SystemExit) as e:
         logger.info(f"Server shutdown initiated: {type(e).__name__}")
+        raise
     except Exception as e:
         logger.error(f"Server encountered an error: {e}", exc_info=True)
         sys.exit(1)

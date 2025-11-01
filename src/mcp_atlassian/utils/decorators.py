@@ -37,7 +37,8 @@ def check_write_access(func: F) -> F:
                 "_", " "
             )  # e.g., "create_issue" -> "create issue"
             logger.warning(f"Attempted to call tool '{tool_name}' in read-only mode.")
-            raise ValueError(f"Cannot {action_description} in read-only mode.")
+            msg = f"Cannot {action_description} in read-only mode."
+            raise ValueError(msg)
 
         return await func(ctx, *args, **kwargs)
 

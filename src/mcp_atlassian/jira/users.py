@@ -262,14 +262,12 @@ class UsersMixin(JiraClient):
                         f"Resolved email '{identifier}' to accountId '{resolved_id}'. Determined param: account_id (Cloud)"
                     )
                 else:
-                    raise ValueError(
-                        f"Could not resolve email '{identifier}' to a valid account ID for Jira Cloud."
-                    )
+                    msg = f"Could not resolve email '{identifier}' to a valid account ID for Jira Cloud."
+                    raise ValueError(msg)
             except Exception as e:
                 logger.warning(f"Failed to resolve email '{identifier}': {e}")
-                raise ValueError(
-                    f"Could not resolve email '{identifier}' to a valid account ID for Jira Cloud."
-                ) from e
+                msg = f"Could not resolve email '{identifier}' to a valid account ID for Jira Cloud."
+                raise ValueError(msg) from e
         # Cloud: identifier is not accountId or email, try to resolve
         else:
             logger.debug(
@@ -285,17 +283,15 @@ class UsersMixin(JiraClient):
                 logger.error(
                     f"Could not resolve identifier '{identifier}' to a usable format (accountId/username/key)."
                 )
-                raise ValueError(
-                    f"Could not determine how to look up user '{identifier}'."
-                ) from e
+                msg = f"Could not determine how to look up user '{identifier}'."
+                raise ValueError(msg) from e
 
         if not api_kwargs:
             logger.error(
                 f"Logic failed to determine API parameters for identifier '{identifier}'"
             )
-            raise ValueError(
-                f"Could not determine the correct parameter to use for identifier '{identifier}'."
-            )
+            msg = f"Could not determine the correct parameter to use for identifier '{identifier}'."
+            raise ValueError(msg)
 
         return api_kwargs
 
@@ -323,39 +319,41 @@ class UsersMixin(JiraClient):
                 logger.error(
                     f"User lookup for '{identifier}' returned unexpected type: {type(user_data)}. Data: {user_data}"
                 )
-                raise ValueError(f"User '{identifier}' not found or lookup failed.")
+                msg = f"User '{identifier}' not found or lookup failed."
+                raise ValueError(msg)
             return JiraUser.from_api_response(user_data)
         except HTTPError as http_err:
             if http_err.response is not None:
                 response_text = http_err.response.text[:200]
                 status_code = http_err.response.status_code
                 if status_code == 404:
-                    raise ValueError(f"User '{identifier}' not found.") from http_err
+                    msg = f"User '{identifier}' not found."
+                    raise ValueError(msg) from http_err
                 elif status_code in [401, 403]:
                     logger.error(
                         f"Authentication/Permission error for '{identifier}': {status_code}"
                     )
-                    raise MCPAtlassianAuthenticationError(
-                        f"Permission denied accessing user '{identifier}'."
-                    ) from http_err
+                    msg = f"Permission denied accessing user '{identifier}'."
+                    raise MCPAtlassianAuthenticationError(msg) from http_err
                 else:
                     logger.error(
                         f"HTTP error {status_code} for '{identifier}': {http_err}. Response: {response_text}"
                     )
-                    raise Exception(
+                    msg = (
                         f"API error getting user profile for '{identifier}': {http_err}"
-                    ) from http_err
+                    )
+                    raise Exception(msg) from http_err
             else:
                 logger.error(
                     f"Network or unknown HTTP error (no response object) for '{identifier}': {http_err}"
                 )
-                raise Exception(
+                msg = (
                     f"Network error getting user profile for '{identifier}': {http_err}"
-                ) from http_err
+                )
+                raise Exception(msg) from http_err
         except Exception as e:
             logger.exception(
                 f"Unexpected error getting/processing user profile for '{identifier}':"
             )
-            raise Exception(
-                f"Error processing user profile for '{identifier}': {str(e)}"
-            ) from e
+            msg = f"Error processing user profile for '{identifier}': {str(e)}"
+            raise Exception(msg) from e
