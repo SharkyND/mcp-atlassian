@@ -200,6 +200,66 @@ def get_available_services(
             bitbucket_is_setup = True
             logger.info("Using Bitbucket authentication from header personal token")
 
+    # Xray service detection
+    xray_url = os.getenv("XRAY_URL")
+    xray_is_setup = False
+    if xray_url:
+        is_cloud = is_atlassian_cloud_url(xray_url)
+        if all(
+            [
+                os.getenv("ATLASSIAN_OAUTH_CLIENT_ID"),
+                os.getenv("ATLASSIAN_OAUTH_CLIENT_SECRET"),
+                os.getenv("ATLASSIAN_OAUTH_REDIRECT_URI"),
+                os.getenv("ATLASSIAN_OAUTH_SCOPE"),
+                os.getenv("ATLASSIAN_OAUTH_CLOUD_ID"),
+            ]
+        ):
+            xray_is_setup = True
+            logger.info(
+                "Using Xray OAuth 2.0 (3LO) authentication (Cloud-only features)"
+            )
+        elif all(
+            [
+                os.getenv("ATLASSIAN_OAUTH_ACCESS_TOKEN"),
+                os.getenv("ATLASSIAN_OAUTH_CLOUD_ID"),
+            ]
+        ):
+            xray_is_setup = True
+            logger.info(
+                "Using Xray OAuth 2.0 (3LO) authentication (Cloud-only features) "
+                "with provided access token"
+            )
+        elif is_cloud:  # Cloud non-OAuth
+            if all(
+                [
+                    os.getenv("XRAY_USERNAME"),
+                    os.getenv("XRAY_API_TOKEN"),
+                ]
+            ):
+                xray_is_setup = True
+                logger.info("Using Xray Cloud Basic Authentication (API Token)")
+        else:  # Server/Data Center non-OAuth
+            if os.getenv("XRAY_PERSONAL_TOKEN") or (
+                os.getenv("XRAY_USERNAME") and os.getenv("XRAY_API_TOKEN")
+            ):
+                xray_is_setup = True
+                logger.info(
+                    "Using Xray Server/Data Center authentication (PAT or Basic Auth)"
+                )
+    elif os.getenv("ATLASSIAN_OAUTH_ENABLE", "").lower() in ("true", "1", "yes"):
+        xray_is_setup = True
+        logger.info(
+            "Using Xray minimal OAuth configuration - expecting user-provided tokens via headers"
+        )
+
+    if not xray_is_setup:
+        xray_token = headers.get("X-Atlassian-Xray-Personal-Token")
+        xray_url_header = headers.get("X-Atlassian-Xray-Url")
+
+        if xray_token and xray_url_header:
+            xray_is_setup = True
+            logger.info("Using Xray authentication from header personal token")
+
     # Log setup status
     if not confluence_is_setup:
         logger.info(
@@ -213,9 +273,14 @@ def get_available_services(
         logger.info(
             "Bitbucket is not configured or required environment variables are missing."
         )
+    if not xray_is_setup:
+        logger.info(
+            "Xray is not configured or required environment variables are missing."
+        )
 
     return {
         "confluence": confluence_is_setup,
         "jira": jira_is_setup,
         "bitbucket": bitbucket_is_setup,
+        "xray": xray_is_setup,
     }

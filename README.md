@@ -6,8 +6,8 @@
 [![Run Tests](https://github.com/SharkyND/mcp-atlassian/actions/workflows/tests.yml/badge.svg)](https://github.com/SharkyND/mcp-atlassian/actions/workflows/tests.yml)
 ![License](https://img.shields.io/github/license/SharkyND/mcp-atlassian)
 
-Model Context Protocol (MCP) server for Atlassian products (Confluence, Jira and Bitbucket). This integration supports both Confluence, Jira and Bitbucket Cloud and Server/Data Center deployments.
-
+Model Context Protocol (MCP) server for Atlassian products (Confluence, Jira, Bitbucket, and Xray).
+This integration supports both Confluence, Jira, Bitbucket and Xray Cloud and Server/Data Center deployments.
 Note: This project is a fork from [mcp-atlassian](https://github.com/sooperset/mcp-atlassian). The project at the time of making a fork has not been maintained for a while with couple of dozen pull requests and a few issues on the github project. Hence, it was about time to fork the project and make some fixes.
 
 ## Example Usage
@@ -18,6 +18,8 @@ Ask your AI assistant to:
 - **🔍 AI-Powered Confluence Search** - "Find our OKR guide in Confluence and summarize it"
 - **🐛 Smart Jira Issue Filtering** - "Show me urgent bugs in PROJ project from last week"
 - **📄 Content Creation & Management** - "Create a tech design doc for XYZ feature"
+- **🧪 Test Management with Xray** - "Get test execution results for the latest sprint"
+- **📊 Quality Assurance Tracking** - "Update test run status and add defects found during testing"
 
 
 ### Feature Demo
@@ -40,6 +42,8 @@ https://github.com/user-attachments/assets/7fe9c488-ad0c-4876-9b54-120b666bb785
 | **Jira**       | Server/Data Center | ✅ Supported (version 8.14+) |
 | **Bitbucket**  | Cloud              | ⚠️ Not Tested                |
 | **Bitbucket**  | Server/Data Center | ✅ Supported (version 9.0+)  |
+| **Xray**       | Cloud              | ⚠️ Not Tested                |
+| **Xray**       | Server/Data Center | ✅ Supported (Jira 8.0+)     |
 
 ## Quick Start Guide
 
@@ -132,6 +136,11 @@ For **Bitbucket authentication**:
 - `X-Atlassian-Bitbucket-Personal-Token`: Your Bitbucket PAT or app password
 - `X-Atlassian-Bitbucket-Url`: Your Bitbucket instance URL
 
+
+For **Xray authentication**:
+- `X-Atlassian-Xray-Personal-Token`: Your Xray PAT or API token
+- `X-Atlassian-Xray-Url`: Your Xray instance URL
+
 **Benefits:**
 - ✅ No environment variables required
 - ✅ Per-request authentication
@@ -152,7 +161,9 @@ For **Bitbucket authentication**:
       "X-Atlassian-Confluence-Personal-Token": "your_confluence_pat_or_api_token",
       "X-Atlassian-Confluence-Url": "https://your-confluence-instance.com",
       "X-Atlassian-Bitbucket-Personal-Token": "your_bitbucket_pat_or_app_password",
-      "X-Atlassian-Bitbucket-Url": "https://your-bitbucket-instance.com"
+      "X-Atlassian-Bitbucket-Url": "https://your-bitbucket-instance.com",
+      "X-Atlassian-Xray-Personal-Token": "your_xray_pat_or_api_token",
+      "X-Atlassian-Xray-Url": "https://your-xray-instance.com"
     },
     "type": "http"
   }
@@ -206,7 +217,8 @@ There are three main approaches to configure the Docker container:
 > - `X-Atlassian-Jira-Url`: Jira instance URL (passed as HTTP header)
 > - `X-Atlassian-Confluence-Personal-Token`: Confluence PAT/API token (passed as HTTP header)
 > - `X-Atlassian-Confluence-Url`: Confluence instance URL (passed as HTTP header)
-> - `X-Atlassian-Read-Only-Mode`: Per-request read-only mode (passed as HTTP header)
+> - `X-Atlassian-Xray-Personal-Token`: Xray PAT/API token (passed as HTTP header)
+> - `X-Atlassian-Xray-Url`: Xray instance URL (passed as HTTP header)
 >
 > See the [.env.example](https://github.com/SharkyND/mcp-atlassian/blob/main/.env.example) file for all available options.
 
@@ -901,41 +913,63 @@ Here's a complete example of setting up multi-user authentication with streamabl
 - `add_pull_request_blocker_comment`: Add a blocking comment to a pull request
 - `add_pull_request_comment`: Add a regular comment to a pull request
 
+#### Xray Tools
+
+- `get_tests`: Retrieve information about specific tests
+- `get_test_statuses`: Get all available test statuses
+- `get_test_runs`: Get test runs for a specific test
+- `get_test_executions`: Get test executions for a test
+- `get_test_plans`: Get test plans associated with a test
+- `create_test_step`: Create a new test step for a test
+- `update_test_step`: Update an existing test step
+- `update_test_run_status`: Update the status of a test run
+- `update_test_run_defects`: Associate defects with a test run
+
 
 <details> <summary>View All Tools</summary>
 
-| Operation | Jira Tools                    | Confluence Tools               | Bitbucket Tools                    |
-|-----------|-------------------------------|--------------------------------|------------------------------------|
-| **Read**  | `jira_search`                 | `confluence_search`            | `list_workspaces_or_projects`      |
-|           | `jira_get_issue`              | `confluence_get_page`          | `list_repositories`                |
-|           | `jira_get_all_projects`       | `confluence_get_page_children` | `get_repository_info`              |
-|           | `jira_get_project_issues`     | `confluence_get_comments`      | `list_branches`                    |
-|           | `jira_get_worklog`            | `confluence_get_labels`        | `get_default_branch`               |
-|           | `jira_get_transitions`        | `confluence_search_user`       | `get_file_content`                 |
-|           | `jira_search_fields`          |                                | `list_directory`                   |
-|           | `jira_get_agile_boards`       |                                | `list_pull_requests`               |
-|           | `jira_get_board_issues`       |                                | `pull_request_activities`          |
-|           | `jira_get_sprints_from_board` |                                | `get_pull_request`                 |
-|           | `jira_get_sprint_issues`      |                                | `get_commit_changes`               |
-|           | `jira_get_issue_link_types`   |                                | `get_commits`                      |
-|           | `jira_batch_get_changelogs`*  |                                |                                    |
-|           | `jira_get_user_profile`       |                                |                                    |
-|           | `jira_download_attachments`   |                                |                                    |
-|           | `jira_get_project_versions`   |                                |                                    |
-| **Write** | `jira_create_issue`           | `confluence_create_page`       | `create_pull_request`              |
-|           | `jira_update_issue`           | `confluence_update_page`       | `create_branch`                    |
-|           | `jira_delete_issue`           | `confluence_delete_page`       | `add_pull_request_blocker_comment` |
-|           | `jira_batch_create_issues`    | `confluence_add_label`         | `add_pull_request_comment`         |
-|           | `jira_add_comment`            | `confluence_add_comment`       |                                    |
-|           | `jira_transition_issue`       |                                |                                    |
-|           | `jira_add_worklog`            |                                |                                    |
-|           | `jira_link_to_epic`           |                                |                                    |
-|           | `jira_create_sprint`          |                                |                                    |
-|           | `jira_update_sprint`          |                                |                                    |
-|           | `jira_create_issue_link`      |                                |                                    |
-|           | `jira_remove_issue_link`      |                                |                                    |
-|           | `jira_create_version`         |                                |                                    |
-|           | `jira_batch_create_versions`  |                                |                                    |
+| Operation | Jira Tools                    | Confluence Tools               | Bitbucket Tools                    | Xray Tools                        |
+|-----------|-------------------------------|--------------------------------|------------------------------------|-----------------------------------|
+| **Read**  | `jira_search`                 | `confluence_search`            | `list_workspaces_or_projects`      | `get_tests`                       |
+|           | `jira_get_issue`              | `confluence_get_page`          | `list_repositories`                | `get_test_statuses`               |
+|           | `jira_get_all_projects`       | `confluence_get_page_children` | `get_repository_info`              | `get_test_runs`                   |
+|           | `jira_get_project_issues`     | `confluence_get_comments`      | `list_branches`                    | `get_test_runs_with_environment`  |
+|           | `jira_get_worklog`            | `confluence_get_labels`        | `get_default_branch`               | `get_test_preconditions`          |
+|           | `jira_get_transitions`        | `confluence_search_user`       | `get_file_content`                 | `get_test_sets`                   |
+|           | `jira_search_fields`          |                                | `list_directory`                   | `get_test_executions`             |
+|           | `jira_get_agile_boards`       |                                | `list_pull_requests`               | `get_test_plans`                  |
+|           | `jira_get_board_issues`       |                                | `pull_request_activities`          | `get_test_step_statuses`          |
+|           | `jira_get_sprints_from_board` |                                | `get_pull_request`                 | `get_test_step`                   |
+|           | `jira_get_sprint_issues`      |                                | `get_commit_changes`               | `get_test_steps`                  |
+|           | `jira_get_issue_link_types`   |                                | `get_commits`                      | `get_tests_with_precondition`     |
+|           | `jira_batch_get_changelogs`*  |                                |                                    | `get_tests_with_test_set`         |
+|           | `jira_get_user_profile`       |                                |                                    | `get_tests_with_test_plan`        |
+|           | `jira_download_attachments`   |                                |                                    | `get_test_executions_with_test_plan` |
+|           | `jira_get_project_versions`   |                                |                                    | `get_tests_with_test_execution`   |
+|           |                               |                                |                                    | `get_test_run`                    |
+|           |                               |                                |                                    | `get_test_run_assignee`           |
+|           |                               |                                |                                    | `get_test_run_iteration`          |
+|           |                               |                                |                                    | `get_test_run_status`             |
+|           |                               |                                |                                    | `get_test_run_defects`            |
+|           |                               |                                |                                    | `get_test_run_comment`            |
+|           |                               |                                |                                    | `get_test_run_steps`              |
+| **Write** | `jira_create_issue`           | `confluence_create_page`       | `create_pull_request`              | `create_test_step`                |
+|           | `jira_update_issue`           | `confluence_update_page`       | `create_branch`                    | `update_test_step`                |
+|           | `jira_delete_issue`           | `confluence_delete_page`       | `add_pull_request_blocker_comment` | `delete_test_step`                |
+|           | `jira_batch_create_issues`    | `confluence_add_label`         | `add_pull_request_comment`         | `update_precondition`             |
+|           | `jira_add_comment`            | `confluence_add_comment`       |                                    | `delete_test_from_precondition`   |
+|           | `jira_transition_issue`       |                                |                                    | `update_test_set`                 |
+|           | `jira_add_worklog`            |                                |                                    | `delete_test_from_test_set`       |
+|           | `jira_link_to_epic`           |                                |                                    | `update_test_plan`                |
+|           | `jira_create_sprint`          |                                |                                    | `delete_test_from_test_plan`      |
+|           | `jira_update_sprint`          |                                |                                    | `update_test_plan_test_executions` |
+|           | `jira_create_issue_link`      |                                |                                    | `delete_test_execution_from_test_plan` |
+|           | `jira_remove_issue_link`      |                                |                                    | `update_test_execution`           |
+|           | `jira_create_version`         |                                |                                    | `delete_test_from_test_execution` |
+|           | `jira_batch_create_versions`  |                                |                                    | `update_test_run_assignee`        |
+|           |                               |                                |                                    | `update_test_run_status`          |
+|           |                               |                                |                                    | `update_test_run_defects`         |
+|           |                               |                                |                                    | `update_test_run_comment`         |
 
 </details>
 

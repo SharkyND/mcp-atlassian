@@ -1,6 +1,6 @@
-"""Dependency providers for JiraFetcher, ConfluenceFetcher, and BitbucketFetcher with context awareness.
+"""Dependency providers for JiraFetcher, ConfluenceFetcher, BitbucketFetcher, and XrayFetcher with context awareness.
 
-Provides get_jira_fetcher, get_confluence_fetcher, and get_bitbucket_fetcher for use in tool functions.
+Provides get_jira_fetcher, get_confluence_fetcher, get_bitbucket_fetcher, and get_xray_fetcher for use in tool functions.
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ from mcp_atlassian.confluence import ConfluenceConfig, ConfluenceFetcher
 from mcp_atlassian.jira import JiraConfig, JiraFetcher
 from mcp_atlassian.servers.context import MainAppContext
 from mcp_atlassian.utils.oauth import OAuthConfig
+from mcp_atlassian.Xray import XrayConfig, XrayFetcher
 
 if TYPE_CHECKING:
     from mcp_atlassian.bitbucket.config import (
@@ -27,26 +28,29 @@ if TYPE_CHECKING:
         ConfluenceConfig as UserConfluenceConfigType,
     )
     from mcp_atlassian.jira.config import JiraConfig as UserJiraConfigType
+    from mcp_atlassian.Xray.config import (
+        XrayConfig as UserXrayConfigType,
+    )
 
 logger = logging.getLogger("mcp-atlassian.servers.dependencies")
 
 
 def _create_user_config_for_fetcher(
-    base_config: JiraConfig | ConfluenceConfig | BitbucketConfig,
+    base_config: JiraConfig | ConfluenceConfig | BitbucketConfig | XrayConfig,
     auth_type: str,
     credentials: dict[str, Any],
     cloud_id: str | None = None,
-) -> JiraConfig | ConfluenceConfig | BitbucketConfig:
-    """Create a user-specific configuration for Jira, Confluence, or Bitbucket fetchers.
+) -> JiraConfig | ConfluenceConfig | BitbucketConfig | XrayConfig:
+    """Create a user-specific configuration for Jira, Confluence, Bitbucket, or Xray fetchers.
 
     Args:
-        base_config: The base JiraConfig, ConfluenceConfig, or BitbucketConfig to clone and modify.
+        base_config: The base JiraConfig, ConfluenceConfig, BitbucketConfig, or XrayConfig to clone and modify.
         auth_type: The authentication type ('oauth' or 'pat').
         credentials: Dictionary of credentials (token, email, etc).
         cloud_id: Optional cloud ID to override the base config cloud ID.
 
     Returns:
-        JiraConfig, ConfluenceConfig, or BitbucketConfig with user-specific credentials.
+        JiraConfig, ConfluenceConfig, BitbucketConfig, or XrayConfig with user-specific credentials.
 
     Raises:
         ValueError: If required credentials are missing or auth_type is unsupported.
@@ -124,7 +128,7 @@ def _create_user_config_for_fetcher(
                     "oauth_config": oauth_config_for_user,
                 }
             )
-        else:  # Jira and Confluence use api_token
+        else:  # Jira and Confluence and Xray use api_token
             common_args.update(
                 {
                     "username": username_for_config,
@@ -160,6 +164,12 @@ def _create_user_config_for_fetcher(
         )
         user_jira_config.projects_filter = base_config.projects_filter
         return user_jira_config
+    elif isinstance(base_config, XrayConfig):
+        user_xray_config: UserXrayConfigType = dataclasses.replace(
+            base_config, **common_args
+        )
+        user_xray_config.projects_filter = base_config.projects_filter
+        return user_xray_config
     elif isinstance(base_config, ConfluenceConfig):
         user_confluence_config: UserConfluenceConfigType = dataclasses.replace(
             base_config, **common_args
@@ -284,6 +294,7 @@ async def get_jira_fetcher(ctx: Context) -> JiraFetcher:
             try:
                 user_jira_fetcher = JiraFetcher(config=user_specific_config)
                 current_user_id = user_jira_fetcher.get_current_user_account_id()
+
                 logger.debug(
                     f"get_jira_fetcher: Validated Jira token for user ID: {current_user_id}"
                 )
@@ -689,4 +700,189 @@ async def get_bitbucket_fetcher(ctx: Context) -> BitbucketFetcher:
     logger.error("Bitbucket configuration could not be resolved.")
     raise ValueError(
         "Bitbucket client (fetcher) not available. Ensure server is configured correctly."
+    )
+
+
+async def get_xray_fetcher(ctx: Context) -> XrayFetcher:
+    """Returns a XrayFetcher instance appropriate for the current request context.
+
+    Args:
+        ctx: The FastMCP context.
+
+    Returns:
+        XrayFetcher instance for the current user or global config.
+
+    Raises:
+        ValueError: If configuration or credentials are invalid.
+    """
+    logger.debug(f"get_xray_fetcher: ENTERED. Context ID: {id(ctx)}")
+    try:
+        request: Request = get_http_request()
+        logger.debug(
+            f"get_xray_fetcher: In HTTP request context. Request URL: {request.url}. "
+            f"State.xray_fetcher exists: {hasattr(request.state, 'xray_fetcher') and request.state.xray_fetcher is not None}. "
+            f"State.user_auth_type: {getattr(request.state, 'user_atlassian_auth_type', 'N/A')}. "
+            f"State.user_token_present: {hasattr(request.state, 'user_atlassian_token') and request.state.user_atlassian_token is not None}."
+        )
+        # Use fetcher from request.state if already present
+        if hasattr(request.state, "xray_fetcher") and request.state.xray_fetcher:
+            logger.debug("get_xray_fetcher: Returning XrayFetcher from request.state.")
+            return request.state.xray_fetcher
+        user_auth_type = getattr(request.state, "user_atlassian_auth_type", None)
+        logger.debug(f"get_xray_fetcher: User auth type: {user_auth_type}")
+
+        service_headers = getattr(request.state, "atlassian_service_headers", {})
+        xray_url_header = service_headers.get("X-Atlassian-Xray-Url")
+        xray_token_header = service_headers.get("X-Atlassian-Xray-Personal-Token")
+
+        if (
+            user_auth_type == "pat"
+            and xray_url_header
+            and xray_token_header
+            and not hasattr(request.state, "user_atlassian_token")
+        ):
+            logger.info(
+                f"Creating header-based XrayFetcher with URL: {xray_url_header} and PAT token"
+            )
+            header_config = XrayConfig(
+                url=xray_url_header,
+                auth_type="pat",
+                personal_token=xray_token_header,
+                ssl_verify=True,
+                projects_filter=None,
+                http_proxy=None,
+                https_proxy=None,
+                no_proxy=None,
+                socks_proxy=None,
+                custom_headers=None,
+            )
+            try:
+                header_xray_fetcher = XrayFetcher(config=header_config)
+                current_user_info = header_xray_fetcher.get_current_user_info()
+                derived_email = (
+                    current_user_info.get("email")
+                    if isinstance(current_user_info, dict)
+                    else None
+                )
+                display_name = (
+                    current_user_info.get("displayName")
+                    if isinstance(current_user_info, dict)
+                    else None
+                )
+                request.state.xray_fetcher = header_xray_fetcher
+
+                logger.debug(
+                    f"get_xray_fetcher: Validated header-based Xray token. User context: Email='{derived_email}', DisplayName='{display_name}'"
+                )
+
+                if (
+                    derived_email
+                    and current_user_info
+                    and isinstance(current_user_info, dict)
+                ):
+                    request.state.user_atlassian_email = current_user_info["email"]
+
+                return header_xray_fetcher
+            except Exception as e:
+                logger.error(
+                    f"get_xray_fetcher: Failed to create/validate header-based XrayFetcher: {e}",
+                    exc_info=True,
+                )
+                raise ValueError(
+                    f"Invalid header-based Xray token or configuration: {e}"
+                )
+
+        elif user_auth_type in ["oauth", "pat"] and hasattr(
+            request.state, "user_atlassian_token"
+        ):
+            user_token = getattr(request.state, "user_atlassian_token", None)
+            user_email = getattr(request.state, "user_atlassian_email", None)
+            user_cloud_id = getattr(request.state, "user_atlassian_cloud_id", None)
+
+            if not user_token:
+                raise ValueError("User Atlassian token found in state but is empty.")
+            credentials = {"user_email_context": user_email}
+            if user_auth_type == "oauth":
+                credentials["oauth_access_token"] = user_token
+            elif user_auth_type == "pat":
+                credentials["personal_access_token"] = user_token
+            lifespan_ctx_dict = ctx.request_context.lifespan_context  # type: ignore
+            app_lifespan_ctx: MainAppContext | None = (
+                lifespan_ctx_dict.get("app_lifespan_context")
+                if isinstance(lifespan_ctx_dict, dict)
+                else None
+            )
+            if not app_lifespan_ctx or not app_lifespan_ctx.full_xray_config:
+                raise ValueError(
+                    "Xray global configuration (URL, SSL) is not available from lifespan context."
+                )
+
+            cloud_id_info = f" with cloudId {user_cloud_id}" if user_cloud_id else ""
+            logger.info(
+                f"Creating user-specific XrayFetcher (type: {user_auth_type}) for user {user_email or 'unknown'} (token ...{str(user_token)[-8:]}){cloud_id_info}"
+            )
+            user_specific_config = _create_user_config_for_fetcher(
+                base_config=app_lifespan_ctx.full_xray_config,
+                auth_type=user_auth_type,
+                credentials=credentials,
+                cloud_id=user_cloud_id,
+            )
+            try:
+                user_xray_fetcher = XrayFetcher(config=user_specific_config)
+                current_user_info = user_xray_fetcher.get_current_user_info()
+                derived_email = (
+                    current_user_info.get("email")
+                    if isinstance(current_user_info, dict)
+                    else None
+                )
+                display_name = (
+                    current_user_info.get("displayName")
+                    if isinstance(current_user_info, dict)
+                    else None
+                )
+                logger.debug(
+                    f"get_xray_fetcher: Validated Xray token. User context: Email='{user_email or derived_email}', DisplayName='{display_name}'"
+                )
+                if (
+                    not user_email
+                    and derived_email
+                    and current_user_info
+                    and isinstance(current_user_info, dict)
+                    and current_user_info.get("email")
+                ):
+                    request.state.user_atlassian_email = current_user_info["email"]
+
+                request.state.xray_fetcher = user_xray_fetcher
+                return user_xray_fetcher
+            except Exception as e:
+                logger.error(
+                    f"get_xray_fetcher: Failed to create/validate user-specific XrayFetcher: {e}",
+                    exc_info=True,
+                )
+                raise ValueError(f"Invalid user Xray token or configuration: {e}")
+        else:
+            logger.debug(
+                f"get_xray_fetcher: No user-specific XrayFetcher. Auth type: {user_auth_type}. Token present: {hasattr(request.state, 'user_atlassian_token')}. Will use global fallback."
+            )
+    except RuntimeError:
+        logger.debug(
+            "Not in an HTTP request context. Attempting global XrayFetcher for non-HTTP."
+        )
+    # Fallback to global fetcher if not in HTTP context or no user info
+    lifespan_ctx_dict_global = ctx.request_context.lifespan_context  # type: ignore
+    app_lifespan_ctx_global: MainAppContext | None = (
+        lifespan_ctx_dict_global.get("app_lifespan_context")
+        if isinstance(lifespan_ctx_dict_global, dict)
+        else None
+    )
+    if app_lifespan_ctx_global and app_lifespan_ctx_global.full_xray_config:
+        # Check if this is a header-only config (empty URL means header-based)
+        logger.debug(
+            "get_xray_fetcher: Using global XrayFetcher from lifespan_context. "
+            f"Global config auth_type: {app_lifespan_ctx_global.full_xray_config.auth_type}"
+        )
+        return XrayFetcher(config=app_lifespan_ctx_global.full_xray_config)
+    logger.error("Xray configuration could not be resolved.")
+    raise ValueError(
+        "Xray client (fetcher) not available. Ensure server is configured correctly."
     )
