@@ -1092,10 +1092,12 @@ class TestJiraSearchResult:
         api_data.pop("maxResults", None)
 
         search_result = JiraSearchResult.from_api_response(api_data)
-        # Verify that -1 is used for missing metadata
-        assert search_result.total == -1
-        assert search_result.start_at == -1
+        # Verify that sensible defaults are used for missing metadata
+        assert search_result.total == 1  # Falls back to number of returned issues
+        assert search_result.start_at == 0
         assert search_result.max_results == -1
+        assert search_result.next_page_token is None
+        assert search_result.is_last is None
         assert len(search_result.issues) == 1  # Assuming mock data has issues
 
     def test_to_simplified_dict(self, jira_search_data):
@@ -1109,11 +1111,15 @@ class TestJiraSearchResult:
         assert "start_at" in simplified
         assert "max_results" in simplified
         assert "issues" in simplified
+        assert "next_page_token" in simplified
+        assert "is_last" in simplified
 
         # Verify metadata values
         assert simplified["total"] == 34
         assert simplified["start_at"] == 0
         assert simplified["max_results"] == 5
+        assert simplified["next_page_token"] is None
+        assert simplified["is_last"] is None
 
         # Verify issues array
         assert isinstance(simplified["issues"], list)
@@ -1145,6 +1151,8 @@ class TestJiraSearchResult:
         assert simplified["start_at"] == 0
         assert simplified["max_results"] == 0
         assert simplified["issues"] == []
+        assert simplified["next_page_token"] is None
+        assert simplified["is_last"] is None
 
     def test_to_simplified_dict_with_multiple_issues(self):
         """Test converting JiraSearchResult with multiple issues to a simplified dictionary."""

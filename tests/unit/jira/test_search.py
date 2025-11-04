@@ -52,69 +52,95 @@ class TestSearchMixin:
             "maxResults": 50,
         }
 
-    @pytest.mark.parametrize(
-        "is_cloud, expected_method_name",
-        [
-            (True, "enhanced_jql_get_list_of_tickets"),  # Cloud scenario
-            (False, "jql"),  # Server/DC scenario
-        ],
-    )
-    def test_search_issues_calls_correct_method(
-        self,
-        search_mixin: SearchMixin,
-        mock_issues_response,
-        is_cloud,
-        expected_method_name,
+    def test_search_issues_calls_cloud_endpoint(
+        self, search_mixin: SearchMixin, mock_issues_response
     ):
-        """Test that the correct Jira API method is called based on Cloud/Server setting."""
-        # Setup: Mock config.is_cloud
-        search_mixin.config.is_cloud = is_cloud
-        search_mixin.config.projects_filter = None  # No filter for this test
-        search_mixin.config.url = (
-            "https://test.example.com"  # Model creation needs this
-        )
+        """Ensure Jira Cloud uses the enhanced /search/jql endpoint."""
+        search_mixin.config.is_cloud = True
+        search_mixin.config.projects_filter = None
+        search_mixin.config.url = "https://test.example.com"
 
-        # Setup: Mock response for both API methods
-        search_mixin.jira.enhanced_jql_get_list_of_tickets = MagicMock(
-            return_value=mock_issues_response["issues"]
-        )
-        search_mixin.jira.jql = MagicMock(return_value=mock_issues_response)
+        cloud_response = {
+            "issues": mock_issues_response["issues"],
+            "nextPageToken": None,
+            "isLast": True,
+        }
 
-        # Determine other method name for assertion
-        other_method_name = (
-            "jql"
-            if expected_method_name == "enhanced_jql_get_list_of_tickets"
-            else "enhanced_jql_get_list_of_tickets"
-        )
+        search_mixin.jira.resource_url.side_effect = lambda path: path
+        search_mixin.jira.get.reset_mock()
+        search_mixin.jira.get.return_value = cloud_response
 
-        # Act
         jql_query = "project = TEST"
         result = search_mixin.search_issues(jql_query, limit=10, start=0)
 
-        # Assert: Basic result verification
         assert isinstance(result, JiraSearchResult)
-        assert len(result.issues) > 0  # Based on mocked response
+        assert len(result.issues) == len(mock_issues_response["issues"])
+        assert result.next_page_token is None
+        assert result.is_last is True
 
-        # Assert: Correct method call verification
-        expected_method_mock = getattr(search_mixin.jira, expected_method_name)
+        search_mixin.jira.get.assert_called_once()
+        called_path = search_mixin.jira.get.call_args[0][0]
+        params = search_mixin.jira.get.call_args[1]["params"]
 
-        # Define expected kwargs based on whether it's Cloud or Server
-        expected_kwargs = {
-            "limit": 10,
-            "expand": None,
+        assert called_path == "search/jql"
+        assert params["jql"] == jql_query
+        assert params["maxResults"] == 10
+        assert "fields" in params
+
+        search_mixin.jira.jql.assert_not_called()
+
+    def test_search_issues_calls_server_endpoint(
+        self, search_mixin: SearchMixin, mock_issues_response
+    ):
+        """Ensure Jira Server/Data Center uses the classic search endpoint."""
+        search_mixin.config.is_cloud = False
+        search_mixin.config.projects_filter = None
+        search_mixin.config.url = "https://test.example.com"
+
+        search_mixin.jira.jql = MagicMock(return_value=mock_issues_response)
+
+        jql_query = "project = TEST"
+        result = search_mixin.search_issues(jql_query, limit=10, start=0)
+
+        assert isinstance(result, JiraSearchResult)
+        assert len(result.issues) == len(mock_issues_response["issues"])
+
+        search_mixin.jira.jql.assert_called_once_with(
+            jql_query, fields=ANY, start=0, limit=10, expand=None
+        )
+        search_mixin.jira.get.assert_not_called()
+
+    def test_search_issues_cloud_handles_pagination(self, search_mixin: SearchMixin):
+        """Verify Cloud pagination stops at the requested limit and tracks tokens."""
+        search_mixin.config.is_cloud = True
+        search_mixin.config.projects_filter = None
+        search_mixin.config.url = "https://test.example.com"
+        search_mixin.jira.resource_url.side_effect = lambda path: path
+
+        page_one_issue = {
+            "id": "10001",
+            "key": "TEST-1",
+            "fields": {"summary": "Issue one"},
+        }
+        page_two_issue = {
+            "id": "10002",
+            "key": "TEST-2",
+            "fields": {"summary": "Issue two"},
         }
 
-        # Add start param only for Server/DC
-        if not is_cloud:
-            expected_kwargs["start"] = 0
+        search_mixin.jira.get.side_effect = [
+            {"issues": [page_one_issue], "nextPageToken": "token-123", "isLast": False},
+            {"issues": [page_two_issue], "nextPageToken": None, "isLast": True},
+        ]
 
-        expected_method_mock.assert_called_once_with(
-            jql_query, fields=ANY, **expected_kwargs
-        )
+        result = search_mixin.search_issues("project = TEST", limit=2)
 
-        # Assert: Other method was not called
-        other_method_mock = getattr(search_mixin.jira, other_method_name)
-        other_method_mock.assert_not_called()
+        assert isinstance(result, JiraSearchResult)
+        assert len(result.issues) == 2
+        assert result.next_page_token is None
+        assert result.is_last is True
+        assert result.total == 2
+        assert search_mixin.jira.get.call_count == 2
 
     def test_search_issues_basic(self, search_mixin: SearchMixin):
         """Test basic search functionality."""
@@ -255,7 +281,7 @@ class TestSearchMixin:
         # Verify results
         assert isinstance(result, JiraSearchResult)
         assert len(result.issues) == 0
-        assert result.total == -1
+        assert result.total == 0
 
     def test_search_issues_with_error(self, search_mixin: SearchMixin):
         """Test search with API error."""
