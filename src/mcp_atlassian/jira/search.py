@@ -87,18 +87,61 @@ class SearchMixin(JiraClient, IssueOperationsProto):
                 fields_param = fields
 
             if self.config.is_cloud:
+                limit_value = limit if isinstance(limit, int) else 50
+                limit_value = max(limit_value, 0)
+                response_dict_for_model: dict[str, Any] = {}
                 try:
                     issues_accumulated: list[dict] = []
-                    remaining = max(limit, 0)
+                    remaining = limit_value
                     token_for_request: str | None = None
                     last_response: dict[str, Any] | None = None
 
+                    params: dict[str, Any] = {}
+                    if limit_value == 0:
+                        params["jql"] = jql
+                        params["maxResults"] = 0
+                        if fields_param:
+                            params["fields"] = fields_param
+                        if expand:
+                            params["expand"] = expand
+
+                        zero_limit_response = self.jira.get(
+                            self.jira.resource_url("search/jql"), params=params
+                        )
+                        if not isinstance(zero_limit_response, dict):
+                            msg = (
+                                "Unexpected return value type from Jira search/jql "
+                                f"response when limit is zero: {type(zero_limit_response)}"
+                            )
+                            logger.error(msg)
+                            raise TypeError(msg)
+
+                        response_dict_for_model["issues"] = []
+                        response_dict_for_model["nextPageToken"] = (
+                            zero_limit_response.get("nextPageToken")
+                        )
+                        response_dict_for_model["isLast"] = zero_limit_response.get(
+                            "isLast"
+                        )
+                        response_dict_for_model["maxResults"] = 0
+                        total_value = zero_limit_response.get("total")
+                        if isinstance(total_value, int):
+                            response_dict_for_model["total"] = int(total_value)
+
+                        search_result = JiraSearchResult.from_api_response(
+                            response_dict_for_model,
+                            base_url=self.config.url,
+                            requested_fields=fields_param,
+                        )
+
+                        return search_result
+
                     while remaining > 0:
-                        page_limit = min(remaining if remaining > 0 else limit, 5000)
-                        params: dict[str, Any] = {
-                            "jql": jql,
-                            "maxResults": page_limit,
-                        }
+                        page_limit = min(
+                            remaining if remaining > 0 else limit_value, 5000
+                        )
+                        params["jql"] = jql
+                        params["maxResults"] = page_limit
                         if fields_param:
                             params["fields"] = fields_param
                         if expand:
@@ -139,27 +182,30 @@ class SearchMixin(JiraClient, IssueOperationsProto):
 
                         token_for_request = str(next_page_token)
 
-                    trimmed_issues = issues_accumulated[:limit]
-                    response_dict_for_model: dict[str, Any] = {
-                        "issues": trimmed_issues,
-                        "nextPageToken": (
-                            last_response.get("nextPageToken")
-                            if isinstance(last_response, dict)
-                            else None
-                        ),
-                        "isLast": (
-                            last_response.get("isLast")
-                            if isinstance(last_response, dict)
-                            else None
-                        ),
-                        "maxResults": limit,
-                    }
+                    trimmed_issues = (
+                        issues_accumulated[:limit_value]
+                        if limit_value > 0
+                        else issues_accumulated
+                    )
+                    response_dict_for_model["issues"] = trimmed_issues
+                    response_dict_for_model["nextPageToken"] = (
+                        last_response.get("nextPageToken")
+                        if isinstance(last_response, dict)
+                        else None
+                    )
+                    response_dict_for_model["isLast"] = (
+                        last_response.get("isLast")
+                        if isinstance(last_response, dict)
+                        else None
+                    )
 
                     if isinstance(last_response, dict):
                         if (
                             last_response.get("nextPageToken") in (None, "")
                             or last_response.get("isLast") is True
-                        ) and len(issues_accumulated) <= limit:
+                        ) and len(issues_accumulated) <= (
+                            limit_value if limit_value > 0 else len(issues_accumulated)
+                        ):
                             response_dict_for_model["total"] = len(issues_accumulated)
 
                     search_result = JiraSearchResult.from_api_response(
@@ -169,6 +215,11 @@ class SearchMixin(JiraClient, IssueOperationsProto):
                     )
 
                     return search_result
+                except Exception:
+                    logger.error(
+                        "Error executing Jira Cloud enhanced search", exc_info=True
+                    )
+                    raise
             else:
                 limit = min(limit, 50)
                 response = self.jira.jql(
