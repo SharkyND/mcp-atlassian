@@ -56,6 +56,7 @@ The following table lists the configurable parameters and their default values.
 | `env.CONFLUENCE_URL` | Confluence base URL | `""` (commented) |
 | `env.JIRA_URL` | Jira base URL | `""` (commented) |
 | `env.MCP_VERBOSE` | Enable verbose logging | `""` (commented) |
+| `env.REQUIRE_USERNAME` | Enable requirement of username for monitoring | `false` (commented) |
 
 ### Ingress Configuration
 

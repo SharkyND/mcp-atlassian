@@ -1,6 +1,8 @@
 """Main FastMCP server setup for Atlassian integration."""
 
+import json
 import logging
+import os
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from typing import Any, Literal, Optional
@@ -12,7 +14,8 @@ from mcp.types import Tool as MCPTool
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
+from starlette.routing import Route
 
 from mcp_atlassian.bitbucket import BitbucketFetcher
 from mcp_atlassian.bitbucket.config import BitbucketConfig
@@ -23,6 +26,7 @@ from mcp_atlassian.jira.config import JiraConfig
 from mcp_atlassian.utils.environment import get_available_services
 from mcp_atlassian.utils.io import is_read_only_mode
 from mcp_atlassian.utils.logging import mask_sensitive
+from mcp_atlassian.utils.prometheus_metrics import get_metrics, initialize_metrics
 from mcp_atlassian.utils.tools import get_enabled_tools, should_include_tool
 from mcp_atlassian.Xray import XrayFetcher
 from mcp_atlassian.Xray.config import XrayConfig
@@ -35,9 +39,31 @@ from .xray import xray_mcp
 
 logger = logging.getLogger("mcp-atlassian.server.main")
 
+# Initialize metrics immediately when module is loaded
+pod_name = os.environ.get("POD_NAME")
+initialize_metrics(pod_name)
+logger.info(f"Metrics collection initialized for pod: {pod_name}")
 
-async def health_check(request: Request) -> JSONResponse:
+
+async def health_check() -> JSONResponse:
     return JSONResponse({"status": "ok"})
+
+
+async def metrics_endpoint(request: Request) -> Response:
+    """Prometheus metrics endpoint for scraping."""
+    metrics_collector = get_metrics()
+    logger.debug(
+        f"Metrics endpoint called. Collector: {metrics_collector}, Enabled: {metrics_collector.is_enabled if metrics_collector else 'N/A'}"
+    )
+    if not metrics_collector or not metrics_collector.is_enabled:
+        return Response(
+            "# Metrics collection not enabled\n",
+            media_type="text/plain",
+            status_code=503,
+        )
+
+    content, content_type = metrics_collector.generate_metrics()
+    return Response(content, media_type=content_type)
 
 
 @asynccontextmanager
@@ -324,6 +350,10 @@ class AtlassianMCP(FastMCP[MainAppContext]):
             stateless_http=stateless_http,
             **kwargs,
         )
+
+        # Add metrics endpoint
+        app.router.routes.append(Route("/metrics", metrics_endpoint, methods=["GET"]))
+
         return app
 
 
@@ -375,6 +405,18 @@ class UserTokenMiddleware:
         if "state" not in scope_copy:
             scope_copy["state"] = {}
 
+        # Start metrics tracking for HTTP request
+        metrics_collector = get_metrics()
+        request_path = scope.get("path", "")
+        method = scope.get("method", "")
+        metrics_context = None
+
+        # Start request tracking
+        if metrics_collector:
+            metrics_context = metrics_collector.start_request_tracking(
+                method, request_path
+            )
+
         mcp_server_instance = self.mcp_server_ref
         if mcp_server_instance is None:
             logger.debug(
@@ -396,6 +438,41 @@ class UserTokenMiddleware:
         if request_path == mcp_path and method == "POST":
             # Parse headers from scope (headers are byte tuples per ASGI spec)
             headers = dict(scope.get("headers", []))
+
+            # Extract User-Agent header for tracking and make it lowercase
+            user_agent_header = headers.get(b"user-agent")
+            user_agent = (
+                user_agent_header.decode("latin-1") if user_agent_header else None
+            )
+            user_agent = user_agent.lower() if user_agent else None
+
+            # get username if present
+            username_header = headers.get(b"x-atlassian-username")
+            username = username_header.decode("latin-1") if username_header else None
+            username = username.lower() if username else None
+
+            # Check username requirement - validate that at least one username is provided
+            if os.environ.get("REQUIRE_USERNAME") == "true":
+                if not username:
+                    logger.error(
+                        "Username validation failed: REQUIRE_USERNAME is enabled but no username header provided"
+                    )
+                    error_response = json.dumps(
+                        {
+                            "error": "Username required",
+                            "message": '"X-Atlassian-Username" must be provided in headers when REQUIRE_USERNAME is enabled',
+                        }
+                    ).encode()
+
+                    await send(
+                        {
+                            "type": "http.response.start",
+                            "status": 400,
+                            "headers": [(b"content-type", b"application/json")],
+                        }
+                    )
+                    await send({"type": "http.response.body", "body": error_response})
+                    return
 
             # Convert bytes to strings (ASGI headers are always bytes)
             auth_header = headers.get(b"authorization")
@@ -425,6 +502,7 @@ class UserTokenMiddleware:
                 if confluence_token_header
                 else None
             )
+
             confluence_url_header = headers.get(b"x-atlassian-confluence-url")
             confluence_url_header_str = (
                 confluence_url_header.decode("latin-1")
@@ -440,6 +518,7 @@ class UserTokenMiddleware:
                 if bitbucket_token_header
                 else None
             )
+
             bitbucket_url_header = headers.get(b"x-atlassian-bitbucket-url")
             bitbucket_url_header_str = (
                 bitbucket_url_header.decode("latin-1") if bitbucket_url_header else None
@@ -452,6 +531,107 @@ class UserTokenMiddleware:
             xray_url_header_str = (
                 xray_url_header.decode("latin-1") if xray_url_header else None
             )
+
+            # Track service-specific user activity for business intelligence
+            activity_type = None
+            cached_messages = []
+            message_index = 0
+
+            # Create a wrapper to cache the request body without consuming it
+            async def cached_receive() -> dict:
+                nonlocal cached_messages, message_index
+
+                # If we already have this message cached, return it
+                if message_index < len(cached_messages):
+                    message = cached_messages[message_index]
+                    message_index += 1
+                    return message
+
+                # Otherwise, receive and cache the message
+                message = await receive()
+                cached_messages.append(message)
+                message_index += 1
+                return message
+
+            if metrics_collector:
+                try:
+                    # Read the request body to extract activity type
+                    body_parts = []
+                    while True:
+                        message = await cached_receive()
+                        if message["type"] == "http.request":
+                            body_parts.append(message.get("body", b""))
+                            if not message.get("more_body", False):
+                                break
+                        else:
+                            break
+
+                    # Combine all body parts
+                    full_body = b"".join(body_parts)
+                    if full_body:
+                        body_data = json.loads(full_body.decode("utf-8"))
+                        activity_type = body_data.get("params", {}).get("name")
+
+                    # Reset message index for the actual app to consume from the beginning
+                    message_index = 0
+
+                except (json.JSONDecodeError, UnicodeDecodeError, KeyError):
+                    # If we can't parse the body, continue without activity type
+                    activity_type = None
+                    # Reset message index for the actual app
+                    message_index = 0
+                # Only track when service-specific headers are provided (header-based auth)
+                # Track activity only once per request, using the appropriate service
+
+                # Determine which service to use based on activity type, or fallback to first available
+                service_to_use = None
+                username_to_use = None
+
+                if activity_type:
+                    if (
+                        activity_type.startswith("jira_")
+                        and jira_token_header_str
+                        and jira_url_header_str
+                    ):
+                        service_to_use = "jira"
+                        username_to_use = username
+                    elif (
+                        activity_type.startswith("confluence_")
+                        and confluence_token_header_str
+                        and confluence_url_header_str
+                    ):
+                        service_to_use = "confluence"
+                        username_to_use = username
+                    elif (
+                        activity_type.startswith("bitbucket_")
+                        and bitbucket_token_header_str
+                        and bitbucket_url_header_str
+                    ):
+                        service_to_use = "bitbucket"
+                        username_to_use = username
+
+                # If no specific service determined from activity type, use first available service
+                if not service_to_use:
+                    if jira_token_header_str and jira_url_header_str:
+                        service_to_use = "jira"
+                        username_to_use = username
+                        activity_type = activity_type or "jira_access"
+                    elif confluence_token_header_str and confluence_url_header_str:
+                        service_to_use = "confluence"
+                        username_to_use = username
+                        activity_type = activity_type or "confluence_access"
+                    elif bitbucket_token_header_str and bitbucket_url_header_str:
+                        service_to_use = "bitbucket"
+                        username_to_use = username
+                        activity_type = activity_type or "bitbucket_access"
+
+                # Track the activity for the determined service
+                if service_to_use:
+                    metrics_collector.track_user_activity(
+                        username=username_to_use,
+                        user_agent=user_agent,
+                        activity_type=activity_type,
+                    )
 
             token_for_log = mask_sensitive(
                 auth_header_str.split(" ", 1)[1].strip()
@@ -480,7 +660,6 @@ class UserTokenMiddleware:
                     "UserTokenMiddleware: No cloudId header provided, "
                     "will use global config"
                 )
-
             service_headers = {}
             if jira_token_header_str:
                 service_headers["X-Atlassian-Jira-Personal-Token"] = (
@@ -603,9 +782,16 @@ class UserTokenMiddleware:
                         f"if applicable."
                     )
 
-        # Create a safe send wrapper to handle client disconnections
+        # Create a safe send wrapper to handle client disconnections and track metrics
+        response_status = 200  # Default status
+
         async def safe_send(message: dict) -> None:
+            nonlocal response_status
             try:
+                # Track response status for metrics
+                if message.get("type") == "http.response.start":
+                    response_status = message.get("status", 200)
+
                 await send(message)
             except (ConnectionResetError, BrokenPipeError, OSError) as e:
                 # Client disconnected - log but don't propagate to avoid ASGI violations
@@ -618,8 +804,13 @@ class UserTokenMiddleware:
                 # Re-raise unexpected errors
                 raise
 
-        # Continue with the request using the modified scope
-        await self.app(scope_copy, receive, safe_send)
+        # Continue with the request using the modified scope and cached receive
+        receive_func = cached_receive if "cached_receive" in locals() else receive
+        await self.app(scope_copy, receive_func, safe_send)
+
+        # End metrics tracking
+        if metrics_collector and metrics_context:
+            metrics_collector.end_request_tracking(metrics_context, response_status)
 
         logger.debug(
             f"UserTokenMiddleware.__call__: EXITED for request path='{request_path}'"
@@ -670,7 +861,7 @@ main_mcp.mount(bitbucket_mcp, prefix="bitbucket")
 
 @main_mcp.custom_route("/healthz", methods=["GET"], include_in_schema=False)
 async def _health_check_route(request: Request) -> JSONResponse:
-    return await health_check(request)
+    return await health_check()
 
 
 @main_mcp.custom_route("/readyz", methods=["GET"], include_in_schema=False)
