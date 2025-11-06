@@ -26,6 +26,8 @@ def env_scenarios():
         "oauth_cloud": {
             "CONFLUENCE_URL": "https://company.atlassian.net",
             "JIRA_URL": "https://company.atlassian.net",
+            "BITBUCKET_URL": "https://bitbucket.org/company",
+            "XRAY_URL": "https://company.atlassian.net",
             "ATLASSIAN_OAUTH_CLIENT_ID": "client_id",
             "ATLASSIAN_OAUTH_CLIENT_SECRET": "client_secret",
             "ATLASSIAN_OAUTH_REDIRECT_URI": "http://localhost:8080/callback",
@@ -39,12 +41,22 @@ def env_scenarios():
             "JIRA_URL": "https://company.atlassian.net",
             "JIRA_USERNAME": "user@company.com",
             "JIRA_API_TOKEN": "api_token",
+            "BITBUCKET_URL": "https://bitbucket.org/company",
+            "BITBUCKET_USERNAME": "user@company.com",
+            "BITBUCKET_APP_PASSWORD": "app_password",
+            "XRAY_URL": "https://company.atlassian.net",
+            "XRAY_USERNAME": "user@company.com",
+            "XRAY_API_TOKEN": "api_token",
         },
         "pat_server": {
             "CONFLUENCE_URL": "https://confluence.company.com",
             "CONFLUENCE_PERSONAL_TOKEN": "pat_token",
             "JIRA_URL": "https://jira.company.com",
             "JIRA_PERSONAL_TOKEN": "pat_token",
+            "BITBUCKET_URL": "https://bitbucket.company.com",
+            "BITBUCKET_PERSONAL_TOKEN": "pat_token",
+            "XRAY_URL": "https://xray.company.com",
+            "XRAY_PERSONAL_TOKEN": "pat_token",
         },
         "basic_auth_server": {
             "CONFLUENCE_URL": "https://confluence.company.com",
@@ -53,18 +65,29 @@ def env_scenarios():
             "JIRA_URL": "https://jira.company.com",
             "JIRA_USERNAME": "admin",
             "JIRA_API_TOKEN": "password",
+            "BITBUCKET_URL": "https://bitbucket.company.com",
+            "BITBUCKET_USERNAME": "admin",
+            "BITBUCKET_APP_PASSWORD": "password",
+            "XRAY_URL": "https://xray.company.com",
+            "XRAY_USERNAME": "admin",
+            "XRAY_API_TOKEN": "password",
         },
     }
 
 
 def _assert_service_availability(
-    result, confluence_expected, jira_expected, bitbucket_expected=False
+    result,
+    confluence_expected,
+    jira_expected,
+    bitbucket_expected=False,
+    xray_expected=False,
 ):
     """Helper to assert service availability."""
     assert result == {
         "confluence": confluence_expected,
         "jira": jira_expected,
         "bitbucket": bitbucket_expected,
+        "xray": xray_expected,
     }
 
 
@@ -97,23 +120,40 @@ class TestGetAvailableServices:
         with MockEnvironment.clean_env():
             result = get_available_services()
             _assert_service_availability(
-                result, confluence_expected=False, jira_expected=False
+                result,
+                confluence_expected=False,
+                jira_expected=False,
+                bitbucket_expected=False,
+                xray_expected=False,
             )
             _assert_authentication_logs(
-                caplog, "not_configured", ["confluence", "jira"]
+                caplog, "not_configured", ["confluence", "jira", "bitbucket", "xray"]
             )
 
     @pytest.mark.parametrize(
-        "scenario,expected_confluence,expected_jira",
+        "scenario,expected_confluence,expected_jira,expected_bitbucket,expected_xray",
         [
-            ("oauth_cloud", True, True),
-            ("basic_auth_cloud", True, True),
-            ("pat_server", True, True),
-            ("basic_auth_server", True, True),
+            ("oauth_cloud", True, True, True, False),  # Xray not supported on Cloud
+            (
+                "basic_auth_cloud",
+                True,
+                True,
+                True,
+                False,
+            ),  # Xray not supported on Cloud
+            ("pat_server", True, True, True, True),
+            ("basic_auth_server", True, True, True, True),
         ],
     )
     def test_valid_authentication_scenarios(
-        self, env_scenarios, scenario, expected_confluence, expected_jira, caplog
+        self,
+        env_scenarios,
+        scenario,
+        expected_confluence,
+        expected_jira,
+        expected_bitbucket,
+        expected_xray,
+        caplog,
     ):
         """Test various valid authentication scenarios."""
         with MockEnvironment.clean_env():
@@ -127,17 +167,33 @@ class TestGetAvailableServices:
                 result,
                 confluence_expected=expected_confluence,
                 jira_expected=expected_jira,
+                bitbucket_expected=expected_bitbucket,
+                xray_expected=expected_xray,
             )
 
             # Verify appropriate log messages based on scenario
             if scenario == "oauth_cloud":
-                _assert_authentication_logs(caplog, "oauth", ["confluence", "jira"])
+                _assert_authentication_logs(
+                    caplog,
+                    "oauth",
+                    ["confluence", "jira", "bitbucket"],  # Xray excluded for Cloud
+                )
             elif scenario == "basic_auth_cloud":
                 _assert_authentication_logs(
-                    caplog, "cloud_basic", ["confluence", "jira"]
+                    caplog,
+                    "cloud_basic",
+                    ["confluence", "jira"],  # Xray excluded for Cloud
+                )
+                # Bitbucket Cloud uses App Password, which has different log message
+                assert_log_contains(
+                    caplog,
+                    "INFO",
+                    "Using Bitbucket Cloud Basic Authentication (App Password)",
                 )
             elif scenario in ["pat_server", "basic_auth_server"]:
-                _assert_authentication_logs(caplog, "server", ["confluence", "jira"])
+                _assert_authentication_logs(
+                    caplog, "server", ["confluence", "jira", "bitbucket", "xray"]
+                )
 
     @pytest.mark.parametrize(
         "missing_oauth_var",
@@ -154,7 +210,7 @@ class TestGetAvailableServices:
     ):
         """Test that OAuth fails when any required variable is missing."""
         with MockEnvironment.clean_env():
-            oauth_config = env_scenarios["oauth_cloud"]
+            oauth_config = env_scenarios["oauth_cloud"].copy()
             # Remove one required OAuth variable
             del oauth_config[missing_oauth_var]
 
@@ -165,14 +221,34 @@ class TestGetAvailableServices:
 
             result = get_available_services()
             _assert_service_availability(
-                result, confluence_expected=False, jira_expected=False
+                result,
+                confluence_expected=False,
+                jira_expected=False,
+                bitbucket_expected=False,
+                xray_expected=False,
             )
 
     @pytest.mark.parametrize(
         "missing_basic_vars,service",
         [
-            (["CONFLUENCE_USERNAME", "JIRA_USERNAME"], "username"),
-            (["CONFLUENCE_API_TOKEN", "JIRA_API_TOKEN"], "token"),
+            (
+                [
+                    "CONFLUENCE_USERNAME",
+                    "JIRA_USERNAME",
+                    "BITBUCKET_USERNAME",
+                    "XRAY_USERNAME",
+                ],
+                "username",
+            ),
+            (
+                [
+                    "CONFLUENCE_API_TOKEN",
+                    "JIRA_API_TOKEN",
+                    "BITBUCKET_APP_PASSWORD",
+                    "XRAY_API_TOKEN",
+                ],
+                "token",
+            ),
         ],
     )
     def test_basic_auth_missing_credentials(
@@ -184,7 +260,8 @@ class TestGetAvailableServices:
 
             # Remove required variables
             for var in missing_basic_vars:
-                del basic_config[var]
+                if var in basic_config:
+                    del basic_config[var]
 
             for key, value in basic_config.items():
                 import os
@@ -193,7 +270,11 @@ class TestGetAvailableServices:
 
             result = get_available_services()
             _assert_service_availability(
-                result, confluence_expected=False, jira_expected=False
+                result,
+                confluence_expected=False,
+                jira_expected=False,
+                bitbucket_expected=False,
+                xray_expected=False,
             )
 
     def test_oauth_precedence_over_basic_auth(self, env_scenarios, caplog):
@@ -212,11 +293,19 @@ class TestGetAvailableServices:
 
             result = get_available_services()
             _assert_service_availability(
-                result, confluence_expected=True, jira_expected=True
+                result,
+                confluence_expected=True,
+                jira_expected=True,
+                bitbucket_expected=True,
+                xray_expected=False,  # Xray not supported on Cloud
             )
 
             # Should use OAuth, not Basic Auth
-            _assert_authentication_logs(caplog, "oauth", ["confluence", "jira"])
+            _assert_authentication_logs(
+                caplog,
+                "oauth",
+                ["confluence", "jira", "bitbucket"],  # Xray excluded for Cloud
+            )
             assert "Basic Authentication" not in caplog.text
 
     def test_mixed_service_configuration(self, caplog):
@@ -230,11 +319,17 @@ class TestGetAvailableServices:
 
             result = get_available_services()
             _assert_service_availability(
-                result, confluence_expected=True, jira_expected=False
+                result,
+                confluence_expected=True,
+                jira_expected=False,
+                bitbucket_expected=False,
+                xray_expected=False,
             )
 
             _assert_authentication_logs(caplog, "cloud_basic", ["confluence"])
-            _assert_authentication_logs(caplog, "not_configured", ["jira"])
+            _assert_authentication_logs(
+                caplog, "not_configured", ["jira", "bitbucket", "xray"]
+            )
 
     def test_return_value_structure(self):
         """Test that the return value has the correct structure."""
@@ -242,7 +337,7 @@ class TestGetAvailableServices:
             result = get_available_services()
 
             assert isinstance(result, dict)
-            assert set(result.keys()) == {"confluence", "jira", "bitbucket"}
+            assert set(result.keys()) == {"confluence", "jira", "bitbucket", "xray"}
             assert all(isinstance(v, bool) for v in result.values())
 
     @pytest.mark.parametrize(
@@ -262,8 +357,12 @@ class TestGetAvailableServices:
 
             result = get_available_services()
             _assert_service_availability(
-                result, confluence_expected=False, jira_expected=False
+                result,
+                confluence_expected=False,
+                jira_expected=False,
+                bitbucket_expected=False,
+                xray_expected=False,
             )
             _assert_authentication_logs(
-                caplog, "not_configured", ["confluence", "jira"]
+                caplog, "not_configured", ["confluence", "jira", "bitbucket", "xray"]
             )

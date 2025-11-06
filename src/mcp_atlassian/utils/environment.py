@@ -200,6 +200,78 @@ def get_available_services(
             bitbucket_is_setup = True
             logger.info("Using Bitbucket authentication from header personal token")
 
+    # Xray service detection
+    xray_url = os.getenv("XRAY_URL")
+    xray_is_setup = False
+    if xray_url:
+        is_cloud = is_atlassian_cloud_url(xray_url)
+
+        # Xray is not supported in Cloud - force disable if cloud URL is detected
+        if is_cloud:
+            logger.warning(
+                f"Xray is not supported in Atlassian Cloud. "
+                f"Disabling Xray tools for cloud URL: {xray_url}"
+            )
+            xray_is_setup = False
+        else:  # Server/Data Center only
+            if all(
+                [
+                    os.getenv("ATLASSIAN_OAUTH_CLIENT_ID"),
+                    os.getenv("ATLASSIAN_OAUTH_CLIENT_SECRET"),
+                    os.getenv("ATLASSIAN_OAUTH_REDIRECT_URI"),
+                    os.getenv("ATLASSIAN_OAUTH_SCOPE"),
+                    os.getenv("ATLASSIAN_OAUTH_CLOUD_ID"),
+                ]
+            ):
+                # OAuth is typically for cloud, but keeping this for completeness
+                logger.warning(
+                    "OAuth configuration detected for Xray, but Xray is only supported on Server/Data Center"
+                )
+                xray_is_setup = False
+            elif all(
+                [
+                    os.getenv("ATLASSIAN_OAUTH_ACCESS_TOKEN"),
+                    os.getenv("ATLASSIAN_OAUTH_CLOUD_ID"),
+                ]
+            ):
+                # OAuth token is typically for cloud, but keeping this for completeness
+                logger.warning(
+                    "OAuth access token detected for Xray, but Xray is only supported on Server/Data Center"
+                )
+                xray_is_setup = False
+            elif os.getenv("XRAY_PERSONAL_TOKEN") or (
+                os.getenv("XRAY_USERNAME") and os.getenv("XRAY_API_TOKEN")
+            ):
+                xray_is_setup = True
+                logger.info(
+                    "Using Xray Server/Data Center authentication (PAT or Basic Auth)"
+                )
+    elif os.getenv("ATLASSIAN_OAUTH_ENABLE", "").lower() in ("true", "1", "yes"):
+        # OAuth enable is typically for cloud scenarios, disable Xray
+        logger.warning(
+            "Minimal OAuth configuration detected, but Xray is only supported on Server/Data Center"
+        )
+        xray_is_setup = False
+
+    # Check header-based authentication - also validate cloud URLs
+    if not xray_is_setup:
+        xray_token = headers.get("X-Atlassian-Xray-Personal-Token")
+        xray_url_header = headers.get("X-Atlassian-Xray-Url")
+
+        if xray_token and xray_url_header:
+            # Check if the header URL is a cloud URL
+            if is_atlassian_cloud_url(xray_url_header):
+                logger.warning(
+                    f"Xray is not supported in Atlassian Cloud. "
+                    f"Ignoring header authentication for cloud URL: {xray_url_header}"
+                )
+                xray_is_setup = False
+            else:
+                xray_is_setup = True
+                logger.info(
+                    "Using Xray Server/Data Center authentication from header personal token"
+                )
+
     # Log setup status
     if not confluence_is_setup:
         logger.info(
@@ -213,9 +285,14 @@ def get_available_services(
         logger.info(
             "Bitbucket is not configured or required environment variables are missing."
         )
+    if not xray_is_setup:
+        logger.info(
+            "Xray is not configured or required environment variables are missing."
+        )
 
     return {
         "confluence": confluence_is_setup,
         "jira": jira_is_setup,
         "bitbucket": bitbucket_is_setup,
+        "xray": xray_is_setup,
     }
