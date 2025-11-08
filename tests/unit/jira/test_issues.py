@@ -1,5 +1,6 @@
 """Tests for the Jira Issues mixin."""
 
+from typing import Any
 from unittest.mock import ANY, MagicMock, patch
 
 import pytest
@@ -196,6 +197,60 @@ class TestIssuesMixin:
 
         except Exception as e:
             pytest.fail(f"Test failed: {e}")
+
+    def test_get_issue_adds_expand_and_properties_fields(
+        self, issues_mixin: IssuesMixin
+    ):
+        """Ensure expand/properties parameters adjust requested fields."""
+        issue_data = {
+            "id": "10001",
+            "key": "TEST-123",
+            "fields": {
+                "summary": "Test Issue",
+                "status": {"name": "Open"},
+                "issuetype": {"name": "Bug"},
+                "comment": {"comments": []},
+                "created": "2023-01-01T00:00:00.000+0000",
+                "updated": "2023-01-02T00:00:00.000+0000",
+            },
+        }
+        issues_mixin.jira.get_issue.return_value = issue_data
+        issues_mixin.jira.issue_get_comments.return_value = {"comments": []}
+
+        issues_mixin.get_issue(
+            "TEST-123",
+            expand="changelog,renderedFields",
+            properties=["propA"],
+        )
+
+        kwargs = issues_mixin.jira.get_issue.call_args.kwargs
+        fields_arg = kwargs["fields"]
+        requested_fields = fields_arg.split(",")
+        assert "changelog" in requested_fields or fields_arg == "*all"
+        assert "rendered" in requested_fields or fields_arg == "*all"
+        assert "properties" in requested_fields or fields_arg == "*all"
+        assert kwargs["properties"] == "propA"
+
+    def test_get_issue_missing_issue_raises_wrapped_exception(
+        self, issues_mixin: IssuesMixin
+    ):
+        """get_issue should wrap ValueError when Jira returns no issue."""
+        issues_mixin.jira.get_issue.return_value = None
+        with pytest.raises(
+            Exception,
+            match=r"Error retrieving issue MISSING-1: Issue MISSING-1 not found",
+        ):
+            issues_mixin.get_issue("MISSING-1")
+
+    def test_get_issue_non_dict_response_raises_wrapped_exception(
+        self, issues_mixin: IssuesMixin
+    ):
+        """get_issue should wrap TypeError when Jira returns unexpected data."""
+        issues_mixin.jira.get_issue.return_value = "invalid"
+        with pytest.raises(
+            Exception, match=r"Error retrieving issue TEST-1: Unexpected return value"
+        ):
+            issues_mixin.get_issue("TEST-1")
 
     def test_get_issue_error_handling(self, issues_mixin: IssuesMixin):
         """Test error handling in get_issue."""
@@ -1690,3 +1745,180 @@ class TestIssuesMixin:
         assert isinstance(result, JiraIssue)
         assert result.key == "DEV-123"
         assert result.summary == "Development issue"
+
+    def test_get_issue_comments_handles_invalid_response(
+        self, issues_mixin: IssuesMixin
+    ):
+        """_get_issue_comments_if_needed should handle unexpected payloads."""
+        issues_mixin.jira.issue_get_comments.return_value = ["unexpected"]
+        comments = issues_mixin._get_issue_comments_if_needed("TEST-1", 5)
+        assert comments == []
+
+    def test_extract_epic_information_for_epic(self, issues_mixin: IssuesMixin):
+        """Ensure epic fields are read when issue itself is an epic."""
+        issues_mixin.get_field_ids_to_epic = MagicMock(
+            return_value={"epic_name": "customfield_10011"}
+        )
+        issue = {
+            "fields": {
+                "issuetype": {"name": "Epic"},
+                "customfield_10011": "Epic Name",
+            }
+        }
+
+        info = issues_mixin._extract_epic_information(issue)
+
+        assert info["is_epic"] is True
+        assert info["epic_name"] == "Epic Name"
+
+    def test_extract_epic_information_for_linked_issue(self, issues_mixin: IssuesMixin):
+        """Ensure epic link details are retrieved when linked to an epic."""
+        issues_mixin.get_field_ids_to_epic = MagicMock(
+            return_value={
+                "epic_link": "customfield_10010",
+                "epic_name": "customfield_10011",
+            }
+        )
+        issues_mixin.jira.get_issue.return_value = {
+            "fields": {
+                "customfield_10011": "Epic Name",
+                "summary": "Epic summary",
+            }
+        }
+        issue = {
+            "fields": {
+                "issuetype": {"name": "Story"},
+                "customfield_10010": "EPIC-1",
+            }
+        }
+
+        info = issues_mixin._extract_epic_information(issue)
+
+        assert info["epic_key"] == "EPIC-1"
+        assert info["epic_name"] == "Epic Name"
+        assert info["epic_summary"] == "Epic summary"
+
+    def test_format_issue_content_and_metadata(self, issues_mixin: IssuesMixin):
+        """_format_issue_content and _create_issue_metadata include key details."""
+        issue = {
+            "fields": {
+                "summary": "Issue summary",
+                "status": {"name": "Open"},
+                "issuetype": {"name": "Task"},
+                "reporter": {"displayName": "Reporter"},
+                "assignee": {"displayName": "Assignee"},
+            }
+        }
+        comments = [
+            {
+                "author": {"displayName": "Reviewer"},
+                "body": "Looks good",
+                "created": "2023-01-02T10:00:00.000+0000",
+            }
+        ]
+        epic_info = {
+            "epic_key": "EPIC-9",
+            "epic_name": None,
+            "epic_summary": "Epic summary",
+            "is_epic": False,
+        }
+        content = issues_mixin._format_issue_content(
+            "TEST-1", issue, "Description", comments, "2023-01-01", epic_info
+        )
+        assert "**Epic**: [EPIC-9] Epic summary" in content
+        assert "**Reporter**: Reporter" in content
+        metadata = issues_mixin._create_issue_metadata(
+            "TEST-1", issue, comments, "2023-01-01", epic_info
+        )
+        assert metadata["url"].endswith("/browse/TEST-1")
+        assert metadata["comment_count"] == 1
+        assert metadata["epic_key"] == "EPIC-9"
+
+    def test_find_issue_type_name_helpers(self, issues_mixin: IssuesMixin):
+        """Verify epic/subtask lookup helpers."""
+        issues_mixin.get_project_issue_types = MagicMock(
+            return_value=[{"name": "Epic"}, {"name": "Task", "subtask": True}]
+        )
+        assert issues_mixin._find_epic_issue_type_name("PROJ") == "Epic"
+        assert issues_mixin._find_subtask_issue_type_name("PROJ") == "Task"
+        issues_mixin.get_project_issue_types.side_effect = Exception("boom")
+        assert issues_mixin._find_epic_issue_type_name("PROJ") is None
+        assert issues_mixin._find_subtask_issue_type_name("PROJ") is None
+
+    def test_process_additional_fields_formats_values(self, issues_mixin: IssuesMixin):
+        """_process_additional_fields should map kwargs into field IDs."""
+        issues_mixin._generate_field_map = MagicMock(
+            return_value={"priority": "priority", "labels": "labels"}
+        )
+        issues_mixin.get_field_by_id = MagicMock(
+            side_effect=[
+                {"name": "Priority", "schema": {"type": "priority"}},
+                {"name": "Labels", "schema": {"type": "array"}},
+            ]
+        )
+        fields: dict[str, Any] = {}
+        issues_mixin._process_additional_fields(
+            fields,
+            {
+                "priority": "High",
+                "labels": "frontend, api",
+                "ignored_field": "value",
+            },
+        )
+        assert fields["priority"] == {"name": "High"}
+        assert fields["labels"] == ["frontend", "api"]
+
+    def test_format_field_value_for_write_variants(
+        self, issues_mixin: IssuesMixin, monkeypatch: pytest.MonkeyPatch
+    ):
+        """_format_field_value_for_write handles reporter/fixVersions/etc."""
+        issues_mixin._get_account_id = MagicMock(return_value="acct-1")
+        # Ensure the config is treated as an Atlassian Cloud instance
+        issues_mixin.config.url = "https://cloud.atlassian.net"
+        reporter_value = issues_mixin._format_field_value_for_write(
+            "reporter",
+            "reporter@example.com",
+            {"name": "Reporter"},
+        )
+        assert reporter_value == {"accountId": "acct-1"}
+        fixversions_value = issues_mixin._format_field_value_for_write(
+            "fixVersions",
+            ["1.0", {"id": "200"}],
+            None,
+        )
+        assert fixversions_value == [{"name": "1.0"}, {"id": "200"}]
+        labels_value = issues_mixin._format_field_value_for_write(
+            "labels",
+            "frontend, api",
+            {"name": "Labels"},
+        )
+        assert labels_value == ["frontend", "api"]
+        assert issues_mixin._format_field_value_for_write("duedate", 123, None) is None
+
+        class DummyDate:
+            def isoformat(self):
+                return "2024-01-01T00:00:00+00:00"
+
+        monkeypatch.setattr(
+            "mcp_atlassian.jira.issues.parse_date", lambda value: DummyDate()
+        )
+        datetime_value = issues_mixin._format_field_value_for_write(
+            "customfield_dt",
+            "2024-01-01T00:00:00.000+0000",
+            {"name": "Custom Date", "schema": {"type": "datetime"}},
+        )
+        assert datetime_value == "2024-01-01T00:00:00+00:00"
+
+    def test_handle_create_issue_error_logs(self, issues_mixin: IssuesMixin, caplog):
+        """_handle_create_issue_error should log tailored hints."""
+        with caplog.at_level("ERROR"):
+            issues_mixin._handle_create_issue_error(
+                ValueError("Epic name missing"), "Epic"
+            )
+        assert "epic_name" in caplog.text
+        caplog.clear()
+        with caplog.at_level("ERROR"):
+            issues_mixin._handle_create_issue_error(
+                ValueError("customfield_10010 missing"), "Story"
+            )
+        assert "custom field" in caplog.text

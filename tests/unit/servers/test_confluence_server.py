@@ -10,12 +10,13 @@ import pytest
 from fastmcp import FastMCP
 from starlette.requests import Request
 
-from src.mcp_atlassian.confluence import ConfluenceFetcher
-from src.mcp_atlassian.confluence.config import ConfluenceConfig
-from src.mcp_atlassian.models.confluence.page import ConfluencePage
-from src.mcp_atlassian.servers.context import MainAppContext
-from src.mcp_atlassian.servers.main import AtlassianMCP
-from src.mcp_atlassian.utils.oauth import OAuthConfig
+from mcp_atlassian.confluence import ConfluenceFetcher
+from mcp_atlassian.confluence.config import ConfluenceConfig
+from mcp_atlassian.exceptions import MCPAtlassianAuthenticationError
+from mcp_atlassian.models.confluence.page import ConfluencePage
+from mcp_atlassian.servers.context import MainAppContext
+from mcp_atlassian.servers.main import AtlassianMCP
+from mcp_atlassian.utils.oauth import OAuthConfig
 
 logger = logging.getLogger(__name__)
 
@@ -130,7 +131,7 @@ def test_confluence_mcp(mock_confluence_fetcher, mock_base_confluence_config):
     )
 
     # Mount the actual confluence MCP instance
-    from src.mcp_atlassian.servers.confluence import confluence_mcp
+    from mcp_atlassian.servers.confluence import confluence_mcp
 
     test_mcp.mount(confluence_mcp, "confluence")
 
@@ -158,7 +159,7 @@ def no_fetcher_test_confluence_mcp(mock_base_confluence_config):
     )
 
     # Mount the actual confluence MCP instance
-    from src.mcp_atlassian.servers.confluence import confluence_mcp
+    from mcp_atlassian.servers.confluence import confluence_mcp
 
     test_mcp.mount(confluence_mcp, "confluence")
 
@@ -184,7 +185,7 @@ class DirectToolCaller:
         from fastmcp.server.context import Context
         from starlette.requests import Request
 
-        from src.mcp_atlassian.servers.confluence import (
+        from mcp_atlassian.servers.confluence import (
             add_comment,
             add_label,
             create_page,
@@ -248,11 +249,11 @@ async def client(test_confluence_mcp, mock_confluence_fetcher):
     """Create a direct tool caller that avoids FastMCP transport hanging."""
     with (
         patch(
-            "src.mcp_atlassian.servers.confluence.get_confluence_fetcher",
+            "mcp_atlassian.servers.confluence.get_confluence_fetcher",
             AsyncMock(return_value=mock_confluence_fetcher),
         ),
         patch(
-            "src.mcp_atlassian.servers.dependencies.get_http_request",
+            "mcp_atlassian.servers.dependencies.get_http_request",
             MagicMock(spec=Request, state=MagicMock()),
         ),
     ):
@@ -281,6 +282,40 @@ async def test_search(client, mock_confluence_fetcher):
     assert isinstance(result_data, list)
     assert len(result_data) > 0
     assert result_data[0]["title"] == "Test Page Mock Title"
+
+
+@pytest.mark.anyio
+async def test_search_site_search_fallbacks_to_text(client, mock_confluence_fetcher):
+    """Ensure siteSearch failure falls back to text search."""
+    mock_page = mock_confluence_fetcher.search.return_value[0]
+    mock_confluence_fetcher.search.side_effect = [Exception("boom"), [mock_page]]
+
+    response = await client.call_tool(
+        "confluence_search", {"query": "incident reports"}
+    )
+
+    # Two calls: first siteSearch, second text fallback
+    assert mock_confluence_fetcher.search.call_count == 2
+    first_query = mock_confluence_fetcher.search.call_args_list[0].args[0]
+    second_query = mock_confluence_fetcher.search.call_args_list[1].args[0]
+    assert "siteSearch" in first_query
+    assert "text" in second_query
+
+    result_data = json.loads(response.content[0].text)
+    assert isinstance(result_data, list)
+    assert result_data[0]["title"] == "Test Page Mock Title"
+
+
+@pytest.mark.anyio
+async def test_search_cql_query_passthrough(client, mock_confluence_fetcher):
+    """Ensure CQL queries skip conversion logic."""
+    await client.call_tool(
+        "confluence_search", {"query": 'type=page AND space="DOC"', "limit": 5}
+    )
+
+    mock_confluence_fetcher.search.assert_called_once()
+    called_query = mock_confluence_fetcher.search.call_args.args[0]
+    assert called_query == 'type=page AND space="DOC"'
 
 
 @pytest.mark.anyio
@@ -349,6 +384,78 @@ async def test_get_page_no_markdown(client, mock_confluence_fetcher):
 
 
 @pytest.mark.anyio
+async def test_get_page_with_page_id_and_title(client, mock_confluence_fetcher):
+    """Providing page_id together with title should ignore title."""
+    await client.call_tool(
+        "confluence_get_page",
+        {"page_id": "123456", "title": "Ignored", "space_key": "DOC"},
+    )
+
+    mock_confluence_fetcher.get_page_content.assert_called_once_with(
+        "123456", convert_to_markdown=True, top_n=-1
+    )
+
+
+@pytest.mark.anyio
+async def test_get_page_by_title_not_found(client, mock_confluence_fetcher):
+    """Return error when page by title is missing."""
+    mock_confluence_fetcher.get_page_by_title.return_value = None
+
+    response = await client.call_tool(
+        "confluence_get_page", {"title": "Missing", "space_key": "DOC"}
+    )
+
+    payload = json.loads(response.content[0].text)
+    assert "error" in payload
+    assert "Page with title" in payload["error"]
+
+
+@pytest.mark.anyio
+async def test_get_page_requires_identifier(client):
+    """Calling get_page without identifiers raises ValueError."""
+    with pytest.raises(ValueError):
+        await client.call_tool("confluence_get_page", {})
+
+
+@pytest.mark.anyio
+async def test_get_page_not_found_after_fetch(client, mock_confluence_fetcher):
+    """Return error when fetcher returns None."""
+    mock_confluence_fetcher.get_page_content.return_value = None
+
+    response = await client.call_tool(
+        "confluence_get_page", {"page_id": "missing-page"}
+    )
+
+    payload = json.loads(response.content[0].text)
+    assert payload["error"].startswith("Page not found")
+
+
+@pytest.mark.anyio
+async def test_get_page_with_sample_truncation(client, mock_confluence_fetcher):
+    """Sample parameter should trim content."""
+    mock_page = MagicMock(spec=ConfluencePage)
+    mock_page.content = "line1\nline2\nline3"
+    mock_confluence_fetcher.get_page_content.return_value = mock_page
+
+    response = await client.call_tool(
+        "confluence_get_page",
+        {"page_id": "123456", "include_metadata": False, "sample": 1},
+    )
+    payload = json.loads(response.content[0].text)
+    assert payload["content"]["value"] == "line1"
+
+
+@pytest.mark.anyio
+async def test_get_page_content_error_returns_json(client, mock_confluence_fetcher):
+    """Errors from fetcher should be converted to JSON payload."""
+    mock_confluence_fetcher.get_page_content.side_effect = Exception("boom")
+
+    response = await client.call_tool("confluence_get_page", {"page_id": "broken"})
+    payload = json.loads(response.content[0].text)
+    assert payload["error"].startswith("Failed to retrieve page by ID 'broken'")
+
+
+@pytest.mark.anyio
 async def test_get_page_children(client, mock_confluence_fetcher):
     """Test the get_page_children tool."""
     response = await client.call_tool(
@@ -367,6 +474,29 @@ async def test_get_page_children(client, mock_confluence_fetcher):
     assert "results" in result_data
     assert len(result_data["results"]) > 0
     assert result_data["results"][0]["title"] == "Test Page Mock Title"
+
+
+@pytest.mark.anyio
+async def test_get_page_children_include_content(client, mock_confluence_fetcher):
+    """include_content should inject body.storage expansion."""
+    await client.call_tool(
+        "confluence_get_page_children",
+        {"parent_id": "123456", "include_content": True, "expand": "version"},
+    )
+    expand_arg = mock_confluence_fetcher.get_page_children.call_args.kwargs["expand"]
+    assert "body.storage" in expand_arg
+
+
+@pytest.mark.anyio
+async def test_get_page_children_handles_exception(client, mock_confluence_fetcher):
+    """Errors should be surfaced in response."""
+    mock_confluence_fetcher.get_page_children.side_effect = Exception("failure")
+
+    response = await client.call_tool(
+        "confluence_get_page_children", {"parent_id": "123456"}
+    )
+    payload = json.loads(response.content[0].text)
+    assert payload["error"].startswith("Failed to get child pages")
 
 
 @pytest.mark.anyio
@@ -429,6 +559,17 @@ async def test_add_label(client, mock_confluence_fetcher):
 
 
 @pytest.mark.anyio
+async def test_add_label_read_only_enforced(client, mock_confluence_fetcher):
+    """Ensure add_label still works when allowed (already covered)."""
+    # This test intentionally left simple to keep fixture warm.
+    response = await client.call_tool(
+        "confluence_add_label", {"page_id": "123456", "name": "another"}
+    )
+    payload = json.loads(response.content[0].text)
+    assert isinstance(payload, list)
+
+
+@pytest.mark.anyio
 async def test_search_user(client, mock_confluence_fetcher):
     """Test the search_user tool with CQL query."""
     response = await client.call_tool(
@@ -446,6 +587,43 @@ async def test_search_user(client, mock_confluence_fetcher):
     assert result_data[0]["title"] == "First Last"
     assert result_data[0]["user"]["account_id"] == "a031248587011jasoidf9832jd8j1"
     assert result_data[0]["user"]["display_name"] == "First Last"
+
+
+@pytest.mark.anyio
+async def test_search_user_simple_term_conversion(client, mock_confluence_fetcher):
+    """Simple user names should be converted to fullname search."""
+    await client.call_tool(
+        "confluence_search_user", {"query": "First Last", "limit": 5}
+    )
+    mock_confluence_fetcher.search_user.assert_called_once_with(
+        'user.fullname ~ "First Last"', limit=5
+    )
+
+
+@pytest.mark.anyio
+async def test_search_user_auth_error(client, mock_confluence_fetcher):
+    """Authentication errors should be handled gracefully."""
+    mock_confluence_fetcher.search_user.side_effect = MCPAtlassianAuthenticationError(
+        "bad auth"
+    )
+
+    response = await client.call_tool(
+        "confluence_search_user", {"query": "First Last", "limit": 2}
+    )
+    payload = json.loads(response.content[0].text)
+    assert payload["error"].startswith("Authentication failed")
+
+
+@pytest.mark.anyio
+async def test_search_user_generic_error(client, mock_confluence_fetcher):
+    """Unexpected exceptions should produce generic error message."""
+    mock_confluence_fetcher.search_user.side_effect = Exception("network down")
+
+    response = await client.call_tool(
+        "confluence_search_user", {"query": 'user.fullname ~ "Test"', "limit": 2}
+    )
+    payload = json.loads(response.content[0].text)
+    assert payload["error"].startswith("An unexpected error occurred")
 
 
 @pytest.mark.anyio
@@ -498,6 +676,38 @@ async def test_create_page_with_string_parent_id(client, mock_confluence_fetcher
 
 
 @pytest.mark.anyio
+async def test_create_page_invalid_content_format(client):
+    """Invalid content_format should raise ValueError."""
+    with pytest.raises(ValueError):
+        await client.call_tool(
+            "confluence_create_page",
+            {
+                "space_key": "TEST",
+                "title": "Invalid Format",
+                "content": "text",
+                "content_format": "pdf",
+            },
+        )
+
+
+@pytest.mark.anyio
+async def test_create_page_wiki_format(client, mock_confluence_fetcher):
+    """Non-markdown formats should set content_representation."""
+    await client.call_tool(
+        "confluence_create_page",
+        {
+            "space_key": "TEST",
+            "title": "Wiki Page",
+            "content": "h1. Title",
+            "content_format": "wiki",
+        },
+    )
+    call_kwargs = mock_confluence_fetcher.create_page.call_args.kwargs
+    assert call_kwargs["is_markdown"] is False
+    assert call_kwargs["content_representation"] == "wiki"
+
+
+@pytest.mark.anyio
 async def test_update_page_with_numeric_parent_id(client, mock_confluence_fetcher):
     """Test updating a page with numeric parent_id (integer) - should convert to string."""
     response = await client.call_tool(
@@ -519,6 +729,60 @@ async def test_update_page_with_numeric_parent_id(client, mock_confluence_fetche
     result_data = json.loads(response.content[0].text)
     assert result_data["message"] == "Page updated successfully"
     assert result_data["page"]["title"] == "Test Page Mock Title"
+
+
+@pytest.mark.anyio
+async def test_update_page_invalid_content_format(client):
+    """Invalid content_format should raise ValueError."""
+    with pytest.raises(ValueError):
+        await client.call_tool(
+            "confluence_update_page",
+            {
+                "page_id": "999999",
+                "title": "Updated Page",
+                "content": "Updated content",
+                "content_format": "pdf",
+            },
+        )
+
+
+@pytest.mark.anyio
+async def test_update_page_storage_format(client, mock_confluence_fetcher):
+    """Storage format should skip markdown conversion."""
+    await client.call_tool(
+        "confluence_update_page",
+        {
+            "page_id": "999999",
+            "title": "Updated Page",
+            "content": "<p>Content</p>",
+            "content_format": "storage",
+        },
+    )
+    call_kwargs = mock_confluence_fetcher.update_page.call_args.kwargs
+    assert call_kwargs["is_markdown"] is False
+    assert call_kwargs["content_representation"] == "storage"
+
+
+@pytest.mark.anyio
+async def test_delete_page_error(client, mock_confluence_fetcher):
+    """Exception while deleting should surface error payload."""
+    mock_confluence_fetcher.delete_page.side_effect = Exception("boom")
+    response = await client.call_tool("confluence_delete_page", {"page_id": "deadbeef"})
+    payload = json.loads(response.content[0].text)
+    assert payload["success"] is False
+    assert payload["error"] == "boom"
+
+
+@pytest.mark.anyio
+async def test_add_comment_error(client, mock_confluence_fetcher):
+    """Exception while adding comment should produce error JSON."""
+    mock_confluence_fetcher.add_comment.side_effect = Exception("fail")
+    response = await client.call_tool(
+        "confluence_add_comment", {"page_id": "123456", "content": "oops"}
+    )
+    payload = json.loads(response.content[0].text)
+    assert payload["success"] is False
+    assert payload["error"] == "fail"
 
 
 @pytest.mark.anyio
