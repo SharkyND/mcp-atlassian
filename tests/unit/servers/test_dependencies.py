@@ -13,8 +13,10 @@ from mcp_atlassian.servers.dependencies import (
     _create_user_config_for_fetcher,
     get_confluence_fetcher,
     get_jira_fetcher,
+    get_xray_fetcher,
 )
 from mcp_atlassian.utils.oauth import OAuthConfig
+from mcp_atlassian.xray import XrayConfig, XrayFetcher
 from tests.utils.assertions import assert_mock_called_with_partial
 from tests.utils.factories import AuthConfigFactory
 from tests.utils.mocks import MockFastMCP
@@ -79,6 +81,31 @@ def config_factory():
             return ConfluenceConfig(**{**defaults, **overrides})
 
         @staticmethod
+        def create_xray_config(auth_type="basic", **overrides):
+            """Create a XrayConfig instance."""
+            defaults = {
+                "url": "https://test.atlassian.net",
+                "auth_type": auth_type,
+                "ssl_verify": True,
+                "http_proxy": None,
+                "https_proxy": None,
+                "no_proxy": None,
+                "socks_proxy": None,
+                "projects_filter": ["TEST"],
+            }
+
+            if auth_type == "basic":
+                defaults.update(
+                    {"username": "test_username", "api_token": "test_token"}
+                )
+            elif auth_type == "oauth":
+                defaults["oauth_config"] = ConfigFactory.create_oauth_config()
+            elif auth_type == "pat":
+                defaults["personal_token"] = "test_pat_token"
+
+            return XrayConfig(**{**defaults, **overrides})
+
+        @staticmethod
         def create_oauth_config(**overrides):
             """Create an OAuthConfig instance."""
             oauth_data = AuthConfigFactory.create_oauth_config(**overrides)
@@ -94,14 +121,21 @@ def config_factory():
             )
 
         @staticmethod
-        def create_app_context(jira_config=None, confluence_config=None, **overrides):
+        def create_app_context(
+            jira_config=None, confluence_config=None, xray_config=None, **overrides
+        ):
             """Create a MainAppContext instance."""
             defaults = {
                 "full_jira_config": jira_config or ConfigFactory.create_jira_config(),
                 "full_confluence_config": confluence_config
                 or ConfigFactory.create_confluence_config(),
+                "full_xray_config": xray_config or ConfigFactory.create_xray_config(),
                 "read_only": False,
-                "enabled_tools": ["jira_get_issue", "confluence_get_page"],
+                "enabled_tools": [
+                    "jira_get_issue",
+                    "confluence_get_page",
+                    "xray_get_tests",
+                ],
             }
             return MainAppContext(**{**defaults, **overrides})
 
@@ -181,6 +215,8 @@ class TestCreateUserConfigForFetcher:
             ("jira", "pat", "user-pat-token"),
             ("confluence", "oauth", "user-oauth-token"),
             ("confluence", "pat", "user-pat-token"),
+            ("xray", "oauth", "user-oauth-token"),
+            ("xray", "pat", "user-pat-token"),
         ],
     )
     def test_create_user_config_success(
@@ -191,9 +227,12 @@ class TestCreateUserConfigForFetcher:
         if config_type == "jira":
             base_config = config_factory.create_jira_config(auth_type=auth_type)
             expected_type = JiraConfig
-        else:
+        elif config_type == "confluence":
             base_config = config_factory.create_confluence_config(auth_type=auth_type)
             expected_type = ConfluenceConfig
+        else:  # xray
+            base_config = config_factory.create_xray_config(auth_type=auth_type)
+            expected_type = XrayConfig
 
         credentials = _create_user_credentials(auth_type, token)
 
@@ -207,8 +246,10 @@ class TestCreateUserConfigForFetcher:
 
         if config_type == "jira":
             assert result.projects_filter == ["TEST"]
-        else:
+        elif config_type == "confluence":
             assert result.spaces_filter == ["TEST"]
+        else:  # xray
+            assert result.projects_filter == ["TEST"]
 
     def test_oauth_auth_type_minimal_config_success(self):
         """Test OAuth auth type with minimal base config (user-provided tokens mode)."""
@@ -373,10 +414,12 @@ def _setup_mock_request_state(mock_request, auth_scenario=None, cached_fetcher=N
     if cached_fetcher:
         mock_request.state.jira_fetcher = cached_fetcher
         mock_request.state.confluence_fetcher = cached_fetcher
+        mock_request.state.xray_fetcher = cached_fetcher
         return
 
     mock_request.state.jira_fetcher = None
     mock_request.state.confluence_fetcher = None
+    mock_request.state.xray_fetcher = None
 
     if auth_scenario:
         mock_request.state.user_atlassian_auth_type = auth_scenario["auth_type"]
@@ -407,6 +450,14 @@ def _create_mock_fetcher(fetcher_class, validation_return=None, validation_error
                 validation_return or "test-account-id"
             )
     elif fetcher_class == ConfluenceFetcher:
+        if validation_error:
+            mock_fetcher.get_current_user_info.side_effect = validation_error
+        else:
+            mock_fetcher.get_current_user_info.return_value = validation_return or {
+                "email": "user@example.com",
+                "displayName": "Test User",
+            }
+    elif fetcher_class == XrayFetcher:
         if validation_error:
             mock_fetcher.get_current_user_info.side_effect = validation_error
         else:
@@ -814,3 +865,299 @@ class TestGetConfluenceFetcher:
 
         with pytest.raises(ValueError, match=expected_error_match):
             await get_confluence_fetcher(mock_context)
+
+
+class TestGetXrayFetcher:
+    """Tests for get_xray_fetcher function."""
+
+    @patch("mcp_atlassian.servers.dependencies.get_http_request")
+    @patch("mcp_atlassian.servers.dependencies.XrayFetcher")
+    async def test_cached_fetcher_returned(
+        self, mock_xray_fetcher_class, mock_get_http_request, mock_context, mock_request
+    ):
+        """Test returning cached XrayFetcher from request state."""
+        cached_fetcher = MagicMock(spec=XrayFetcher)
+        _setup_mock_request_state(mock_request, cached_fetcher=cached_fetcher)
+        mock_get_http_request.return_value = mock_request
+
+        result = await get_xray_fetcher(mock_context)
+
+        assert result == cached_fetcher
+        mock_xray_fetcher_class.assert_not_called()
+
+    @pytest.mark.parametrize("scenario_key", ["oauth", "pat"])
+    @patch("mcp_atlassian.servers.dependencies.get_http_request")
+    @patch("mcp_atlassian.servers.dependencies.XrayFetcher")
+    async def test_user_specific_fetcher_creation(
+        self,
+        mock_xray_fetcher_class,
+        mock_get_http_request,
+        mock_context,
+        mock_request,
+        config_factory,
+        auth_scenarios,
+        scenario_key,
+    ):
+        """Test creating user-specific XrayFetcher with different auth types."""
+        scenario = auth_scenarios[scenario_key]
+
+        # Setup request state
+        _setup_mock_request_state(mock_request, scenario)
+        mock_get_http_request.return_value = mock_request
+
+        # Setup context
+        xray_config = config_factory.create_xray_config(auth_type=scenario["auth_type"])
+        app_context = config_factory.create_app_context(xray_config=xray_config)
+        _setup_mock_context(mock_context, app_context)
+
+        # Setup mock fetcher
+        mock_fetcher = _create_mock_fetcher(XrayFetcher)
+        mock_xray_fetcher_class.return_value = mock_fetcher
+
+        result = await get_xray_fetcher(mock_context)
+
+        assert result == mock_fetcher
+        assert mock_request.state.xray_fetcher == mock_fetcher
+        mock_xray_fetcher_class.assert_called_once()
+
+        # Verify the config passed to XrayFetcher
+        called_config = mock_xray_fetcher_class.call_args[1]["config"]
+        assert called_config.auth_type == scenario["auth_type"]
+
+        if scenario["auth_type"] == "oauth":
+            assert called_config.oauth_config.access_token == scenario["token"]
+        elif scenario["auth_type"] == "pat":
+            assert called_config.personal_token == scenario["token"]
+
+    @patch("mcp_atlassian.servers.dependencies.get_http_request")
+    @patch("mcp_atlassian.servers.dependencies.XrayFetcher")
+    async def test_header_based_fetcher_creation(
+        self,
+        mock_xray_fetcher_class,
+        mock_get_http_request,
+        mock_context,
+        mock_request,
+        config_factory,
+    ):
+        """Test creating header-based XrayFetcher with service headers."""
+        # Setup request state with PAT auth but no user token (header-based scenario)
+        mock_request.state.user_atlassian_auth_type = "pat"
+        mock_request.state.user_atlassian_email = None
+        mock_request.state.xray_fetcher = None
+
+        # Ensure user_atlassian_token attribute does not exist for header-based scenario
+        if hasattr(mock_request.state, "user_atlassian_token"):
+            delattr(mock_request.state, "user_atlassian_token")
+
+        # Setup service headers
+        mock_request.state.atlassian_service_headers = {
+            "X-Atlassian-Xray-Url": "https://xray.example.com",
+            "X-Atlassian-Xray-Personal-Token": "header-xray-token",
+        }
+
+        mock_get_http_request.return_value = mock_request
+
+        # Setup context
+        app_context = config_factory.create_app_context()
+        _setup_mock_context(mock_context, app_context)
+
+        # Setup mock fetcher
+        mock_fetcher = _create_mock_fetcher(XrayFetcher)
+        mock_xray_fetcher_class.return_value = mock_fetcher
+
+        result = await get_xray_fetcher(mock_context)
+
+        assert result == mock_fetcher
+        assert mock_request.state.xray_fetcher == mock_fetcher
+        mock_xray_fetcher_class.assert_called_once()
+
+        # Verify the config passed to XrayFetcher uses header values
+        called_config = mock_xray_fetcher_class.call_args[1]["config"]
+        assert called_config.auth_type == "pat"
+        assert called_config.url == "https://xray.example.com"
+        assert called_config.personal_token == "header-xray-token"
+
+    @patch("mcp_atlassian.servers.dependencies.get_http_request")
+    @patch("mcp_atlassian.servers.dependencies.XrayFetcher")
+    async def test_global_fallback_scenarios(
+        self,
+        mock_xray_fetcher_class,
+        mock_get_http_request,
+        mock_context,
+        mock_request,
+        config_factory,
+    ):
+        """Test fallback to global XrayFetcher in various scenarios."""
+        # Test both HTTP context without user token and non-HTTP context
+        test_scenarios = [
+            {"name": "no_user_token", "setup_http": True, "user_auth": None},
+            {"name": "no_http_context", "setup_http": False, "user_auth": None},
+        ]
+
+        for scenario in test_scenarios:
+            # Setup request state
+            if scenario["setup_http"]:
+                _setup_mock_request_state(mock_request)
+                mock_get_http_request.return_value = mock_request
+            else:
+                mock_get_http_request.side_effect = RuntimeError("No HTTP context")
+
+            # Setup context
+            app_context = config_factory.create_app_context()
+            _setup_mock_context(mock_context, app_context)
+
+            # Setup mock fetcher
+            mock_fetcher = _create_mock_fetcher(XrayFetcher)
+            mock_xray_fetcher_class.return_value = mock_fetcher
+
+            result = await get_xray_fetcher(mock_context)
+
+            assert result == mock_fetcher
+            assert_mock_called_with_partial(
+                mock_xray_fetcher_class, config=app_context.full_xray_config
+            )
+
+            # Reset mocks for next iteration
+            mock_xray_fetcher_class.reset_mock()
+            mock_get_http_request.reset_mock()
+
+    @pytest.mark.parametrize(
+        "email_scenario,expected_email",
+        [
+            ("derive_email", "derived@example.com"),
+            ("preserve_existing", "existing@example.com"),
+        ],
+    )
+    @patch("mcp_atlassian.servers.dependencies.get_http_request")
+    @patch("mcp_atlassian.servers.dependencies.XrayFetcher")
+    async def test_email_derivation_behavior(
+        self,
+        mock_xray_fetcher_class,
+        mock_get_http_request,
+        mock_context,
+        mock_request,
+        config_factory,
+        auth_scenarios,
+        email_scenario,
+        expected_email,
+    ):
+        """Test email derivation behavior in different scenarios."""
+        scenario = auth_scenarios["pat"].copy()
+
+        if email_scenario == "derive_email":
+            scenario["email"] = None  # No existing email
+            user_info_email = "derived@example.com"
+        else:  # preserve_existing
+            scenario["email"] = "existing@example.com"
+            user_info_email = "different@example.com"
+
+        # Setup request state
+        _setup_mock_request_state(mock_request, scenario)
+        mock_get_http_request.return_value = mock_request
+
+        # Setup context
+        app_context = config_factory.create_app_context()
+        _setup_mock_context(mock_context, app_context)
+
+        # Setup mock fetcher with specific user info
+        mock_fetcher = _create_mock_fetcher(
+            XrayFetcher,
+            validation_return={
+                "email": user_info_email,
+                "displayName": "Test User",
+            },
+        )
+        mock_xray_fetcher_class.return_value = mock_fetcher
+
+        result = await get_xray_fetcher(mock_context)
+
+        assert result == mock_fetcher
+        assert mock_request.state.xray_fetcher == mock_fetcher
+        assert mock_request.state.user_atlassian_email == expected_email
+
+    @pytest.mark.parametrize(
+        "error_scenario,expected_error_match",
+        [
+            ("missing_global_config", "Xray client \\(fetcher\\) not available"),
+            ("empty_user_token", "User Atlassian token found in state but is empty"),
+            ("validation_failure", "Invalid user Xray token or configuration"),
+            (
+                "header_validation_failure",
+                "Invalid header-based Xray token or configuration",
+            ),
+            (
+                "missing_lifespan_context",
+                "Xray global configuration.*is not available from lifespan context",
+            ),
+        ],
+    )
+    @patch("mcp_atlassian.servers.dependencies.get_http_request")
+    @patch("mcp_atlassian.servers.dependencies.XrayFetcher")
+    async def test_error_scenarios(
+        self,
+        mock_xray_fetcher_class,
+        mock_get_http_request,
+        mock_context,
+        mock_request,
+        config_factory,
+        auth_scenarios,
+        error_scenario,
+        expected_error_match,
+    ):
+        """Test various error scenarios."""
+        if error_scenario == "missing_global_config":
+            mock_get_http_request.side_effect = RuntimeError("No HTTP context")
+            mock_context.request_context.lifespan_context = {}
+
+        elif error_scenario == "empty_user_token":
+            scenario = auth_scenarios["oauth"].copy()
+            scenario["token"] = ""  # Empty token
+            _setup_mock_request_state(mock_request, scenario)
+            mock_get_http_request.return_value = mock_request
+            app_context = config_factory.create_app_context()
+            _setup_mock_context(mock_context, app_context)
+
+        elif error_scenario == "validation_failure":
+            scenario = auth_scenarios["pat"]
+            _setup_mock_request_state(mock_request, scenario)
+            mock_get_http_request.return_value = mock_request
+            app_context = config_factory.create_app_context()
+            _setup_mock_context(mock_context, app_context)
+
+            # Setup mock fetcher to fail validation
+            mock_fetcher = _create_mock_fetcher(
+                XrayFetcher, validation_error=Exception("Invalid token")
+            )
+            mock_xray_fetcher_class.return_value = mock_fetcher
+
+        elif error_scenario == "header_validation_failure":
+            # Setup header-based scenario that fails
+            mock_request.state.user_atlassian_auth_type = "pat"
+            mock_request.state.xray_fetcher = None
+
+            # Ensure user_atlassian_token attribute does not exist for header-based scenario
+            if hasattr(mock_request.state, "user_atlassian_token"):
+                delattr(mock_request.state, "user_atlassian_token")
+
+            mock_request.state.atlassian_service_headers = {
+                "X-Atlassian-Xray-Url": "https://xray.example.com",
+                "X-Atlassian-Xray-Personal-Token": "invalid-header-token",
+            }
+            mock_get_http_request.return_value = mock_request
+            app_context = config_factory.create_app_context()
+            _setup_mock_context(mock_context, app_context)
+
+            # Setup mock fetcher to fail validation
+            mock_fetcher = _create_mock_fetcher(
+                XrayFetcher, validation_error=Exception("Invalid header token")
+            )
+            mock_xray_fetcher_class.return_value = mock_fetcher
+
+        elif error_scenario == "missing_lifespan_context":
+            scenario = auth_scenarios["oauth"]
+            _setup_mock_request_state(mock_request, scenario)
+            mock_get_http_request.return_value = mock_request
+            mock_context.request_context.lifespan_context = {}
+
+        with pytest.raises(ValueError, match=expected_error_match):
+            await get_xray_fetcher(mock_context)
