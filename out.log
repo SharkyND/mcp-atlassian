@@ -1,0 +1,347 @@
+ ./run.sh
+DEBUG - mcp-atlassian - Logging level set to: DEBUG
+DEBUG - mcp-atlassian - Logging stream set to: stderr
+DEBUG - mcp-atlassian - Attempting to load environment from default .env file if it exists
+DEBUG - mcp-atlassian - Final transport determined: streamable-http
+DEBUG - mcp-atlassian - Final port for HTTP transports: 9000
+DEBUG - mcp-atlassian - Final host for HTTP transports: 0.0.0.0
+DEBUG - mcp-atlassian - Final path for Streamable HTTP: FastMCP default
+DEBUG - mcp.server.lowlevel.server - Initializing server 'Bitbucket MCP Service'
+DEBUG - mcp.server.lowlevel.server - Registering handler for ListToolsRequest
+DEBUG - mcp.server.lowlevel.server - Registering handler for ListResourcesRequest
+DEBUG - mcp.server.lowlevel.server - Registering handler for ListResourceTemplatesRequest
+DEBUG - mcp.server.lowlevel.server - Registering handler for PromptListRequest
+DEBUG - mcp.server.lowlevel.server - Registering handler for CallToolRequest
+DEBUG - mcp.server.lowlevel.server - Registering handler for ReadResourceRequest
+DEBUG - mcp.server.lowlevel.server - Registering handler for GetPromptRequest
+DEBUG - mcp.server.lowlevel.server - Initializing server 'Confluence MCP Service'
+DEBUG - mcp.server.lowlevel.server - Registering handler for ListToolsRequest
+DEBUG - mcp.server.lowlevel.server - Registering handler for ListResourcesRequest
+DEBUG - mcp.server.lowlevel.server - Registering handler for ListResourceTemplatesRequest
+DEBUG - mcp.server.lowlevel.server - Registering handler for PromptListRequest
+DEBUG - mcp.server.lowlevel.server - Registering handler for CallToolRequest
+DEBUG - mcp.server.lowlevel.server - Registering handler for ReadResourceRequest
+DEBUG - mcp.server.lowlevel.server - Registering handler for GetPromptRequest
+DEBUG - mcp.server.lowlevel.server - Initializing server 'Jira MCP Service'
+DEBUG - mcp.server.lowlevel.server - Registering handler for ListToolsRequest
+DEBUG - mcp.server.lowlevel.server - Registering handler for ListResourcesRequest
+DEBUG - mcp.server.lowlevel.server - Registering handler for ListResourceTemplatesRequest
+DEBUG - mcp.server.lowlevel.server - Registering handler for PromptListRequest
+DEBUG - mcp.server.lowlevel.server - Registering handler for CallToolRequest
+DEBUG - mcp.server.lowlevel.server - Registering handler for ReadResourceRequest
+DEBUG - mcp.server.lowlevel.server - Registering handler for GetPromptRequest
+INFO - mcp-atlassian.server.main - Metrics collection initialized for pod: None
+DEBUG - mcp.server.lowlevel.server - Initializing server 'Atlassian MCP'
+DEBUG - mcp.server.lowlevel.server - Registering handler for ListToolsRequest
+DEBUG - mcp.server.lowlevel.server - Registering handler for ListResourcesRequest
+DEBUG - mcp.server.lowlevel.server - Registering handler for ListResourceTemplatesRequest
+DEBUG - mcp.server.lowlevel.server - Registering handler for PromptListRequest
+DEBUG - mcp.server.lowlevel.server - Registering handler for CallToolRequest
+DEBUG - mcp.server.lowlevel.server - Registering handler for ReadResourceRequest
+DEBUG - mcp.server.lowlevel.server - Registering handler for GetPromptRequest
+INFO - mcp-atlassian - Starting server with STREAMABLE-HTTP transport on http://0.0.0.0:9000/mcp/
+DEBUG - mcp-atlassian.utils.lifecycle - SIGPIPE handler registered
+DEBUG - mcp-atlassian - Starting asyncio event loop...
+DEBUG - mcp-atlassian - Running server for streamable-http transport without stdin monitoring
+DEBUG - asyncio - Using selector: EpollSelector
+[11/13/25 14:56:26] INFO     Starting MCP server 'Atlassian MCP'  server.py:1358
+                             with transport 'streamable-http' on
+                             http://0.0.0.0:9000/mcp/
+INFO - FastMCP.fastmcp.server.server - Starting MCP server 'Atlassian MCP' with transport 'streamable-http' on http://0.0.0.0:9000/mcp/
+INFO:     Started server process [1]
+INFO:     Waiting for application startup.
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.__call__: ENTERED for scope type='lifespan', path='N/A', method='N/A'
+INFO - mcp.server.streamable_http_manager - StreamableHTTP session manager started
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:9000 (Press CTRL+C to quit)
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.__call__: ENTERED for scope type='http', path='/mcp/', method='POST'
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.__call__: Comparing request_path='/mcp' with mcp_path='/mcp'. Request method='POST'
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware: Path='/mcp', AuthHeader='Toke******************************************PEUR', ParsedToken(masked)='NjQ1************************************PEUR', CloudId='None'
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware: No cloudId header provided, will use global config
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware: Extracted service headers: ['X-Atlassian-Jira-Url']
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.__call__: PAT (Token scheme) extracted (masked): ...NjQ1NzI1****************************oOl3PEUR
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.__call__: Set scope state for PAT auth.
+DEBUG - mcp.server.streamable_http_manager - Creating new transport
+INFO - mcp.server.streamable_http_manager - Created new transport with session ID: 93b8f163f4414dfb823acdc67b8b610d
+INFO:     172.17.0.1:54664 - "POST /mcp/ HTTP/1.1" 200 OK
+DEBUG - mcp.server.streamable_http - Closing SSE writer
+DEBUG - sse_starlette.sse - chunk: b'event: message\r\ndata: {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18","capabilities":{"experimental":{},"prompts":{"listChanged":true},"resources":{"subscribe":false,"listChanged":true},"tools":{"listChanged":true}},"serverInfo":{"name":"Atlassian MCP","version":"1.12.4"}}}\r\n\r\n'
+DEBUG - sse_starlette.sse - Got event: http.disconnect. Stop streaming.
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.__call__: EXITED for request path='/mcp'
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.__call__: ENTERED for scope type='http', path='/mcp/', method='GET'
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.__call__: Comparing request_path='/mcp' with mcp_path='/mcp'. Request method='GET'
+DEBUG - mcp.server.streamable_http_manager - Session already exists, handling request directly
+INFO:     172.17.0.1:54664 - "GET /mcp/ HTTP/1.1" 200 OK
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.__call__: ENTERED for scope type='http', path='/mcp/', method='POST'
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.__call__: Comparing request_path='/mcp' with mcp_path='/mcp'. Request method='POST'
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware: Path='/mcp', AuthHeader='Toke******************************************PEUR', ParsedToken(masked)='NjQ1************************************PEUR', CloudId='None'
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware: No cloudId header provided, will use global config
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware: Extracted service headers: ['X-Atlassian-Jira-Url']
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware: MCP-Session-ID header found: 93b8f163f4414dfb823acdc67b8b610d
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.__call__: PAT (Token scheme) extracted (masked): ...NjQ1NzI1****************************oOl3PEUR
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.__call__: Set scope state for PAT auth.
+DEBUG - mcp.server.streamable_http_manager - Session already exists, handling request directly
+INFO:     172.17.0.1:54670 - "POST /mcp/ HTTP/1.1" 202 Accepted
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.__call__: EXITED for request path='/mcp'
+DEBUG - mcp.server.lowlevel.server - Received message: root=InitializedNotification(method='notifications/initialized', params=None, jsonrpc='2.0')
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.__call__: ENTERED for scope type='http', path='/mcp/', method='POST'
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.__call__: Comparing request_path='/mcp' with mcp_path='/mcp'. Request method='POST'
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware: Path='/mcp', AuthHeader='Toke******************************************PEUR', ParsedToken(masked)='NjQ1************************************PEUR', CloudId='None'
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware: No cloudId header provided, will use global config
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware: Extracted service headers: ['X-Atlassian-Jira-Url']
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware: MCP-Session-ID header found: 93b8f163f4414dfb823acdc67b8b610d
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.__call__: PAT (Token scheme) extracted (masked): ...NjQ1NzI1****************************oOl3PEUR
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.__call__: Set scope state for PAT auth.
+DEBUG - mcp.server.streamable_http_manager - Session already exists, handling request directly
+INFO:     172.17.0.1:54678 - "POST /mcp/ HTTP/1.1" 200 OK
+DEBUG - mcp.server.lowlevel.server - Received message: <mcp.shared.session.RequestResponder object at 0x7dc4417a74f0>
+INFO - mcp.server.lowlevel.server - Processing request of type ListPromptsRequest
+DEBUG - mcp.server.lowlevel.server - Dispatching request of type ListPromptsRequest
+DEBUG - mcp.server.lowlevel.server - Response sent
+DEBUG - mcp.server.streamable_http - Closing SSE writer
+DEBUG - sse_starlette.sse - chunk: b'event: message\r\ndata: {"jsonrpc":"2.0","id":2,"result":{"prompts":[]}}\r\n\r\n'
+DEBUG - sse_starlette.sse - Got event: http.disconnect. Stop streaming.
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.__call__: EXITED for request path='/mcp'
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.__call__: ENTERED for scope type='http', path='/mcp/', method='POST'
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.__call__: Comparing request_path='/mcp' with mcp_path='/mcp'. Request method='POST'
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware: Path='/mcp', AuthHeader='Toke******************************************PEUR', ParsedToken(masked)='NjQ1************************************PEUR', CloudId='None'
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware: No cloudId header provided, will use global config
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware: Extracted service headers: ['X-Atlassian-Jira-Url']
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware: MCP-Session-ID header found: 93b8f163f4414dfb823acdc67b8b610d
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.__call__: PAT (Token scheme) extracted (masked): ...NjQ1NzI1****************************oOl3PEUR
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.__call__: Set scope state for PAT auth.
+DEBUG - mcp.server.streamable_http_manager - Session already exists, handling request directly
+INFO:     172.17.0.1:54682 - "POST /mcp/ HTTP/1.1" 200 OK
+DEBUG - mcp.server.lowlevel.server - Received message: <mcp.shared.session.RequestResponder object at 0x7dc4417a5510>
+INFO - mcp.server.lowlevel.server - Processing request of type ListToolsRequest
+DEBUG - mcp.server.lowlevel.server - Dispatching request of type ListToolsRequest
+INFO - mcp-atlassian.utils.environment - Using Jira Server/Data Center authentication (PAT or Basic Auth)
+INFO - mcp-atlassian.utils.environment - Confluence is not configured or required environment variables are missing.
+INFO - mcp-atlassian.utils.environment - Bitbucket is not configured or required environment variables are missing.
+DEBUG - mcp-atlassian.server.main - Header-based service availability: {'confluence': False, 'jira': True, 'bitbucket': False}
+DEBUG - mcp-atlassian.server.main - _main_mcp_list_tools: read_only=False, enabled_tools_filter=None, header_services={'confluence': False, 'jira': True, 'bitbucket': False}
+DEBUG - mcp-atlassian.server.main - Aggregated 58 tools before filtering: ['jira_get_user_profile', 'jira_get_issue', 'jira_search', 'jira_search_fields', 'jira_get_project_issues', 'jira_get_transitions', 'jira_get_worklog', 'jira_download_attachments', 'jira_get_agile_boards', 'jira_get_board_issues', 'jira_get_sprints_from_board', 'jira_get_sprint_issues', 'jira_get_link_types', 'jira_create_issue', 'jira_batch_create_issues', 'jira_batch_get_changelogs', 'jira_update_issue', 'jira_delete_issue', 'jira_add_comment', 'jira_add_worklog', 'jira_link_to_epic', 'jira_create_issue_link', 'jira_create_remote_issue_link', 'jira_remove_issue_link', 'jira_transition_issue', 'jira_create_sprint', 'jira_update_sprint', 'jira_get_project_versions', 'jira_get_all_projects', 'jira_create_version', 'jira_batch_create_versions', 'confluence_search', 'confluence_get_page', 'confluence_get_page_children', 'confluence_get_comments', 'confluence_get_labels', 'confluence_add_label', 'confluence_create_page', 'confluence_update_page', 'confluence_delete_page', 'confluence_add_comment', 'confluence_search_user', 'bitbucket_list_workspaces_or_projects', 'bitbucket_list_repositories', 'bitbucket_get_repository_info', 'bitbucket_list_branches', 'bitbucket_get_default_branch', 'bitbucket_get_file_content', 'bitbucket_list_directory', 'bitbucket_list_pull_requests', 'bitbucket_pull_request_activities', 'bitbucket_get_pull_request', 'bitbucket_get_commit_changes', 'bitbucket_get_commits', 'bitbucket_create_pull_request', 'bitbucket_create_branch', 'bitbucket_add_pull_request_blocker_comment', 'bitbucket_add_pull_request_comment']
+DEBUG - mcp_atlassian.utils.tools - Including tool 'jira_get_user_profile' because enabled_tools filter is None.
+DEBUG - mcp_atlassian.utils.tools - Including tool 'jira_get_issue' because enabled_tools filter is None.
+DEBUG - mcp_atlassian.utils.tools - Including tool 'jira_search' because enabled_tools filter is None.
+DEBUG - mcp_atlassian.utils.tools - Including tool 'jira_search_fields' because enabled_tools filter is None.
+DEBUG - mcp_atlassian.utils.tools - Including tool 'jira_get_project_issues' because enabled_tools filter is None.
+DEBUG - mcp_atlassian.utils.tools - Including tool 'jira_get_transitions' because enabled_tools filter is None.
+DEBUG - mcp_atlassian.utils.tools - Including tool 'jira_get_worklog' because enabled_tools filter is None.
+DEBUG - mcp_atlassian.utils.tools - Including tool 'jira_download_attachments' because enabled_tools filter is None.
+DEBUG - mcp_atlassian.utils.tools - Including tool 'jira_get_agile_boards' because enabled_tools filter is None.
+DEBUG - mcp_atlassian.utils.tools - Including tool 'jira_get_board_issues' because enabled_tools filter is None.
+DEBUG - mcp_atlassian.utils.tools - Including tool 'jira_get_sprints_from_board' because enabled_tools filter is None.
+DEBUG - mcp_atlassian.utils.tools - Including tool 'jira_get_sprint_issues' because enabled_tools filter is None.
+DEBUG - mcp_atlassian.utils.tools - Including tool 'jira_get_link_types' because enabled_tools filter is None.
+DEBUG - mcp_atlassian.utils.tools - Including tool 'jira_create_issue' because enabled_tools filter is None.
+DEBUG - mcp_atlassian.utils.tools - Including tool 'jira_batch_create_issues' because enabled_tools filter is None.
+DEBUG - mcp_atlassian.utils.tools - Including tool 'jira_batch_get_changelogs' because enabled_tools filter is None.
+DEBUG - mcp_atlassian.utils.tools - Including tool 'jira_update_issue' because enabled_tools filter is None.
+DEBUG - mcp_atlassian.utils.tools - Including tool 'jira_delete_issue' because enabled_tools filter is None.
+DEBUG - mcp_atlassian.utils.tools - Including tool 'jira_add_comment' because enabled_tools filter is None.
+DEBUG - mcp_atlassian.utils.tools - Including tool 'jira_add_worklog' because enabled_tools filter is None.
+DEBUG - mcp_atlassian.utils.tools - Including tool 'jira_link_to_epic' because enabled_tools filter is None.
+DEBUG - mcp_atlassian.utils.tools - Including tool 'jira_create_issue_link' because enabled_tools filter is None.
+DEBUG - mcp_atlassian.utils.tools - Including tool 'jira_create_remote_issue_link' because enabled_tools filter is None.
+DEBUG - mcp_atlassian.utils.tools - Including tool 'jira_remove_issue_link' because enabled_tools filter is None.
+DEBUG - mcp_atlassian.utils.tools - Including tool 'jira_transition_issue' because enabled_tools filter is None.
+DEBUG - mcp_atlassian.utils.tools - Including tool 'jira_create_sprint' because enabled_tools filter is None.
+DEBUG - mcp_atlassian.utils.tools - Including tool 'jira_update_sprint' because enabled_tools filter is None.
+DEBUG - mcp_atlassian.utils.tools - Including tool 'jira_get_project_versions' because enabled_tools filter is None.
+DEBUG - mcp_atlassian.utils.tools - Including tool 'jira_get_all_projects' because enabled_tools filter is None.
+DEBUG - mcp_atlassian.utils.tools - Including tool 'jira_create_version' because enabled_tools filter is None.
+DEBUG - mcp_atlassian.utils.tools - Including tool 'jira_batch_create_versions' because enabled_tools filter is None.
+DEBUG - mcp_atlassian.utils.tools - Including tool 'confluence_search' because enabled_tools filter is None.
+DEBUG - mcp-atlassian.server.main - Excluding Confluence tool 'confluence_search' as no Confluence authentication available.
+DEBUG - mcp_atlassian.utils.tools - Including tool 'confluence_get_page' because enabled_tools filter is None.
+DEBUG - mcp-atlassian.server.main - Excluding Confluence tool 'confluence_get_page' as no Confluence authentication available.
+DEBUG - mcp_atlassian.utils.tools - Including tool 'confluence_get_page_children' because enabled_tools filter is None.
+DEBUG - mcp-atlassian.server.main - Excluding Confluence tool 'confluence_get_page_children' as no Confluence authentication available.
+DEBUG - mcp_atlassian.utils.tools - Including tool 'confluence_get_comments' because enabled_tools filter is None.
+DEBUG - mcp-atlassian.server.main - Excluding Confluence tool 'confluence_get_comments' as no Confluence authentication available.
+DEBUG - mcp_atlassian.utils.tools - Including tool 'confluence_get_labels' because enabled_tools filter is None.
+DEBUG - mcp-atlassian.server.main - Excluding Confluence tool 'confluence_get_labels' as no Confluence authentication available.
+DEBUG - mcp_atlassian.utils.tools - Including tool 'confluence_add_label' because enabled_tools filter is None.
+DEBUG - mcp-atlassian.server.main - Excluding Confluence tool 'confluence_add_label' as no Confluence authentication available.
+DEBUG - mcp_atlassian.utils.tools - Including tool 'confluence_create_page' because enabled_tools filter is None.
+DEBUG - mcp-atlassian.server.main - Excluding Confluence tool 'confluence_create_page' as no Confluence authentication available.
+DEBUG - mcp_atlassian.utils.tools - Including tool 'confluence_update_page' because enabled_tools filter is None.
+DEBUG - mcp-atlassian.server.main - Excluding Confluence tool 'confluence_update_page' as no Confluence authentication available.
+DEBUG - mcp_atlassian.utils.tools - Including tool 'confluence_delete_page' because enabled_tools filter is None.
+DEBUG - mcp-atlassian.server.main - Excluding Confluence tool 'confluence_delete_page' as no Confluence authentication available.
+DEBUG - mcp_atlassian.utils.tools - Including tool 'confluence_add_comment' because enabled_tools filter is None.
+DEBUG - mcp-atlassian.server.main - Excluding Confluence tool 'confluence_add_comment' as no Confluence authentication available.
+DEBUG - mcp_atlassian.utils.tools - Including tool 'confluence_search_user' because enabled_tools filter is None.
+DEBUG - mcp-atlassian.server.main - Excluding Confluence tool 'confluence_search_user' as no Confluence authentication available.
+DEBUG - mcp_atlassian.utils.tools - Including tool 'bitbucket_list_workspaces_or_projects' because enabled_tools filter is None.
+DEBUG - mcp-atlassian.server.main - Excluding Bitbucket tool 'bitbucket_list_workspaces_or_projects' as no Bitbucket authentication available.
+DEBUG - mcp_atlassian.utils.tools - Including tool 'bitbucket_list_repositories' because enabled_tools filter is None.
+DEBUG - mcp-atlassian.server.main - Excluding Bitbucket tool 'bitbucket_list_repositories' as no Bitbucket authentication available.
+DEBUG - mcp_atlassian.utils.tools - Including tool 'bitbucket_get_repository_info' because enabled_tools filter is None.
+DEBUG - mcp-atlassian.server.main - Excluding Bitbucket tool 'bitbucket_get_repository_info' as no Bitbucket authentication available.
+DEBUG - mcp_atlassian.utils.tools - Including tool 'bitbucket_list_branches' because enabled_tools filter is None.
+DEBUG - mcp-atlassian.server.main - Excluding Bitbucket tool 'bitbucket_list_branches' as no Bitbucket authentication available.
+DEBUG - mcp_atlassian.utils.tools - Including tool 'bitbucket_get_default_branch' because enabled_tools filter is None.
+DEBUG - mcp-atlassian.server.main - Excluding Bitbucket tool 'bitbucket_get_default_branch' as no Bitbucket authentication available.
+DEBUG - mcp_atlassian.utils.tools - Including tool 'bitbucket_get_file_content' because enabled_tools filter is None.
+DEBUG - mcp-atlassian.server.main - Excluding Bitbucket tool 'bitbucket_get_file_content' as no Bitbucket authentication available.
+DEBUG - mcp_atlassian.utils.tools - Including tool 'bitbucket_list_directory' because enabled_tools filter is None.
+DEBUG - mcp-atlassian.server.main - Excluding Bitbucket tool 'bitbucket_list_directory' as no Bitbucket authentication available.
+DEBUG - mcp_atlassian.utils.tools - Including tool 'bitbucket_list_pull_requests' because enabled_tools filter is None.
+DEBUG - mcp-atlassian.server.main - Excluding Bitbucket tool 'bitbucket_list_pull_requests' as no Bitbucket authentication available.
+DEBUG - mcp_atlassian.utils.tools - Including tool 'bitbucket_pull_request_activities' because enabled_tools filter is None.
+DEBUG - mcp-atlassian.server.main - Excluding Bitbucket tool 'bitbucket_pull_request_activities' as no Bitbucket authentication available.
+DEBUG - mcp_atlassian.utils.tools - Including tool 'bitbucket_get_pull_request' because enabled_tools filter is None.
+DEBUG - mcp-atlassian.server.main - Excluding Bitbucket tool 'bitbucket_get_pull_request' as no Bitbucket authentication available.
+DEBUG - mcp_atlassian.utils.tools - Including tool 'bitbucket_get_commit_changes' because enabled_tools filter is None.
+DEBUG - mcp-atlassian.server.main - Excluding Bitbucket tool 'bitbucket_get_commit_changes' as no Bitbucket authentication available.
+DEBUG - mcp_atlassian.utils.tools - Including tool 'bitbucket_get_commits' because enabled_tools filter is None.
+DEBUG - mcp-atlassian.server.main - Excluding Bitbucket tool 'bitbucket_get_commits' as no Bitbucket authentication available.
+DEBUG - mcp_atlassian.utils.tools - Including tool 'bitbucket_create_pull_request' because enabled_tools filter is None.
+DEBUG - mcp-atlassian.server.main - Excluding Bitbucket tool 'bitbucket_create_pull_request' as no Bitbucket authentication available.
+DEBUG - mcp_atlassian.utils.tools - Including tool 'bitbucket_create_branch' because enabled_tools filter is None.
+DEBUG - mcp-atlassian.server.main - Excluding Bitbucket tool 'bitbucket_create_branch' as no Bitbucket authentication available.
+DEBUG - mcp_atlassian.utils.tools - Including tool 'bitbucket_add_pull_request_blocker_comment' because enabled_tools filter is None.
+DEBUG - mcp-atlassian.server.main - Excluding Bitbucket tool 'bitbucket_add_pull_request_blocker_comment' as no Bitbucket authentication available.
+DEBUG - mcp_atlassian.utils.tools - Including tool 'bitbucket_add_pull_request_comment' because enabled_tools filter is None.
+DEBUG - mcp-atlassian.server.main - Excluding Bitbucket tool 'bitbucket_add_pull_request_comment' as no Bitbucket authentication available.
+DEBUG - mcp-atlassian.server.main - _main_mcp_list_tools: Total tools after filtering: 31
+DEBUG - mcp.server.lowlevel.server - Response sent
+DEBUG - mcp.server.streamable_http - Closing SSE writer
+DEBUG - sse_starlette.sse - chunk: b'event: message\r\ndata: {"jsonrpc":"2.0","id":3,"result":{"tools":[{"name":"jira_get_user_profile","description":"Retrieve profile information for a specific Jira user.\\n\\nArgs:\\n    ctx: The FastMCP context.\\n    user_identifier: User identifier (email, username, key, or account ID).\\n\\nReturns:\\n    JSON string representing the Jira user profile object, or an error object if not found.\\n\\nRaises:\\n    ValueError: If the Jira client is not configured or available.","inputSchema":{"properties":{"user_identifier":{"description":"Identifier for the user (e.g., email address \'user@example.com\', username \'johndoe\', account ID \'accountid:...\', or key for Server/DC).","title":"User Identifier","type":"string"}},"required":["user_identifier"],"type":"object"}},{"name":"jira_get_issue","description":"Get details of a specific Jira issue including its Epic links and relationship information.\\n\\nArgs:\\n    ctx: The FastMCP context.\\n    issue_key: Jira issue key.\\n    fields: Comma-separated list of fields to return (e.g., \'summary,status,customfield_10010\'), a single field as a string (e.g., \'duedate\'), \'*all\' for all fields, or omitted for essentials.\\n    expand: Optional fields to expand.\\n    comment_limit: Maximum number of comments.\\n    properties: Issue properties to return.\\n    update_history: Whether to update issue view history.\\n\\nReturns:\\n    JSON string representing the Jira issue object.\\n\\nRaises:\\n    ValueError: If the Jira client is not configured or available.","inputSchema":{"properties":{"issue_key":{"description":"Jira issue key (e.g., \'PROJ-123\')","title":"Issue Key","type":"string"},"fields":{"default":"reporter,status,priority,assignee,updated,summary,created,issuetype,description,labels","description":"(Optional) Comma-separated list of fields to return (e.g., \'summary,status,customfield_10010\'). You may also provide a single field as a string (e.g., \'duedate\'). Use \'*all\' for all fields (including custom fields), or omit for essential fields only.","title":"Fields","type":"string"},"expand":{"anyOf":[{"type":"string"},{"type":"null"}],"default":null,"description":"(Optional) Fields to expand. Examples: \'renderedFields\' (for rendered content), \'transitions\' (for available status transitions), \'changelog\' (for history)","title":"Expand"},"comment_limit":{"default":10,"description":"Maximum number of comments to include (0 or null for no comments)","maximum":100,"minimum":0,"title":"Comment Limit","type":"integer"},"properties":{"anyOf":[{"type":"string"},{"type":"null"}],"description":"(Optional) A comma-separated list of issue properties to return","default":null,"title":"Properties"},"update_history":{"default":true,"description":"Whether to update the issue view history for the requesting user","title":"Update History","type":"boolean"}},"required":["issue_key"],"type":"object"}},{"name":"jira_search","description":"Search Jira issues using JQL (Jira Query Language).\\n\\nArgs:\\n    ctx: The FastMCP context.\\n    jql: JQL query string.\\n    fields: Comma-separated fields to return.\\n    limit: Maximum number of results.\\n    start_at: Starting index for pagination.\\n    projects_filter: Comma-separated list of project keys to filter by.\\n    expand: Optional fields to expand.\\n\\nReturns:\\n    JSON string representing the search results including pagination info.","inputSchema":{"properties":{"jql":{"description":"JQL query string (Jira Query Language). Examples:\\n- Find Epics: \\"issuetype = Epic AND project = PROJ\\"\\n- Find issues in Epic: \\"parent = PROJ-123\\"\\n- Find by status: \\"status = \'In Progress\' AND project = PROJ\\"\\n- Find by assignee: \\"assignee = currentUser()\\"\\n- Find recently updated: \\"updated >= -7d AND project = PROJ\\"\\n- Find by label: \\"labels = frontend AND project = PROJ\\"\\n- Find by priority: \\"priority = High AND project = PROJ\\"","title":"Jql","type":"string"},"fields":{"default":"reporter,status,priority,assignee,updated,summary,created,issuetype,description,labels","description":"(Optional) Comma-separated fields to return in the results. Use \'*all\' for all fields, or specify individual fields like \'summary,status,assignee,priority\'","title":"Fields","type":"string"},"limit":{"default":10,"description":"Maximum number of results (1-50)","minimum":1,"title":"Limit","type":"integer"},"start_at":{"default":0,"description":"Starting index for pagination (0-based)","minimum":0,"title":"Start At","type":"integer"},"projects_filter":{"anyOf":[{"type":"string"},{"type":"null"}],"default":null,"description":"(Optional) Comma-separated list of project keys to filter results by. Overrides the environment variable JIRA_PROJECTS_FILTER if provided.","title":"Projects Filter"},"expand":{"anyOf":[{"type":"string"},{"type":"null"}],"default":null,"description":"(Optional) fields to expand. Examples: \'renderedFields\', \'transitions\', \'changelog\'","title":"Expand"}},"required":["jql"],"type":"object"}},{"name":"jira_search_fields","description":"Search Jira fields by keyword with fuzzy match.\\n\\nArgs:\\n    ctx: The FastMCP context.\\n    keyword: Keyword for fuzzy search.\\n    limit: Maximum number of results.\\n    refresh: Whether to force refresh the field list.\\n\\nReturns:\\n    JSON string representing a list of matching field definitions.","inputSchema":{"properties":{"keyword":{"default":"","description":"Keyword for fuzzy search. If left empty, lists the first \'limit\' available fields in their default order.","title":"Keyword","type":"string"},"limit":{"default":10,"description":"Maximum number of results","minimum":1,"title":"Limit","type":"integer"},"refresh":{"default":false,"description":"Whether to force refresh the field list","title":"Refresh","type":"boolean"}},"type":"object"}},{"name":"jira_get_project_issues","description":"Get all issues for a specific Jira project.\\n\\nArgs:\\n    ctx: The FastMCP context.\\n    project_key: The project key.\\n    limit: Maximum number of results.\\n    start_at: Starting index for pagination.\\n\\nReturns:\\n    JSON string representing the search results including pagination info.","inputSchema":{"properties":{"project_key":{"description":"The project key","title":"Project Key","type":"string"},"limit":{"default":10,"description":"Maximum number of results (1-50)","maximum":50,"minimum":1,"title":"Limit","type":"integer"},"start_at":{"default":0,"description":"Starting index for pagination (0-based)","minimum":0,"title":"Start At","type":"integer"}},"required":["project_key"],"type":"object"}},{"name":"jira_get_transitions","description":"Get available status transitions for a Jira issue.\\n\\nArgs:\\n    ctx: The FastMCP context.\\n    issue_key: Jira issue key.\\n\\nReturns:\\n    JSON string representing a list of available transitions.","inputSchema":{"properties":{"issue_key":{"description":"Jira issue key (e.g., \'PROJ-123\')","title":"Issue Key","type":"string"}},"required":["issue_key"],"type":"object"}},{"name":"jira_get_worklog","description":"Get worklog entries for a Jira issue.\\n\\nArgs:\\n    ctx: The FastMCP context.\\n    issue_key: Jira issue key.\\n\\nReturns:\\n    JSON string representing the worklog entries.","inputSchema":{"properties":{"issue_key":{"description":"Jira issue key (e.g., \'PROJ-123\')","title":"Issue Key","type":"string"}},"required":["issue_key"],"type":"object"}},{"name":"jira_download_attachments","description":"Download attachments from a Jira issue.\\n\\nArgs:\\n    ctx: The FastMCP context.\\n    issue_key: Jira issue key.\\n    target_dir: Directory to save attachments.\\n\\nReturns:\\n    JSON string indicating the result of the download operation.","inputSchema":{"properties":{"issue_key":{"description":"Jira issue key (e.g., \'PROJ-123\')","title":"Issue Key","type":"string"},"target_dir":{"description":"Directory where attachments should be saved","title":"Target Dir","type":"string"}},"required":["issue_key","target_dir"],"type":"object"}},{"name":"jira_get_agile_boards","description":"Get jira agile boards by name, project key, or type.\\n\\nArgs:\\n    ctx: The FastMCP context.\\n    board_name: Name of the board (fuzzy search).\\n    project_key: Project key.\\n    board_type: Board type (\'scrum\' or \'kanban\').\\n    start_at: Starting index.\\n    limit: Maximum results.\\n\\nReturns:\\n    JSON string representing a list of board objects.","inputSchema":{"properties":{"board_name":{"anyOf":[{"type":"string"},{"type":"null"}],"default":null,"description":"(Optional) The name of board, support fuzzy search","title":"Board Name"},"project_key":{"anyOf":[{"type":"string"},{"type":"null"}],"default":null,"description":"(Optional) Jira project key (e.g., \'PROJ-123\')","title":"Project Key"},"board_type":{"anyOf":[{"type":"string"},{"type":"null"}],"default":null,"description":"(Optional) The type of jira board (e.g., \'scrum\', \'kanban\')","title":"Board Type"},"start_at":{"default":0,"description":"Starting index for pagination (0-based)","minimum":0,"title":"Start At","type":"integer"},"limit":{"default":10,"description":"Maximum number of results (1-50)","maximum":50,"minimum":1,"title":"Limit","type":"integer"}},"type":"object"}},{"name":"jira_get_board_issues","description":"Get all issues linked to a specific board filtered by JQL.\\n\\nArgs:\\n    ctx: The FastMCP context.\\n    board_id: The ID of the board.\\n    jql: JQL query string to filter issues.\\n    fields: Comma-separated fields to return.\\n    start_at: Starting index for pagination.\\n    limit: Maximum number of results.\\n    expand: Optional fields to expand.\\n\\nReturns:\\n    JSON string representing the search results including pagination info.","inputSchema":{"properties":{"board_id":{"description":"The id of the board (e.g., \'1001\')","title":"Board Id","type":"string"},"jql":{"description":"JQL query string (Jira Query Language). Examples:\\n- Find Epics: \\"issuetype = Epic AND project = PROJ\\"\\n- Find issues in Epic: \\"parent = PROJ-123\\"\\n- Find by status: \\"status = \'In Progress\' AND project = PROJ\\"\\n- Find by assignee: \\"assignee = currentUser()\\"\\n- Find recently updated: \\"updated >= -7d AND project = PROJ\\"\\n- Find by label: \\"labels = frontend AND project = PROJ\\"\\n- Find by priority: \\"priority = High AND project = PROJ\\"","title":"Jql","type":"string"},"fields":{"default":"reporter,status,priority,assignee,updated,summary,created,issuetype,description,labels","description":"Comma-separated fields to return in the results. Use \'*all\' for all fields, or specify individual fields like \'summary,status,assignee,priority\'","title":"Fields","type":"string"},"start_at":{"default":0,"description":"Starting index for pagination (0-based)","minimum":0,"title":"Start At","type":"integer"},"limit":{"default":10,"description":"Maximum number of results (1-50)","maximum":50,"minimum":1,"title":"Limit","type":"integer"},"expand":{"default":"version","description":"Optional fields to expand in the response (e.g., \'changelog\').","title":"Expand","type":"string"}},"required":["board_id","jql"],"type":"object"}},{"name":"jira_get_sprints_from_board","description":"Get jira sprints from board by state.\\n\\nArgs:\\n    ctx: The FastMCP context.\\n    board_id: The ID of the board.\\n    state: Sprint state (\'active\', \'future\', \'closed\'). If None, returns all sprints.\\n    start_at: Starting index.\\n    limit: Maximum results.\\n\\nReturns:\\n    JSON string representing a list of sprint objects.","inputSchema":{"properties":{"board_id":{"description":"The id of board (e.g., \'1000\')","title":"Board Id","type":"string"},"state":{"anyOf":[{"type":"string"},{"type":"null"}],"default":null,"description":"Sprint state (e.g., \'active\', \'future\', \'closed\')","title":"State"},"start_at":{"default":0,"description":"Starting index for pagination (0-based)","minimum":0,"title":"Start At","type":"integer"},"limit":{"default":10,"description":"Maximum number of results (1-50)","maximum":50,"minimum":1,"title":"Limit","type":"integer"}},"required":["board_id"],"type":"object"}},{"name":"jira_get_sprint_issues","description":"Get jira issues from sprint.\\n\\nArgs:\\n    ctx: The FastMCP context.\\n    sprint_id: The ID of the sprint.\\n    fields: Comma-separated fields to return.\\n    start_at: Starting index.\\n    limit: Maximum results.\\n\\nReturns:\\n    JSON string representing the search results including pagination info.","inputSchema":{"properties":{"sprint_id":{"description":"The id of sprint (e.g., \'10001\')","title":"Sprint Id","type":"string"},"fields":{"default":"reporter,status,priority,assignee,updated,summary,created,issuetype,description,labels","description":"Comma-separated fields to return in the results. Use \'*all\' for all fields, or specify individual fields like \'summary,status,assignee,priority\'","title":"Fields","type":"string"},"start_at":{"default":0,"description":"Starting index for pagination (0-based)","minimum":0,"title":"Start At","type":"integer"},"limit":{"default":10,"description":"Maximum number of results (1-50)","maximum":50,"minimum":1,"title":"Limit","type":"integer"}},"required":["sprint_id"],"type":"object"}},{"name":"jira_get_link_types","description":"Get all available issue link types.\\n\\nArgs:\\n    ctx: The FastMCP context.\\n\\nReturns:\\n    JSON string representing a list of issue link type objects.","inputSchema":{"properties":{},"type":"object"}},{"name":"jira_create_issue","description":"Create a new Jira issue with optional Epic link or parent for subtasks.\\n\\nArgs:\\n    ctx: The FastMCP context.\\n    project_key: The JIRA project key.\\n    summary: Summary/title of the issue.\\n    issue_type: Issue type (e.g., \'Task\', \'Bug\', \'Story\', \'Epic\', \'Subtask\').\\n    assignee: Assignee\'s user identifier (string): Email, display name, or account ID (e.g., \'user@example.com\', \'John Doe\', \'accountid:...\').\\n    description: Issue description.\\n    components: Comma-separated list of component names.\\n    additional_fields: Dictionary of additional fields.\\n\\nReturns:\\n    JSON string representing the created issue object.\\n\\nRaises:\\n    ValueError: If in read-only mode or Jira client is unavailable.","inputSchema":{"properties":{"project_key":{"description":"The JIRA project key (e.g. \'PROJ\', \'DEV\', \'SUPPORT\'). This is the prefix of issue keys in your project. Never assume what it might be, always ask the user.","title":"Project Key","type":"string"},"summary":{"description":"Summary/title of the issue","title":"Summary","type":"string"},"issue_type":{"description":"Issue type (e.g. \'Task\', \'Bug\', \'Story\', \'Epic\', \'Subtask\'). The available types depend on your project configuration. For subtasks, use \'Subtask\' (not \'Sub-task\') and include parent in additional_fields.","title":"Issue Type","type":"string"},"assignee":{"anyOf":[{"type":"string"},{"type":"null"}],"default":null,"description":"(Optional) Assignee\'s user identifier (string): Email, display name, or account ID (e.g., \'user@example.com\', \'John Doe\', \'accountid:...\')","title":"Assignee"},"description":{"anyOf":[{"type":"string"},{"type":"null"}],"default":null,"description":"Issue description","title":"Description"},"components":{"anyOf":[{"type":"string"},{"type":"null"}],"default":null,"description":"(Optional) Comma-separated list of component names to assign (e.g., \'Frontend,API\')","title":"Components"},"additional_fields":{"anyOf":[{"type":"object"},{"type":"null"}],"default":null,"description":"(Optional) Dictionary of additional fields to set. Examples:\\n- Set priority: {\'priority\': {\'name\': \'High\'}}\\n- Add labels: {\'labels\': [\'frontend\', \'urgent\']}\\n- Link to parent (for any issue type): {\'parent\': \'PROJ-123\'}\\n- Set Fix Version/s: {\'fixVersions\': [{\'id\': \'10020\'}]}\\n- Custom fields: {\'customfield_10010\': \'value\'}","title":"Additional Fields"}},"required":["project_key","summary","issue_type"],"type":"object"}},{"name":"jira_batch_create_issues","description":"Create multiple Jira issues in a batch.\\n\\nArgs:\\n    ctx: The FastMCP context.\\n    issues: JSON array string of issue objects.\\n    validate_only: If true, only validates without creating.\\n\\nReturns:\\n    JSON string indicating success and listing created issues (or validation result).\\n\\nRaises:\\n    ValueError: If in read-only mode, Jira client unavailable, or invalid JSON.","inputSchema":{"properties":{"issues":{"description":"JSON array of issue objects. Each object should contain:\\n- project_key (required): The project key (e.g., \'PROJ\')\\n- summary (required): Issue summary/title\\n- issue_type (required): Type of issue (e.g., \'Task\', \'Bug\')\\n- description (optional): Issue description\\n- assignee (optional): Assignee username or email\\n- components (optional): Array of component names\\nExample: [\\n  {\\"project_key\\": \\"PROJ\\", \\"summary\\": \\"Issue 1\\", \\"issue_type\\": \\"Task\\"},\\n  {\\"project_key\\": \\"PROJ\\", \\"summary\\": \\"Issue 2\\", \\"issue_type\\": \\"Bug\\", \\"components\\": [\\"Frontend\\"]}\\n]","title":"Issues","type":"string"},"validate_only":{"default":false,"description":"If true, only validates the issues without creating them","title":"Validate Only","type":"boolean"}},"required":["issues"],"type":"object"}},{"name":"jira_batch_get_changelogs","description":"Get changelogs for multiple Jira issues (Cloud only).\\n\\nArgs:\\n    ctx: The FastMCP context.\\n    issue_ids_or_keys: List of issue IDs or keys.\\n    fields: List of fields to filter changelogs by. None for all fields.\\n    limit: Maximum changelogs per issue (-1 for all).\\n\\nReturns:\\n    JSON string representing a list of issues with their changelogs.\\n\\nRaises:\\n    NotImplementedError: If run on Jira Server/Data Center.\\n    ValueError: If Jira client is unavailable.","inputSchema":{"properties":{"issue_ids_or_keys":{"description":"List of Jira issue IDs or keys, e.g. [\'PROJ-123\', \'PROJ-124\']","items":{"type":"string"},"title":"Issue Ids Or Keys","type":"array"},"fields":{"anyOf":[{"items":{"type":"string"},"type":"array"},{"type":"null"}],"default":null,"description":"(Optional) Filter the changelogs by fields, e.g. [\'status\', \'assignee\']. Default to None for all fields.","title":"Fields"},"limit":{"default":-1,"description":"Maximum number of changelogs to return in result for each issue. Default to -1 for all changelogs. Notice that it only limits the results in the response, the function will still fetch all the data.","title":"Limit","type":"integer"}},"required":["issue_ids_or_keys"],"type":"object"}},{"name":"jira_update_issue","description":"Update an existing Jira issue including changing status, adding Epic links, updating fields, etc.\\n\\nArgs:\\n    ctx: The FastMCP context.\\n    issue_key: Jira issue key.\\n    fields: Dictionary of fields to update.\\n    additional_fields: Optional dictionary of additional fields.\\n    attachments: Optional JSON array string or comma-separated list of file paths.\\n\\nReturns:\\n    JSON string representing the updated issue object and attachment results.\\n\\nRaises:\\n    ValueError: If in read-only mode or Jira client unavailable, or invalid input.","inputSchema":{"properties":{"issue_key":{"description":"Jira issue key (e.g., \'PROJ-123\')","title":"Issue Key","type":"string"},"fields":{"description":"Dictionary of fields to update. For \'assignee\', provide a string identifier (email, name, or accountId). Example: `{\'assignee\': \'user@example.com\', \'summary\': \'New Summary\'}`","title":"Fields","type":"object"},"additional_fields":{"anyOf":[{"type":"object"},{"type":"null"}],"default":null,"description":"(Optional) Dictionary of additional fields to update. Use this for custom fields or more complex updates.","title":"Additional Fields"},"attachments":{"anyOf":[{"type":"string"},{"type":"null"}],"default":null,"description":"(Optional) JSON string array or comma-separated list of file paths to attach to the issue. Example: \'/path/to/file1.txt,/path/to/file2.txt\' or [\'/path/to/file1.txt\',\'/path/to/file2.txt\']","title":"Attachments"}},"required":["issue_key","fields"],"type":"object"}},{"name":"jira_delete_issue","description":"Delete an existing Jira issue.\\n\\nArgs:\\n    ctx: The FastMCP context.\\n    issue_key: Jira issue key.\\n\\nReturns:\\n    JSON string indicating success.\\n\\nRaises:\\n    ValueError: If in read-only mode or Jira client unavailable.","inputSchema":{"properties":{"issue_key":{"description":"Jira issue key (e.g. PROJ-123)","title":"Issue Key","type":"string"}},"required":["issue_key"],"type":"object"}},{"name":"jira_add_comment","description":"Add a comment to a Jira issue.\\n\\nArgs:\\n    ctx: The FastMCP context.\\n    issue_key: Jira issue key.\\n    comment: Comment text in Markdown.\\n\\nReturns:\\n    JSON string representing the added comment object.\\n\\nRaises:\\n    ValueError: If in read-only mode or Jira client unavailable.","inputSchema":{"properties":{"issue_key":{"description":"Jira issue key (e.g., \'PROJ-123\')","title":"Issue Key","type":"string"},"comment":{"description":"Comment text in Markdown format","title":"Comment","type":"string"}},"required":["issue_key","comment"],"type":"object"}},{"name":"jira_add_worklog","description":"Add a worklog entry to a Jira issue.\\n\\nArgs:\\n    ctx: The FastMCP context.\\n    issue_key: Jira issue key.\\n    time_spent: Time spent in Jira format.\\n    comment: Optional comment in Markdown.\\n    started: Optional start time in ISO format.\\n    original_estimate: Optional new original estimate.\\n    remaining_estimate: Optional new remaining estimate.\\n\\n\\nReturns:\\n    JSON string representing the added worklog object.\\n\\nRaises:\\n    ValueError: If in read-only mode or Jira client unavailable.","inputSchema":{"properties":{"issue_key":{"description":"Jira issue key (e.g., \'PROJ-123\')","title":"Issue Key","type":"string"},"time_spent":{"description":"Time spent in Jira format. Examples: \'1h 30m\' (1 hour and 30 minutes), \'1d\' (1 day), \'30m\' (30 minutes), \'4h\' (4 hours)","title":"Time Spent","type":"string"},"comment":{"anyOf":[{"type":"string"},{"type":"null"}],"default":null,"description":"(Optional) Comment for the worklog in Markdown format","title":"Comment"},"started":{"anyOf":[{"type":"string"},{"type":"null"}],"default":null,"description":"(Optional) Start time in ISO format. If not provided, the current time will be used. Example: \'2023-08-01T12:00:00.000+0000\'","title":"Started"},"original_estimate":{"anyOf":[{"type":"string"},{"type":"null"}],"default":null,"description":"(Optional) New value for the original estimate","title":"Original Estimate"},"remaining_estimate":{"anyOf":[{"type":"string"},{"type":"null"}],"default":null,"description":"(Optional) New value for the remaining estimate","title":"Remaining Estimate"}},"required":["issue_key","time_spent"],"type":"object"}},{"name":"jira_link_to_epic","description":"Link an existing issue to an epic.\\n\\nArgs:\\n    ctx: The FastMCP context.\\n    issue_key: The key of the issue to link.\\n    epic_key: The key of the epic to link to.\\n\\nReturns:\\n    JSON string representing the updated issue object.\\n\\nRaises:\\n    ValueError: If in read-only mode or Jira client unavailable.","inputSchema":{"properties":{"issue_key":{"description":"The key of the issue to link (e.g., \'PROJ-123\')","title":"Issue Key","type":"string"},"epic_key":{"description":"The key of the epic to link to (e.g., \'PROJ-456\')","title":"Epic Key","type":"string"}},"required":["issue_key","epic_key"],"type":"object"}},{"name":"jira_create_issue_link","description":"Create a link between two Jira issues.\\n\\nArgs:\\n    ctx: The FastMCP context.\\n    link_type: The type of link (e.g., \'Blocks\').\\n    inward_issue_key: The key of the source issue.\\n    outward_issue_key: The key of the target issue.\\n    comment: Optional comment text.\\n    comment_visibility: Optional dictionary for comment visibility.\\n\\nReturns:\\n    JSON string indicating success or failure.\\n\\nRaises:\\n    ValueError: If required fields are missing, invalid input, in read-only mode, or Jira client unavailable.","inputSchema":{"properties":{"link_type":{"description":"The type of link to create (e.g., \'Duplicate\', \'Blocks\', \'Relates to\')","title":"Link Type","type":"string"},"inward_issue_key":{"description":"The key of the inward issue (e.g., \'PROJ-123\')","title":"Inward Issue Key","type":"string"},"outward_issue_key":{"description":"The key of the outward issue (e.g., \'PROJ-456\')","title":"Outward Issue Key","type":"string"},"comment":{"anyOf":[{"type":"string"},{"type":"null"}],"default":null,"description":"(Optional) Comment to add to the link","title":"Comment"},"comment_visibility":{"anyOf":[{"additionalProperties":{"type":"string"},"type":"object"},{"type":"null"}],"default":null,"description":"(Optional) Visibility settings for the comment (e.g., {\'type\': \'group\', \'value\': \'jira-users\'})","title":"Comment Visibility"}},"required":["link_type","inward_issue_key","outward_issue_key"],"type":"object"}},{"name":"jira_create_remote_issue_link","description":"Create a remote issue link (web link or Confluence link) for a Jira issue.\\n\\nThis tool allows you to add web links and Confluence links to Jira issues.\\nThe links will appear in the issue\'s \\"Links\\" section and can be clicked to navigate to external resources.\\n\\nArgs:\\n    ctx: The FastMCP context.\\n    issue_key: The key of the issue to add the link to.\\n    url: The URL to link to (can be any web page or Confluence page).\\n    title: The title/name that will be displayed for the link.\\n    summary: Optional description of what the link is for.\\n    relationship: Optional relationship description.\\n    icon_url: Optional URL to a 16x16 icon for the link.\\n\\nReturns:\\n    JSON string indicating success or failure.\\n\\nRaises:\\n    ValueError: If required fields are missing, invalid input, in read-only mode, or Jira client unavailable.","inputSchema":{"properties":{"issue_key":{"description":"The key of the issue to add the link to (e.g., \'PROJ-123\')","title":"Issue Key","type":"string"},"url":{"description":"The URL to link to (e.g., \'https://example.com/page\' or Confluence page URL)","title":"Url","type":"string"},"title":{"description":"The title/name of the link (e.g., \'Documentation Page\', \'Confluence Page\')","title":"Title","type":"string"},"summary":{"anyOf":[{"type":"string"},{"type":"null"}],"default":null,"description":"(Optional) Description of the link","title":"Summary"},"relationship":{"anyOf":[{"type":"string"},{"type":"null"}],"default":null,"description":"(Optional) Relationship description (e.g., \'causes\', \'relates to\', \'documentation\')","title":"Relationship"},"icon_url":{"anyOf":[{"type":"string"},{"type":"null"}],"default":null,"description":"(Optional) URL to a 16x16 icon for the link","title":"Icon Url"}},"required":["issue_key","url","title"],"type":"object"}},{"name":"jira_remove_issue_link","description":"Remove a link between two Jira issues.\\n\\nArgs:\\n    ctx: The FastMCP context.\\n    link_id: The ID of the link to remove.\\n\\nReturns:\\n    JSON string indicating success.\\n\\nRaises:\\n    ValueError: If link_id is missing, in read-only mode, or Jira client unavailable.","inputSchema":{"properties":{"link_id":{"description":"The ID of the link to remove","title":"Link Id","type":"string"}},"required":["link_id"],"type":"object"}},{"name":"jira_transition_issue","description":"Transition a Jira issue to a new status.\\n\\nArgs:\\n    ctx: The FastMCP context.\\n    issue_key: Jira issue key.\\n    transition_id: ID of the transition.\\n    fields: Optional dictionary of fields to update during transition.\\n    comment: Optional comment for the transition.\\n\\nReturns:\\n    JSON string representing the updated issue object.\\n\\nRaises:\\n    ValueError: If required fields missing, invalid input, in read-only mode, or Jira client unavailable.","inputSchema":{"properties":{"issue_key":{"description":"Jira issue key (e.g., \'PROJ-123\')","title":"Issue Key","type":"string"},"transition_id":{"description":"ID of the transition to perform. Use the jira_get_transitions tool first to get the available transition IDs for the issue. Example values: \'11\', \'21\', \'31\'","title":"Transition Id","type":"string"},"fields":{"anyOf":[{"type":"object"},{"type":"null"}],"default":null,"description":"(Optional) Dictionary of fields to update during the transition. Some transitions require specific fields to be set (e.g., resolution). Example: {\'resolution\': {\'name\': \'Fixed\'}}","title":"Fields"},"comment":{"anyOf":[{"type":"string"},{"type":"null"}],"default":null,"description":"(Optional) Comment to add during the transition. This will be visible in the issue history.","title":"Comment"}},"required":["issue_key","transition_id"],"type":"object"}},{"name":"jira_create_sprint","description":"Create Jira sprint for a board.\\n\\nArgs:\\n    ctx: The FastMCP context.\\n    board_id: Board ID.\\n    sprint_name: Sprint name.\\n    start_date: Start date (ISO format).\\n    end_date: End date (ISO format).\\n    goal: Optional sprint goal.\\n\\nReturns:\\n    JSON string representing the created sprint object.\\n\\nRaises:\\n    ValueError: If in read-only mode or Jira client unavailable.","inputSchema":{"properties":{"board_id":{"description":"The id of board (e.g., \'1000\')","title":"Board Id","type":"string"},"sprint_name":{"description":"Name of the sprint (e.g., \'Sprint 1\')","title":"Sprint Name","type":"string"},"start_date":{"description":"Start time for sprint (ISO 8601 format)","title":"Start Date","type":"string"},"end_date":{"description":"End time for sprint (ISO 8601 format)","title":"End Date","type":"string"},"goal":{"anyOf":[{"type":"string"},{"type":"null"}],"default":null,"description":"(Optional) Goal of the sprint","title":"Goal"}},"required":["board_id","sprint_name","start_date","end_date"],"type":"object"}},{"name":"jira_update_sprint","description":"Update jira sprint.\\n\\nArgs:\\n    ctx: The FastMCP context.\\n    sprint_id: The ID of the sprint.\\n    sprint_name: Optional new name.\\n    state: Optional new state (future|active|closed).\\n    start_date: Optional new start date.\\n    end_date: Optional new end date.\\n    goal: Optional new goal.\\n\\nReturns:\\n    JSON string representing the updated sprint object or an error message.\\n\\nRaises:\\n    ValueError: If in read-only mode or Jira client unavailable.","inputSchema":{"properties":{"sprint_id":{"description":"The id of sprint (e.g., \'10001\')","title":"Sprint Id","type":"string"},"sprint_name":{"anyOf":[{"type":"string"},{"type":"null"}],"default":null,"description":"(Optional) New name for the sprint","title":"Sprint Name"},"state":{"anyOf":[{"type":"string"},{"type":"null"}],"default":null,"description":"(Optional) New state for the sprint (future|active|closed)","title":"State"},"start_date":{"anyOf":[{"type":"string"},{"type":"null"}],"default":null,"description":"(Optional) New start date for the sprint","title":"Start Date"},"end_date":{"anyOf":[{"type":"string"},{"type":"null"}],"default":null,"description":"(Optional) New end date for the sprint","title":"End Date"},"goal":{"anyOf":[{"type":"string"},{"type":"null"}],"default":null,"description":"(Optional) New goal for the sprint","title":"Goal"}},"required":["sprint_id"],"type":"object"}},{"name":"jira_get_project_versions","description":"Get all fix versions for a specific Jira project.","inputSchema":{"properties":{"project_key":{"description":"Jira project key (e.g., \'PROJ\')","title":"Project Key","type":"string"}},"required":["project_key"],"type":"object"}},{"name":"jira_get_all_projects","description":"Get all Jira projects accessible to the current user.\\n\\nArgs:\\n    ctx: The FastMCP context.\\n    include_archived: Whether to include archived projects.\\n\\nReturns:\\n    JSON string representing a list of project objects accessible to the user.\\n    Project keys are always returned in uppercase.\\n    If JIRA_PROJECTS_FILTER is configured, only returns projects matching those keys.\\n\\nRaises:\\n    ValueError: If the Jira client is not configured or available.","inputSchema":{"properties":{"include_archived":{"default":false,"description":"Whether to include archived projects in the results","title":"Include Archived","type":"boolean"}},"type":"object"}},{"name":"jira_create_version","description":"Create a new fix version in a Jira project.\\n\\nArgs:\\n    ctx: The FastMCP context.\\n    project_key: The project key.\\n    name: Name of the version.\\n    start_date: Start date (optional).\\n    release_date: Release date (optional).\\n    description: Description (optional).\\n\\nReturns:\\n    JSON string of the created version object.","inputSchema":{"properties":{"project_key":{"description":"Jira project key (e.g., \'PROJ\')","title":"Project Key","type":"string"},"name":{"description":"Name of the version","title":"Name","type":"string"},"start_date":{"anyOf":[{"type":"string"},{"type":"null"}],"default":null,"description":"Start date (YYYY-MM-DD)","title":"Start Date"},"release_date":{"anyOf":[{"type":"string"},{"type":"null"}],"default":null,"description":"Release date (YYYY-MM-DD)","title":"Release Date"},"description":{"anyOf":[{"type":"string"},{"type":"null"}],"default":null,"description":"Description of the version","title":"Description"}},"required":["project_key","name"],"type":"object"}},{"name":"jira_batch_create_versions","description":"Batch create multiple versions in a Jira project.\\n\\nArgs:\\n    ctx: The FastMCP context.\\n    project_key: The project key.\\n    versions: JSON array string of version objects.\\n\\nReturns:\\n    JSON array of results, each with success flag, version or error.","inputSchema":{"properties":{"project_key":{"description":"Jira project key (e.g., \'PROJ\')","title":"Project Key","type":"string"},"versions":{"description":"JSON array of version objects. Each object should contain:\\n- name (required): Name of the version\\n- startDate (optional): Start date (YYYY-MM-DD)\\n- releaseDate (optional): Release date (YYYY-MM-DD)\\n- description (optional): Description of the version\\nExample: [\\n  {\\"name\\": \\"v1.0\\", \\"startDate\\": \\"2025-01-01\\", \\"releaseDate\\": \\"2025-02-01\\", \\"description\\": \\"First release\\"},\\n  {\\"name\\": \\"v2.0\\"}\\n]","title":"Versions","type":"string"}},"required":["project_key","versions"],"type":"object"}}]}}\r\n\r\n'
+DEBUG - sse_starlette.sse - Got event: http.disconnect. Stop streaming.
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.__call__: EXITED for request path='/mcp'
+DEBUG - sse_starlette.sse - ping: b': ping - 2025-11-13 14:56:42.821493+00:00\r\n\r\n'
+DEBUG - sse_starlette.sse - ping: b': ping - 2025-11-13 14:56:57.823529+00:00\r\n\r\n'
+DEBUG - sse_starlette.sse - ping: b': ping - 2025-11-13 14:57:12.826792+00:00\r\n\r\n'
+DEBUG - sse_starlette.sse - ping: b': ping - 2025-11-13 14:57:27.831582+00:00\r\n\r\n'
+DEBUG - sse_starlette.sse - ping: b': ping - 2025-11-13 14:57:42.834583+00:00\r\n\r\n'
+DEBUG - sse_starlette.sse - ping: b': ping - 2025-11-13 14:57:57.837783+00:00\r\n\r\n'
+DEBUG - sse_starlette.sse - ping: b': ping - 2025-11-13 14:58:12.839502+00:00\r\n\r\n'
+DEBUG - sse_starlette.sse - ping: b': ping - 2025-11-13 14:58:27.840868+00:00\r\n\r\n'
+DEBUG - sse_starlette.sse - ping: b': ping - 2025-11-13 14:58:42.843192+00:00\r\n\r\n'
+DEBUG - sse_starlette.sse - ping: b': ping - 2025-11-13 14:58:57.844994+00:00\r\n\r\n'
+DEBUG - sse_starlette.sse - ping: b': ping - 2025-11-13 14:59:12.847275+00:00\r\n\r\n'
+DEBUG - sse_starlette.sse - ping: b': ping - 2025-11-13 14:59:27.848873+00:00\r\n\r\n'
+DEBUG - sse_starlette.sse - ping: b': ping - 2025-11-13 14:59:42.850382+00:00\r\n\r\n'
+DEBUG - sse_starlette.sse - ping: b': ping - 2025-11-13 14:59:57.852528+00:00\r\n\r\n'
+DEBUG - sse_starlette.sse - ping: b': ping - 2025-11-13 15:00:12.853680+00:00\r\n\r\n'
+DEBUG - sse_starlette.sse - ping: b': ping - 2025-11-13 15:00:27.854846+00:00\r\n\r\n'
+DEBUG - sse_starlette.sse - ping: b': ping - 2025-11-13 15:00:42.856765+00:00\r\n\r\n'
+DEBUG - sse_starlette.sse - ping: b': ping - 2025-11-13 15:00:57.858876+00:00\r\n\r\n'
+DEBUG - sse_starlette.sse - ping: b': ping - 2025-11-13 15:01:12.861531+00:00\r\n\r\n'
+DEBUG - sse_starlette.sse - ping: b': ping - 2025-11-13 15:01:27.863620+00:00\r\n\r\n'
+DEBUG - sse_starlette.sse - ping: b': ping - 2025-11-13 15:01:42.865006+00:00\r\n\r\n'
+DEBUG - sse_starlette.sse - ping: b': ping - 2025-11-13 15:01:57.867484+00:00\r\n\r\n'
+DEBUG - sse_starlette.sse - ping: b': ping - 2025-11-13 15:02:12.869905+00:00\r\n\r\n'
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.__call__: ENTERED for scope type='http', path='/mcp/', method='POST'
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.__call__: Comparing request_path='/mcp' with mcp_path='/mcp'. Request method='POST'
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware: Path='/mcp', AuthHeader='Toke******************************************PEUR', ParsedToken(masked)='NjQ1************************************PEUR', CloudId='None'
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware: No cloudId header provided, will use global config
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware: Extracted service headers: ['X-Atlassian-Jira-Url']
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware: MCP-Session-ID header found: 93b8f163f4414dfb823acdc67b8b610d
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.__call__: PAT (Token scheme) extracted (masked): ...NjQ1NzI1****************************oOl3PEUR
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.__call__: Set scope state for PAT auth.
+DEBUG - mcp.server.streamable_http_manager - Session already exists, handling request directly
+INFO:     172.17.0.1:56272 - "POST /mcp/ HTTP/1.1" 200 OK
+DEBUG - mcp.server.lowlevel.server - Received message: <mcp.shared.session.RequestResponder object at 0x7dc4403987f0>
+INFO - mcp.server.lowlevel.server - Processing request of type CallToolRequest
+DEBUG - mcp.server.lowlevel.server - Dispatching request of type CallToolRequest
+DEBUG - mcp-atlassian.servers.dependencies - get_jira_fetcher: ENTERED. Context ID: 138281865605472
+DEBUG - mcp-atlassian.servers.dependencies - get_jira_fetcher: In HTTP request context. Request URL: http://localhost:9000/mcp/. State.jira_fetcher exists: False. State.user_auth_type: pat. State.user_token_present: True.
+DEBUG - mcp-atlassian.servers.dependencies - get_jira_fetcher: User auth type: pat
+[11/13/25 15:02:15] ERROR    Error calling tool 'get_issue'  tool_manager.py:194
+                             ╭─ Traceback (most recent cal─╮
+                             │ /app/.venv/lib/python3.10/s │
+                             │ ite-packages/fastmcp/tools/ │
+                             │ tool_manager.py:185 in      │
+                             │ call_tool                   │
+                             │                             │
+                             │   182 │   │   │   │   raise │
+                             │   183 │   │   │             │
+                             │   184 │   │   │   try:      │
+                             │ ❱ 185 │   │   │   │   retur │
+                             │   186 │   │   │             │
+                             │   187 │   │   │   # raise T │
+                             │   188 │   │   │   except To │
+                             │                             │
+                             │ /app/.venv/lib/python3.10/s │
+                             │ ite-packages/fastmcp/tools/ │
+                             │ tool.py:204 in run          │
+                             │                             │
+                             │   201 │   │   type_adapter  │
+                             │   202 │   │   result = type │
+                             │   203 │   │   if inspect.is │
+                             │ ❱ 204 │   │   │   result =  │
+                             │   205 │   │                 │
+                             │   206 │   │   return _conve │
+                             │   207                       │
+                             │                             │
+                             │ /app/.venv/lib/python3.10/s │
+                             │ ite-packages/mcp_atlassian/ │
+                             │ servers/jira.py:148 in      │
+                             │ get_issue                   │
+                             │                             │
+                             │    145 │   Raises:          │
+                             │    146 │   │   ValueError:  │
+                             │    147 │   """              │
+                             │ ❱  148 │   jira = await get │
+                             │    149 │   fields_list: str │
+                             │    150 │   if fields and fi │
+                             │    151 │   │   fields_list  │
+                             │                             │
+                             │ /app/.venv/lib/python3.10/s │
+                             │ ite-packages/mcp_atlassian/ │
+                             │ servers/dependencies.py:270 │
+                             │  in get_jira_fetcher        │
+                             │                             │
+                             │   267 │   │   │   │   else  │
+                             │   268 │   │   │   )         │
+                             │   269 │   │   │   if not ap │
+                             │ ❱ 270 │   │   │   │   raise │
+                             │   271 │   │   │   │   │   " │
+                             │       context."             │
+                             │   272 │   │   │   │   )     │
+                             │   273                       │
+                             ╰─────────────────────────────╯
+                             ValueError: Jira global
+                             configuration (URL, SSL) is not
+                             available from lifespan
+                             context.
+ERROR - FastMCP.fastmcp.tools.tool_manager - Error calling tool 'get_issue'
+Traceback (most recent call last):
+  File "/app/.venv/lib/python3.10/site-packages/fastmcp/tools/tool_manager.py", line 185, in call_tool
+    return await tool.run(arguments)
+  File "/app/.venv/lib/python3.10/site-packages/fastmcp/tools/tool.py", line 204, in run
+    result = await result
+  File "/app/.venv/lib/python3.10/site-packages/mcp_atlassian/servers/jira.py", line 148, in get_issue
+    jira = await get_jira_fetcher(ctx)
+  File "/app/.venv/lib/python3.10/site-packages/mcp_atlassian/servers/dependencies.py", line 270, in get_jira_fetcher
+    raise ValueError(
+ValueError: Jira global configuration (URL, SSL) is not available from lifespan context.
+DEBUG - mcp.server.lowlevel.server - Response sent
+DEBUG - mcp.server.streamable_http - Closing SSE writer
+DEBUG - sse_starlette.sse - chunk: b'event: message\r\ndata: {"jsonrpc":"2.0","id":4,"result":{"content":[{"type":"text","text":"Error calling tool \'get_issue\': Jira global configuration (URL, SSL) is not available from lifespan context."}],"isError":true}}\r\n\r\n'
+DEBUG - sse_starlette.sse - Got event: http.disconnect. Stop streaming.
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.__call__: EXITED for request path='/mcp'
+DEBUG - sse_starlette.sse - ping: b': ping - 2025-11-13 15:02:27.873245+00:00\r\n\r\n'
+DEBUG - sse_starlette.sse - ping: b': ping - 2025-11-13 15:02:42.875491+00:00\r\n\r\n'
+DEBUG - sse_starlette.sse - ping: b': ping - 2025-11-13 15:02:57.877900+00:00\r\n\r\n'
+DEBUG - sse_starlette.sse - ping: b': ping - 2025-11-13 15:03:12.879640+00:00\r\n\r\n'
+DEBUG - sse_starlette.sse - ping: b': ping - 2025-11-13 15:03:27.880845+00:00\r\n\r\n'
+DEBUG - sse_starlette.sse - ping: b': ping - 2025-11-13 15:03:42.883073+00:00\r\n\r\n'
+DEBUG - sse_starlette.sse - ping: b': ping - 2025-11-13 15:03:57.885173+00:00\r\n\r\n'
+DEBUG - sse_starlette.sse - ping: b': ping - 2025-11-13 15:04:12.888589+00:00\r\n\r\n'
+DEBUG - sse_starlette.sse - ping: b': ping - 2025-11-13 15:04:27.890812+00:00\r\n\r\n'
+DEBUG - sse_starlette.sse - Got event: http.disconnect. Stop streaming.
+DEBUG - mcp.server.streamable_http - Closing standalone SSE writer
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.__call__: EXITED for request path='/mcp'
+^CINFO:     Shutting down
+ERROR:    Cancel 0 running task(s), timeout graceful shutdown exceeded
+INFO:     Waiting for application shutdown.
+INFO - mcp.server.streamable_http_manager - StreamableHTTP session manager shutting down
+INFO:     Application shutdown complete.
+INFO:     Finished server process [1]
+INFO - mcp-atlassian.utils.lifecycle - Server stopped, flushing output streams...
+DEBUG - mcp-atlassian.utils.lifecycle - Output streams flushed, exiting gracefully

@@ -1,0 +1,532 @@
+❯ ./run.old.sh
+DEBUG - mcp-atlassian - Logging level set to: DEBUG
+DEBUG - mcp-atlassian - Logging stream set to: stderr
+DEBUG - mcp-atlassian - Attempting to load environment from default .env file if it exists
+DEBUG - mcp-atlassian - Final transport determined: streamable-http
+DEBUG - mcp-atlassian - Final port for HTTP transports: 9000
+DEBUG - mcp-atlassian - Final host for HTTP transports: 0.0.0.0
+DEBUG - mcp-atlassian - Final path for Streamable HTTP: FastMCP default
+DEBUG - mcp.server.lowlevel.server - Initializing server 'Confluence MCP Service'
+DEBUG - mcp.server.lowlevel.server - Registering handler for ListToolsRequest
+DEBUG - mcp.server.lowlevel.server - Registering handler for CallToolRequest
+DEBUG - mcp.server.lowlevel.server - Registering handler for ListResourcesRequest
+DEBUG - mcp.server.lowlevel.server - Registering handler for ReadResourceRequest
+DEBUG - mcp.server.lowlevel.server - Registering handler for PromptListRequest
+DEBUG - mcp.server.lowlevel.server - Registering handler for GetPromptRequest
+DEBUG - mcp.server.lowlevel.server - Registering handler for ListResourceTemplatesRequest
+DEBUG - mcp.server.lowlevel.server - Initializing server 'Jira MCP Service'
+DEBUG - mcp.server.lowlevel.server - Registering handler for ListToolsRequest
+DEBUG - mcp.server.lowlevel.server - Registering handler for CallToolRequest
+DEBUG - mcp.server.lowlevel.server - Registering handler for ListResourcesRequest
+DEBUG - mcp.server.lowlevel.server - Registering handler for ReadResourceRequest
+DEBUG - mcp.server.lowlevel.server - Registering handler for PromptListRequest
+DEBUG - mcp.server.lowlevel.server - Registering handler for GetPromptRequest
+DEBUG - mcp.server.lowlevel.server - Registering handler for ListResourceTemplatesRequest
+DEBUG - mcp.server.lowlevel.server - Initializing server 'Atlassian MCP'
+DEBUG - mcp.server.lowlevel.server - Registering handler for ListToolsRequest
+DEBUG - mcp.server.lowlevel.server - Registering handler for CallToolRequest
+DEBUG - mcp.server.lowlevel.server - Registering handler for ListResourcesRequest
+DEBUG - mcp.server.lowlevel.server - Registering handler for ReadResourceRequest
+DEBUG - mcp.server.lowlevel.server - Registering handler for PromptListRequest
+DEBUG - mcp.server.lowlevel.server - Registering handler for GetPromptRequest
+DEBUG - mcp.server.lowlevel.server - Registering handler for ListResourceTemplatesRequest
+INFO - mcp-atlassian.server.main - Added /healthz endpoint for Kubernetes probes
+INFO - mcp-atlassian - Starting server with STREAMABLE-HTTP transport on http://0.0.0.0:9000/mcp
+DEBUG - mcp-atlassian.utils.lifecycle - SIGPIPE handler registered
+DEBUG - mcp-atlassian - Starting asyncio event loop...
+DEBUG - mcp-atlassian - Running server for streamable-http transport without stdin monitoring
+DEBUG - asyncio - Using selector: EpollSelector
+[11/13/25 15:19:24] INFO     Starting MCP server 'Atlassian MCP'   server.py:783
+                             with transport 'streamable-http' on
+                             http://0.0.0.0:9000/mcp
+INFO - FastMCP.fastmcp.server.server - Starting MCP server 'Atlassian MCP' with transport 'streamable-http' on http://0.0.0.0:9000/mcp
+INFO:     Started server process [1]
+INFO:     Waiting for application startup.
+INFO - mcp.server.streamable_http_manager - StreamableHTTP session manager started
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:9000 (Press CTRL+C to quit)
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.dispatch: ENTERED for request path='/mcp/', method='POST'
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.dispatch: Comparing request_path='/mcp' with mcp_path='/mcp'. Request method='POST'
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware: Path='/mcp/', AuthHeader='Toke******************************************PEUR', ParsedToken(masked)='NjQ1************************************PEUR', CloudId='None'
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware: No cloudId header provided, will use global config
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.dispatch: PAT (Token scheme) extracted (masked): ...NjQ1NzI1****************************oOl3PEUR
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.dispatch: Set request.state for PAT auth.
+DEBUG - mcp.server.streamable_http_manager - Creating new transport
+INFO - mcp.server.streamable_http_manager - Created new transport with session ID: 4876d46a1d3a41989ec724c461f49078
+INFO - mcp-atlassian.server.main - Main Atlassian MCP server lifespan starting...
+INFO - mcp-atlassian.utils.environment - Using Jira Server/Data Center authentication (PAT or Basic Auth)
+INFO - mcp-atlassian.utils.environment - Confluence is not configured or required environment variables are missing.
+DEBUG - mcp_atlassian.utils.tools - Parsed enabled tools from environment: ['confluence_search', 'jira_get_issue', 'jira_search']
+INFO - mcp-atlassian.server.main - Jira configuration loaded and authentication is configured.
+INFO - mcp-atlassian.server.main - Read-only mode: DISABLED
+INFO - mcp-atlassian.server.main - Enabled tools filter: ['confluence_search', 'jira_get_issue', 'jira_search']
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.dispatch: EXITED for request path='/mcp/'
+INFO:     172.17.0.1:54304 - "POST /mcp/ HTTP/1.1" 200 OK
+DEBUG - mcp.server.streamable_http - Closing SSE writer
+DEBUG - sse_starlette.sse - chunk: b'event: message\r\ndata: {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-03-26","capabilities":{"experimental":{},"prompts":{"listChanged":false},"resources":{"subscribe":false,"listChanged":false},"tools":{"listChanged":false}},"serverInfo":{"name":"Atlassian MCP","version":"1.9.4"}}}\r\n\r\n'
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.dispatch: ENTERED for request path='/mcp/', method='GET'
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.dispatch: Comparing request_path='/mcp' with mcp_path='/mcp'. Request method='GET'
+DEBUG - mcp.server.streamable_http_manager - Session already exists, handling request directly
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.dispatch: EXITED for request path='/mcp/'
+INFO:     172.17.0.1:54316 - "GET /mcp/ HTTP/1.1" 200 OK
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.dispatch: ENTERED for request path='/mcp/', method='POST'
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.dispatch: Comparing request_path='/mcp' with mcp_path='/mcp'. Request method='POST'
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware: Path='/mcp/', AuthHeader='Toke******************************************PEUR', ParsedToken(masked)='NjQ1************************************PEUR', CloudId='None'
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware: No cloudId header provided, will use global config
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware: MCP-Session-ID header found: 4876d46a1d3a41989ec724c461f49078
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.dispatch: PAT (Token scheme) extracted (masked): ...NjQ1NzI1****************************oOl3PEUR
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.dispatch: Set request.state for PAT auth.
+DEBUG - mcp.server.streamable_http_manager - Session already exists, handling request directly
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.dispatch: ENTERED for request path='/mcp/', method='POST'
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.dispatch: Comparing request_path='/mcp' with mcp_path='/mcp'. Request method='POST'
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware: Path='/mcp/', AuthHeader='Toke******************************************PEUR', ParsedToken(masked)='NjQ1************************************PEUR', CloudId='None'
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware: No cloudId header provided, will use global config
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware: MCP-Session-ID header found: 4876d46a1d3a41989ec724c461f49078
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.dispatch: PAT (Token scheme) extracted (masked): ...NjQ1NzI1****************************oOl3PEUR
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.dispatch: Set request.state for PAT auth.
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.dispatch: EXITED for request path='/mcp/'
+INFO:     172.17.0.1:54304 - "POST /mcp/ HTTP/1.1" 202 Accepted
+DEBUG - mcp.server.streamable_http_manager - Session already exists, handling request directly
+DEBUG - mcp.server.lowlevel.server - Received message: root=InitializedNotification(method='notifications/initialized', params=None, jsonrpc='2.0')
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.dispatch: EXITED for request path='/mcp/'
+INFO:     172.17.0.1:54322 - "POST /mcp/ HTTP/1.1" 200 OK
+DEBUG - mcp.server.lowlevel.server - Received message: <mcp.shared.session.RequestResponder object at 0x74cbeb7b1bd0>
+INFO - mcp.server.lowlevel.server - Processing request of type ListPromptsRequest
+DEBUG - mcp.server.lowlevel.server - Dispatching request of type ListPromptsRequest
+DEBUG - mcp.server.lowlevel.server - Response sent
+DEBUG - mcp.server.streamable_http - Closing SSE writer
+DEBUG - sse_starlette.sse - chunk: b'event: message\r\ndata: {"jsonrpc":"2.0","id":2,"result":{"prompts":[]}}\r\n\r\n'
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.dispatch: ENTERED for request path='/mcp/', method='POST'
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.dispatch: Comparing request_path='/mcp' with mcp_path='/mcp'. Request method='POST'
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware: Path='/mcp/', AuthHeader='Toke******************************************PEUR', ParsedToken(masked)='NjQ1************************************PEUR', CloudId='None'
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware: No cloudId header provided, will use global config
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware: MCP-Session-ID header found: 4876d46a1d3a41989ec724c461f49078
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.dispatch: PAT (Token scheme) extracted (masked): ...NjQ1NzI1****************************oOl3PEUR
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.dispatch: Set request.state for PAT auth.
+DEBUG - mcp.server.streamable_http_manager - Session already exists, handling request directly
+INFO:     172.17.0.1:54336 - "POST /mcp/ HTTP/1.1" 200 OK
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.dispatch: EXITED for request path='/mcp/'
+DEBUG - mcp.server.lowlevel.server - Received message: <mcp.shared.session.RequestResponder object at 0x74cbeb7b1ed0>
+INFO - mcp.server.lowlevel.server - Processing request of type ListToolsRequest
+DEBUG - mcp.server.lowlevel.server - Dispatching request of type ListToolsRequest
+DEBUG - mcp-atlassian.server.main - _main_mcp_list_tools: read_only=False, enabled_tools_filter=['confluence_search', 'jira_get_issue', 'jira_search']
+DEBUG - mcp-atlassian.server.main - Aggregated 42 tools before filtering: ['jira_get_user_profile', 'jira_get_issue', 'jira_search', 'jira_search_fields', 'jira_get_project_issues', 'jira_get_transitions', 'jira_get_worklog', 'jira_download_attachments', 'jira_get_agile_boards', 'jira_get_board_issues', 'jira_get_sprints_from_board', 'jira_get_sprint_issues', 'jira_get_link_types', 'jira_create_issue', 'jira_batch_create_issues', 'jira_batch_get_changelogs', 'jira_update_issue', 'jira_delete_issue', 'jira_add_comment', 'jira_add_worklog', 'jira_link_to_epic', 'jira_create_issue_link', 'jira_create_remote_issue_link', 'jira_remove_issue_link', 'jira_transition_issue', 'jira_create_sprint', 'jira_update_sprint', 'jira_get_project_versions', 'jira_get_all_projects', 'jira_create_version', 'jira_batch_create_versions', 'confluence_search', 'confluence_get_page', 'confluence_get_page_children', 'confluence_get_comments', 'confluence_get_labels', 'confluence_add_label', 'confluence_create_page', 'confluence_update_page', 'confluence_delete_page', 'confluence_add_comment', 'confluence_search_user']
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_get_user_profile' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'jira_get_user_profile' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_get_issue' included: True (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_search' included: True (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_search_fields' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'jira_search_fields' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_get_project_issues' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'jira_get_project_issues' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_get_transitions' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'jira_get_transitions' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_get_worklog' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'jira_get_worklog' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_download_attachments' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'jira_download_attachments' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_get_agile_boards' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'jira_get_agile_boards' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_get_board_issues' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'jira_get_board_issues' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_get_sprints_from_board' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'jira_get_sprints_from_board' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_get_sprint_issues' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'jira_get_sprint_issues' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_get_link_types' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'jira_get_link_types' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_create_issue' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'jira_create_issue' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_batch_create_issues' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'jira_batch_create_issues' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_batch_get_changelogs' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'jira_batch_get_changelogs' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_update_issue' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'jira_update_issue' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_delete_issue' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'jira_delete_issue' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_add_comment' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'jira_add_comment' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_add_worklog' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'jira_add_worklog' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_link_to_epic' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'jira_link_to_epic' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_create_issue_link' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'jira_create_issue_link' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_create_remote_issue_link' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'jira_create_remote_issue_link' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_remove_issue_link' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'jira_remove_issue_link' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_transition_issue' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'jira_transition_issue' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_create_sprint' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'jira_create_sprint' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_update_sprint' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'jira_update_sprint' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_get_project_versions' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'jira_get_project_versions' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_get_all_projects' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'jira_get_all_projects' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_create_version' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'jira_create_version' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_batch_create_versions' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'jira_batch_create_versions' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'confluence_search' included: True (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding Confluence tool 'confluence_search' as Confluence configuration/authentication is incomplete.
+DEBUG - mcp_atlassian.utils.tools - Tool 'confluence_get_page' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'confluence_get_page' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'confluence_get_page_children' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'confluence_get_page_children' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'confluence_get_comments' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'confluence_get_comments' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'confluence_get_labels' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'confluence_get_labels' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'confluence_add_label' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'confluence_add_label' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'confluence_create_page' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'confluence_create_page' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'confluence_update_page' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'confluence_update_page' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'confluence_delete_page' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'confluence_delete_page' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'confluence_add_comment' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'confluence_add_comment' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'confluence_search_user' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'confluence_search_user' (not enabled)
+DEBUG - mcp-atlassian.server.main - _main_mcp_list_tools: Total tools after filtering: 2
+DEBUG - mcp.server.lowlevel.server - Response sent
+DEBUG - mcp.server.streamable_http - Closing SSE writer
+DEBUG - sse_starlette.sse - chunk: b'event: message\r\ndata: {"jsonrpc":"2.0","id":3,"result":{"tools":[{"name":"jira_get_issue","description":"Get details of a specific Jira issue including its Epic links and relationship information.\\n\\n    Args:\\n        ctx: The FastMCP context.\\n        issue_key: Jira issue key.\\n        fields: Comma-separated list of fields to return (e.g., \'summary,status,customfield_10010\'), a single field as a string (e.g., \'duedate\'), \'*all\' for all fields, or omitted for essentials.\\n        expand: Optional fields to expand.\\n        comment_limit: Maximum number of comments.\\n        properties: Issue properties to return.\\n        update_history: Whether to update issue view history.\\n\\n    Returns:\\n        JSON string representing the Jira issue object.\\n\\n    Raises:\\n        ValueError: If the Jira client is not configured or available.\\n    ","inputSchema":{"properties":{"issue_key":{"description":"Jira issue key (e.g., \'PROJ-123\')","title":"Issue Key","type":"string"},"fields":{"default":"issuetype,created,summary,labels,assignee,updated,reporter,status,priority,description","description":"(Optional) Comma-separated list of fields to return (e.g., \'summary,status,customfield_10010\'). You may also provide a single field as a string (e.g., \'duedate\'). Use \'*all\' for all fields (including custom fields), or omit for essential fields only.","title":"Fields","type":"string"},"expand":{"anyOf":[{"type":"string"},{"type":"null"}],"default":null,"description":"(Optional) Fields to expand. Examples: \'renderedFields\' (for rendered content), \'transitions\' (for available status transitions), \'changelog\' (for history)","title":"Expand"},"comment_limit":{"default":10,"description":"Maximum number of comments to include (0 or null for no comments)","maximum":100,"minimum":0,"title":"Comment Limit","type":"integer"},"properties":{"anyOf":[{"type":"string"},{"type":"null"}],"description":"(Optional) A comma-separated list of issue properties to return","default":null,"title":"Properties"},"update_history":{"default":true,"description":"Whether to update the issue view history for the requesting user","title":"Update History","type":"boolean"}},"required":["issue_key"],"type":"object"}},{"name":"jira_search","description":"Search Jira issues using JQL (Jira Query Language).\\n\\n    Args:\\n        ctx: The FastMCP context.\\n        jql: JQL query string.\\n        fields: Comma-separated fields to return.\\n        limit: Maximum number of results.\\n        start_at: Starting index for pagination.\\n        projects_filter: Comma-separated list of project keys to filter by.\\n        expand: Optional fields to expand.\\n\\n    Returns:\\n        JSON string representing the search results including pagination info.\\n    ","inputSchema":{"properties":{"jql":{"description":"JQL query string (Jira Query Language). Examples:\\n- Find Epics: \\"issuetype = Epic AND project = PROJ\\"\\n- Find issues in Epic: \\"parent = PROJ-123\\"\\n- Find by status: \\"status = \'In Progress\' AND project = PROJ\\"\\n- Find by assignee: \\"assignee = currentUser()\\"\\n- Find recently updated: \\"updated >= -7d AND project = PROJ\\"\\n- Find by label: \\"labels = frontend AND project = PROJ\\"\\n- Find by priority: \\"priority = High AND project = PROJ\\"","title":"Jql","type":"string"},"fields":{"default":"issuetype,created,summary,labels,assignee,updated,reporter,status,priority,description","description":"(Optional) Comma-separated fields to return in the results. Use \'*all\' for all fields, or specify individual fields like \'summary,status,assignee,priority\'","title":"Fields","type":"string"},"limit":{"default":10,"description":"Maximum number of results (1-50)","minimum":1,"title":"Limit","type":"integer"},"start_at":{"default":0,"description":"Starting index for pagination (0-based)","minimum":0,"title":"Start At","type":"integer"},"projects_filter":{"anyOf":[{"type":"string"},{"type":"null"}],"default":null,"description":"(Optional) Comma-separated list of project keys to filter results by. Overrides the environment variable JIRA_PROJECTS_FILTER if provided.","title":"Projects Filter"},"expand":{"anyOf":[{"type":"string"},{"type":"null"}],"default":null,"description":"(Optional) fields to expand. Examples: \'renderedFields\', \'transitions\', \'changelog\'","title":"Expand"}},"required":["jql"],"type":"object"}}]}}\r\n\r\n'
+DEBUG - sse_starlette.sse - ping: b': ping - 2025-11-13 15:19:48.060987+00:00\r\n\r\n'
+DEBUG - sse_starlette.sse - ping: b': ping - 2025-11-13 15:20:03.062951+00:00\r\n\r\n'
+DEBUG - sse_starlette.sse - ping: b': ping - 2025-11-13 15:20:18.064328+00:00\r\n\r\n'
+DEBUG - sse_starlette.sse - ping: b': ping - 2025-11-13 15:20:33.065716+00:00\r\n\r\n'
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.dispatch: ENTERED for request path='/mcp/', method='DELETE'
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.dispatch: Comparing request_path='/mcp' with mcp_path='/mcp'. Request method='DELETE'
+DEBUG - mcp.server.streamable_http_manager - Session already exists, handling request directly
+INFO - mcp.server.streamable_http - Terminating session: 4876d46a1d3a41989ec724c461f49078
+DEBUG - mcp.server.streamable_http - Closing standalone SSE writer
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.dispatch: EXITED for request path='/mcp/'
+INFO:     172.17.0.1:54192 - "DELETE /mcp/ HTTP/1.1" 200 OK
+INFO - mcp-atlassian.server.main - Main Atlassian MCP server lifespan shutting down...
+DEBUG - mcp-atlassian.server.main - Cleaning up Jira resources...
+INFO - mcp-atlassian.server.main - Main Atlassian MCP server lifespan shutdown complete.
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.dispatch: ENTERED for request path='/mcp/', method='POST'
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.dispatch: Comparing request_path='/mcp' with mcp_path='/mcp'. Request method='POST'
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware: Path='/mcp/', AuthHeader='Toke******************************************PEUR', ParsedToken(masked)='NjQ1************************************PEUR', CloudId='None'
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware: No cloudId header provided, will use global config
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.dispatch: PAT (Token scheme) extracted (masked): ...NjQ1NzI1****************************oOl3PEUR
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.dispatch: Set request.state for PAT auth.
+DEBUG - mcp.server.streamable_http_manager - Creating new transport
+INFO - mcp.server.streamable_http_manager - Created new transport with session ID: 2f2b49769a3046a78d743a63f121d8a9
+INFO - mcp-atlassian.server.main - Main Atlassian MCP server lifespan starting...
+INFO - mcp-atlassian.utils.environment - Using Jira Server/Data Center authentication (PAT or Basic Auth)
+INFO - mcp-atlassian.utils.environment - Confluence is not configured or required environment variables are missing.
+DEBUG - mcp_atlassian.utils.tools - Parsed enabled tools from environment: ['confluence_search', 'jira_get_issue', 'jira_search']
+INFO - mcp-atlassian.server.main - Jira configuration loaded and authentication is configured.
+INFO - mcp-atlassian.server.main - Read-only mode: DISABLED
+INFO - mcp-atlassian.server.main - Enabled tools filter: ['confluence_search', 'jira_get_issue', 'jira_search']
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.dispatch: EXITED for request path='/mcp/'
+INFO:     172.17.0.1:55004 - "POST /mcp/ HTTP/1.1" 200 OK
+DEBUG - mcp.server.streamable_http - Closing SSE writer
+DEBUG - sse_starlette.sse - chunk: b'event: message\r\ndata: {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-03-26","capabilities":{"experimental":{},"prompts":{"listChanged":false},"resources":{"subscribe":false,"listChanged":false},"tools":{"listChanged":false}},"serverInfo":{"name":"Atlassian MCP","version":"1.9.4"}}}\r\n\r\n'
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.dispatch: ENTERED for request path='/mcp/', method='GET'
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.dispatch: Comparing request_path='/mcp' with mcp_path='/mcp'. Request method='GET'
+DEBUG - mcp.server.streamable_http_manager - Session already exists, handling request directly
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.dispatch: EXITED for request path='/mcp/'
+INFO:     172.17.0.1:55004 - "GET /mcp/ HTTP/1.1" 200 OK
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.dispatch: ENTERED for request path='/mcp/', method='POST'
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.dispatch: Comparing request_path='/mcp' with mcp_path='/mcp'. Request method='POST'
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware: Path='/mcp/', AuthHeader='Toke******************************************PEUR', ParsedToken(masked)='NjQ1************************************PEUR', CloudId='None'
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware: No cloudId header provided, will use global config
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware: MCP-Session-ID header found: 2f2b49769a3046a78d743a63f121d8a9
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.dispatch: PAT (Token scheme) extracted (masked): ...NjQ1NzI1****************************oOl3PEUR
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.dispatch: Set request.state for PAT auth.
+DEBUG - mcp.server.streamable_http_manager - Session already exists, handling request directly
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.dispatch: EXITED for request path='/mcp/'
+INFO:     172.17.0.1:55012 - "POST /mcp/ HTTP/1.1" 202 Accepted
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.dispatch: ENTERED for request path='/mcp/', method='POST'
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.dispatch: Comparing request_path='/mcp' with mcp_path='/mcp'. Request method='POST'
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware: Path='/mcp/', AuthHeader='Toke******************************************PEUR', ParsedToken(masked)='NjQ1************************************PEUR', CloudId='None'
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware: No cloudId header provided, will use global config
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware: MCP-Session-ID header found: 2f2b49769a3046a78d743a63f121d8a9
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.dispatch: PAT (Token scheme) extracted (masked): ...NjQ1NzI1****************************oOl3PEUR
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.dispatch: Set request.state for PAT auth.
+DEBUG - mcp.server.streamable_http_manager - Session already exists, handling request directly
+DEBUG - mcp.server.lowlevel.server - Received message: root=InitializedNotification(method='notifications/initialized', params=None, jsonrpc='2.0')
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.dispatch: EXITED for request path='/mcp/'
+INFO:     172.17.0.1:55016 - "POST /mcp/ HTTP/1.1" 200 OK
+DEBUG - mcp.server.lowlevel.server - Received message: <mcp.shared.session.RequestResponder object at 0x74cbe98511b0>
+INFO - mcp.server.lowlevel.server - Processing request of type ListPromptsRequest
+DEBUG - mcp.server.lowlevel.server - Dispatching request of type ListPromptsRequest
+DEBUG - mcp.server.lowlevel.server - Response sent
+DEBUG - mcp.server.streamable_http - Closing SSE writer
+DEBUG - sse_starlette.sse - chunk: b'event: message\r\ndata: {"jsonrpc":"2.0","id":2,"result":{"prompts":[]}}\r\n\r\n'
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.dispatch: ENTERED for request path='/mcp/', method='POST'
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.dispatch: Comparing request_path='/mcp' with mcp_path='/mcp'. Request method='POST'
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware: Path='/mcp/', AuthHeader='Toke******************************************PEUR', ParsedToken(masked)='NjQ1************************************PEUR', CloudId='None'
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware: No cloudId header provided, will use global config
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware: MCP-Session-ID header found: 2f2b49769a3046a78d743a63f121d8a9
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.dispatch: PAT (Token scheme) extracted (masked): ...NjQ1NzI1****************************oOl3PEUR
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.dispatch: Set request.state for PAT auth.
+DEBUG - mcp.server.streamable_http_manager - Session already exists, handling request directly
+INFO:     172.17.0.1:55022 - "POST /mcp/ HTTP/1.1" 200 OK
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.dispatch: EXITED for request path='/mcp/'
+DEBUG - mcp.server.lowlevel.server - Received message: <mcp.shared.session.RequestResponder object at 0x74cbe9d878b0>
+INFO - mcp.server.lowlevel.server - Processing request of type ListToolsRequest
+DEBUG - mcp.server.lowlevel.server - Dispatching request of type ListToolsRequest
+DEBUG - mcp-atlassian.server.main - _main_mcp_list_tools: read_only=False, enabled_tools_filter=['confluence_search', 'jira_get_issue', 'jira_search']
+DEBUG - mcp-atlassian.server.main - Aggregated 42 tools before filtering: ['jira_get_user_profile', 'jira_get_issue', 'jira_search', 'jira_search_fields', 'jira_get_project_issues', 'jira_get_transitions', 'jira_get_worklog', 'jira_download_attachments', 'jira_get_agile_boards', 'jira_get_board_issues', 'jira_get_sprints_from_board', 'jira_get_sprint_issues', 'jira_get_link_types', 'jira_create_issue', 'jira_batch_create_issues', 'jira_batch_get_changelogs', 'jira_update_issue', 'jira_delete_issue', 'jira_add_comment', 'jira_add_worklog', 'jira_link_to_epic', 'jira_create_issue_link', 'jira_create_remote_issue_link', 'jira_remove_issue_link', 'jira_transition_issue', 'jira_create_sprint', 'jira_update_sprint', 'jira_get_project_versions', 'jira_get_all_projects', 'jira_create_version', 'jira_batch_create_versions', 'confluence_search', 'confluence_get_page', 'confluence_get_page_children', 'confluence_get_comments', 'confluence_get_labels', 'confluence_add_label', 'confluence_create_page', 'confluence_update_page', 'confluence_delete_page', 'confluence_add_comment', 'confluence_search_user']
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_get_user_profile' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'jira_get_user_profile' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_get_issue' included: True (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_search' included: True (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_search_fields' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'jira_search_fields' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_get_project_issues' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'jira_get_project_issues' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_get_transitions' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'jira_get_transitions' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_get_worklog' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'jira_get_worklog' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_download_attachments' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'jira_download_attachments' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_get_agile_boards' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'jira_get_agile_boards' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_get_board_issues' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'jira_get_board_issues' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_get_sprints_from_board' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'jira_get_sprints_from_board' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_get_sprint_issues' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'jira_get_sprint_issues' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_get_link_types' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'jira_get_link_types' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_create_issue' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'jira_create_issue' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_batch_create_issues' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'jira_batch_create_issues' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_batch_get_changelogs' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'jira_batch_get_changelogs' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_update_issue' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'jira_update_issue' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_delete_issue' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'jira_delete_issue' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_add_comment' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'jira_add_comment' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_add_worklog' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'jira_add_worklog' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_link_to_epic' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'jira_link_to_epic' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_create_issue_link' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'jira_create_issue_link' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_create_remote_issue_link' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'jira_create_remote_issue_link' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_remove_issue_link' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'jira_remove_issue_link' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_transition_issue' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'jira_transition_issue' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_create_sprint' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'jira_create_sprint' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_update_sprint' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'jira_update_sprint' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_get_project_versions' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'jira_get_project_versions' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_get_all_projects' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'jira_get_all_projects' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_create_version' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'jira_create_version' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'jira_batch_create_versions' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'jira_batch_create_versions' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'confluence_search' included: True (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding Confluence tool 'confluence_search' as Confluence configuration/authentication is incomplete.
+DEBUG - mcp_atlassian.utils.tools - Tool 'confluence_get_page' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'confluence_get_page' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'confluence_get_page_children' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'confluence_get_page_children' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'confluence_get_comments' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'confluence_get_comments' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'confluence_get_labels' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'confluence_get_labels' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'confluence_add_label' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'confluence_add_label' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'confluence_create_page' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'confluence_create_page' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'confluence_update_page' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'confluence_update_page' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'confluence_delete_page' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'confluence_delete_page' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'confluence_add_comment' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'confluence_add_comment' (not enabled)
+DEBUG - mcp_atlassian.utils.tools - Tool 'confluence_search_user' included: False (based on enabled_tools: ['confluence_search', 'jira_get_issue', 'jira_search'])
+DEBUG - mcp-atlassian.server.main - Excluding tool 'confluence_search_user' (not enabled)
+DEBUG - mcp-atlassian.server.main - _main_mcp_list_tools: Total tools after filtering: 2
+DEBUG - mcp.server.lowlevel.server - Response sent
+DEBUG - mcp.server.streamable_http - Closing SSE writer
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.dispatch: ENTERED for request path='/mcp/', method='POST'
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.dispatch: Comparing request_path='/mcp' with mcp_path='/mcp'. Request method='POST'
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware: Path='/mcp/', AuthHeader='Toke******************************************PEUR', ParsedToken(masked)='NjQ1************************************PEUR', CloudId='None'
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware: No cloudId header provided, will use global config
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware: MCP-Session-ID header found: 2f2b49769a3046a78d743a63f121d8a9
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.dispatch: PAT (Token scheme) extracted (masked): ...NjQ1NzI1****************************oOl3PEUR
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.dispatch: Set request.state for PAT auth.
+DEBUG - sse_starlette.sse - chunk: b'event: message\r\ndata: {"jsonrpc":"2.0","id":3,"result":{"tools":[{"name":"jira_get_issue","description":"Get details of a specific Jira issue including its Epic links and relationship information.\\n\\n    Args:\\n        ctx: The FastMCP context.\\n        issue_key: Jira issue key.\\n        fields: Comma-separated list of fields to return (e.g., \'summary,status,customfield_10010\'), a single field as a string (e.g., \'duedate\'), \'*all\' for all fields, or omitted for essentials.\\n        expand: Optional fields to expand.\\n        comment_limit: Maximum number of comments.\\n        properties: Issue properties to return.\\n        update_history: Whether to update issue view history.\\n\\n    Returns:\\n        JSON string representing the Jira issue object.\\n\\n    Raises:\\n        ValueError: If the Jira client is not configured or available.\\n    ","inputSchema":{"properties":{"issue_key":{"description":"Jira issue key (e.g., \'PROJ-123\')","title":"Issue Key","type":"string"},"fields":{"default":"issuetype,created,summary,labels,assignee,updated,reporter,status,priority,description","description":"(Optional) Comma-separated list of fields to return (e.g., \'summary,status,customfield_10010\'). You may also provide a single field as a string (e.g., \'duedate\'). Use \'*all\' for all fields (including custom fields), or omit for essential fields only.","title":"Fields","type":"string"},"expand":{"anyOf":[{"type":"string"},{"type":"null"}],"default":null,"description":"(Optional) Fields to expand. Examples: \'renderedFields\' (for rendered content), \'transitions\' (for available status transitions), \'changelog\' (for history)","title":"Expand"},"comment_limit":{"default":10,"description":"Maximum number of comments to include (0 or null for no comments)","maximum":100,"minimum":0,"title":"Comment Limit","type":"integer"},"properties":{"anyOf":[{"type":"string"},{"type":"null"}],"description":"(Optional) A comma-separated list of issue properties to return","default":null,"title":"Properties"},"update_history":{"default":true,"description":"Whether to update the issue view history for the requesting user","title":"Update History","type":"boolean"}},"required":["issue_key"],"type":"object"}},{"name":"jira_search","description":"Search Jira issues using JQL (Jira Query Language).\\n\\n    Args:\\n        ctx: The FastMCP context.\\n        jql: JQL query string.\\n        fields: Comma-separated fields to return.\\n        limit: Maximum number of results.\\n        start_at: Starting index for pagination.\\n        projects_filter: Comma-separated list of project keys to filter by.\\n        expand: Optional fields to expand.\\n\\n    Returns:\\n        JSON string representing the search results including pagination info.\\n    ","inputSchema":{"properties":{"jql":{"description":"JQL query string (Jira Query Language). Examples:\\n- Find Epics: \\"issuetype = Epic AND project = PROJ\\"\\n- Find issues in Epic: \\"parent = PROJ-123\\"\\n- Find by status: \\"status = \'In Progress\' AND project = PROJ\\"\\n- Find by assignee: \\"assignee = currentUser()\\"\\n- Find recently updated: \\"updated >= -7d AND project = PROJ\\"\\n- Find by label: \\"labels = frontend AND project = PROJ\\"\\n- Find by priority: \\"priority = High AND project = PROJ\\"","title":"Jql","type":"string"},"fields":{"default":"issuetype,created,summary,labels,assignee,updated,reporter,status,priority,description","description":"(Optional) Comma-separated fields to return in the results. Use \'*all\' for all fields, or specify individual fields like \'summary,status,assignee,priority\'","title":"Fields","type":"string"},"limit":{"default":10,"description":"Maximum number of results (1-50)","minimum":1,"title":"Limit","type":"integer"},"start_at":{"default":0,"description":"Starting index for pagination (0-based)","minimum":0,"title":"Start At","type":"integer"},"projects_filter":{"anyOf":[{"type":"string"},{"type":"null"}],"default":null,"description":"(Optional) Comma-separated list of project keys to filter results by. Overrides the environment variable JIRA_PROJECTS_FILTER if provided.","title":"Projects Filter"},"expand":{"anyOf":[{"type":"string"},{"type":"null"}],"default":null,"description":"(Optional) fields to expand. Examples: \'renderedFields\', \'transitions\', \'changelog\'","title":"Expand"}},"required":["jql"],"type":"object"}}]}}\r\n\r\n'
+DEBUG - mcp.server.streamable_http_manager - Session already exists, handling request directly
+DEBUG - mcp-atlassian.server.main - UserTokenMiddleware.dispatch: EXITED for request path='/mcp/'
+INFO:     172.17.0.1:55026 - "POST /mcp/ HTTP/1.1" 200 OK
+DEBUG - mcp.server.lowlevel.server - Received message: <mcp.shared.session.RequestResponder object at 0x74cbe9850af0>
+INFO - mcp.server.lowlevel.server - Processing request of type CallToolRequest
+DEBUG - mcp.server.lowlevel.server - Dispatching request of type CallToolRequest
+DEBUG - mcp-atlassian.servers.dependencies - get_jira_fetcher: ENTERED. Context ID: 128419175188224
+DEBUG - mcp-atlassian.servers.dependencies - get_jira_fetcher: In HTTP request context. Request URL: http://localhost:9000/mcp/. State.jira_fetcher exists: False. State.user_auth_type: pat. State.user_token_present: True.
+DEBUG - mcp-atlassian.servers.dependencies - get_jira_fetcher: User auth type: pat
+INFO - mcp-atlassian.servers.dependencies - Creating user-specific JiraFetcher (type: pat) for user unknown (token ...oOl3PEUR)
+DEBUG - mcp-atlassian.servers.dependencies - Creating user config for fetcher. Auth type: pat, Credentials keys: dict_keys(['user_email_context', 'personal_access_token']), Cloud ID: None
+DEBUG - mcp-jira - Initializing Jira client with Token (PAT) auth. URL: https://jira.inditex.com/jira, Token (masked): NjQ1************************************PEUR
+DEBUG - mcp-jira - Testing Jira authentication by retrieving current user info...
+DEBUG - atlassian.rest_client - curl --silent -X GET -H 'Content-Type: application/json' -H 'Accept: application/json'  'https://jira.inditex.com/jira/rest/api/2/myself'
+DEBUG - urllib3.connectionpool - Starting new HTTPS connection (1): jira.inditex.com:443
+DEBUG - urllib3.connectionpool - https://jira.inditex.com:443 "GET /jira/rest/api/2/myself HTTP/1.1" 200 335
+DEBUG - atlassian.rest_client - HTTP: GET rest/api/2/myself -> 200
+DEBUG - atlassian.rest_client - HTTP: Response text -> {"self":"https://jira.inditex.com/jira/rest/api/2/user?username=danielfn","key":"danielfn","name":"danielfn","emailAddress":"danielfn@inditex.com","avatarUrls":{"48x48":"https://jira.inditex.com/jira/secure/useravatar?ownerId=danielfn&avatarId=26023","24x24":"https://jira.inditex.com/jira/secure/useravatar?size=small&ownerId=danielfn&avatarId=26023","16x16":"https://jira.inditex.com/jira/secure/useravatar?size=xsmall&ownerId=danielfn&avatarId=26023","32x32":"https://jira.inditex.com/jira/secure/useravatar?size=medium&ownerId=danielfn&avatarId=26023"},"displayName":"Daniel Fernandez Nuñez","active":true,"deleted":false,"timeZone":"Europe/Madrid","locale":"en_US","groups":{"size":258,"items":[]},"applicationRoles":{"size":1,"items":[]},"expand":"groups,applicationRoles"}
+INFO - mcp-jira - Jira authentication successful. Current user: Daniel Fernandez Nuñez (danielfn@inditex.com)
+DEBUG - mcp-jira - Calling self.jira.myself() to get current user details for account ID.
+DEBUG - atlassian.rest_client - curl --silent -X GET -H 'Content-Type: application/json' -H 'Accept: application/json'  'https://jira.inditex.com/jira/rest/api/2/myself'
+DEBUG - urllib3.connectionpool - https://jira.inditex.com:443 "GET /jira/rest/api/2/myself HTTP/1.1" 200 335
+DEBUG - atlassian.rest_client - HTTP: GET rest/api/2/myself -> 200
+DEBUG - atlassian.rest_client - HTTP: Response text -> {"self":"https://jira.inditex.com/jira/rest/api/2/user?username=danielfn","key":"danielfn","name":"danielfn","emailAddress":"danielfn@inditex.com","avatarUrls":{"48x48":"https://jira.inditex.com/jira/secure/useravatar?ownerId=danielfn&avatarId=26023","24x24":"https://jira.inditex.com/jira/secure/useravatar?size=small&ownerId=danielfn&avatarId=26023","16x16":"https://jira.inditex.com/jira/secure/useravatar?size=xsmall&ownerId=danielfn&avatarId=26023","32x32":"https://jira.inditex.com/jira/secure/useravatar?size=medium&ownerId=danielfn&avatarId=26023"},"displayName":"Daniel Fernandez Nuñez","active":true,"deleted":false,"timeZone":"Europe/Madrid","locale":"en_US","groups":{"size":258,"items":[]},"applicationRoles":{"size":1,"items":[]},"expand":"groups,applicationRoles"}
+DEBUG - mcp-jira - Received myself_data: {'self': 'https://jira.inditex.com/jira/rest/api/2/user?username=danielfn', 'key': 'danielfn', 'name': 'danielfn', 'emailAddress': 'danielfn@inditex.com', 'avatarUrls': {'48x48': 'https://jira.inditex.com/jira/secure/useravatar?ownerId=danielfn&avatarId=26023', '24x24': 'https://jira.inditex.com/jira/secure/useravatar?size=small&ownerId=danielfn&avatarId=26023', '16x16': 'https://jira.inditex.com/jira/secure/useravatar?size=xsmall&ownerId=danielfn&avatarId=26023', '32x32': 'https://jira.inditex.
+INFO - mcp-jira - Using 'key' instead of 'accountId' for Jira Data Center/Server
+DEBUG - mcp-atlassian.servers.dependencies - get_jira_fetcher: Validated Jira token for user ID: danielfn
+DEBUG - atlassian.rest_client - curl --silent -X GET -H 'Content-Type: application/json' -H 'Accept: application/json'  'https://jira.inditex.com/jira/rest/api/2/issue/QUALITY-99999?fields=issuetype,created,summary,labels,assignee,updated,reporter,status,priority,description&updateHistory=true'
+DEBUG - urllib3.connectionpool - https://jira.inditex.com:443 "GET /jira/rest/api/2/issue/QUALITY-99999?fields=issuetype,created,summary,labels,assignee,updated,reporter,status,priority,description&updateHistory=true HTTP/1.1" 404 69
+DEBUG - atlassian.rest_client - HTTP: GET rest/api/2/issue/QUALITY-99999 -> 404
+DEBUG - atlassian.rest_client - HTTP: Response text -> {"errorMessages":["Issue Does Not Exist"],"errors":{}}
+ERROR - mcp-jira - HTTP error during API call: Issue Does Not Exist
+[11/13/25 15:20:53] ERROR    Error calling tool 'get_issue': tool_manager.py:129
+                             Issue Does Not Exist
+                             ╭─ Traceback (most recent cal─╮
+                             │ /app/.venv/lib/python3.10/s │
+                             │ ite-packages/fastmcp/tools/ │
+                             │ tool_manager.py:120 in      │
+                             │ call_tool                   │
+                             │                             │
+                             │   117 │   │   │   raise Not │
+                             │   118 │   │                 │
+                             │   119 │   │   try:          │
+                             │ ❱ 120 │   │   │   return aw │
+                             │   121 │   │                 │
+                             │   122 │   │   # raise ToolE │
+                             │   123 │   │   except ToolEr │
+                             │                             │
+                             │ /app/.venv/lib/python3.10/s │
+                             │ ite-packages/fastmcp/tools/ │
+                             │ tool.py:144 in run          │
+                             │                             │
+                             │   141 │   │   type_adapter  │
+                             │   142 │   │   result = type │
+                             │   143 │   │   if inspect.is │
+                             │ ❱ 144 │   │   │   result =  │
+                             │   145 │   │                 │
+                             │   146 │   │   return _conve │
+                             │   147                       │
+                             │                             │
+                             │ /app/.venv/lib/python3.10/s │
+                             │ ite-packages/mcp_atlassian/ │
+                             │ servers/jira.py:154 in      │
+                             │ get_issue                   │
+                             │                             │
+                             │    151 │   if fields and fi │
+                             │    152 │   │   fields_list  │
+                             │    153 │                    │
+                             │ ❱  154 │   issue = jira.get │
+                             │    155 │   │   issue_key=is │
+                             │    156 │   │   fields=field │
+                             │    157 │   │   expand=expan │
+                             │                             │
+                             │ /app/.venv/lib/python3.10/s │
+                             │ ite-packages/mcp_atlassian/ │
+                             │ jira/issues.py:144 in       │
+                             │ get_issue                   │
+                             │                             │
+                             │    141 │   │   │   │   prop │
+                             │    142 │   │   │            │
+                             │    143 │   │   │   # Get th │
+                             │ ❱  144 │   │   │   issue =  │
+                             │    145 │   │   │   │   issu │
+                             │    146 │   │   │   │   expa │
+                             │    147 │   │   │   │   fiel │
+                             │                             │
+                             │ /app/.venv/lib/python3.10/s │
+                             │ ite-packages/atlassian/jira │
+                             │ .py:1195 in get_issue       │
+                             │                             │
+                             │   1192 │   │   if expand:   │
+                             │   1193 │   │   │   params[" │
+                             │   1194 │   │   params["upda │
+                             │ ❱ 1195 │   │   return self. │
+                             │   1196 │                    │
+                             │   1197 │   def epic_issues( │
+                             │        Optional[str] = None │
+                             │   1198 │   │   """          │
+                             │                             │
+                             │ /app/.venv/lib/python3.10/s │
+                             │ ite-packages/atlassian/rest │
+                             │ _client.py:556 in get       │
+                             │                             │
+                             │    553 │   │   :param advan │
+                             │    554 │   │   :return:     │
+                             │    555 │   │   """          │
+                             │ ❱  556 │   │   response = s │
+                             │    557 │   │   │   "GET",   │
+                             │    558 │   │   │   path=pat │
+                             │    559 │   │   │   flags=fl │
+                             │                             │
+                             │ /app/.venv/lib/python3.10/s │
+                             │ ite-packages/atlassian/rest │
+                             │ _client.py:445 in request   │
+                             │                             │
+                             │    442 │   │   if self.adva │
+                             │    443 │   │   │   return r │
+                             │    444 │   │                │
+                             │ ❱  445 │   │   self.raise_f │
+                             │    446 │   │   return respo │
+                             │    447 │                    │
+                             │    448 │   # both True      │
+                             │                             │
+                             │ /app/.venv/lib/python3.10/s │
+                             │ ite-packages/atlassian/rest │
+                             │ _client.py:994 in           │
+                             │ raise_for_status            │
+                             │                             │
+                             │    991 │   │   │   │   log. │
+                             │    992 │   │   │   │   resp │
+                             │    993 │   │   │   else:    │
+                             │ ❱  994 │   │   │   │   rais │
+                             │    995 │   │   else:        │
+                             │    996 │   │   │   response │
+                             │    997                      │
+                             ╰─────────────────────────────╯
+                             HTTPError: Issue Does Not Exist
+ERROR - FastMCP.fastmcp.tools.tool_manager - Error calling tool 'get_issue': Issue Does Not Exist
+Traceback (most recent call last):
+  File "/app/.venv/lib/python3.10/site-packages/fastmcp/tools/tool_manager.py", line 120, in call_tool
+    return await tool.run(arguments)
+  File "/app/.venv/lib/python3.10/site-packages/fastmcp/tools/tool.py", line 144, in run
+    result = await result
+  File "/app/.venv/lib/python3.10/site-packages/mcp_atlassian/servers/jira.py", line 154, in get_issue
+    issue = jira.get_issue(
+  File "/app/.venv/lib/python3.10/site-packages/mcp_atlassian/jira/issues.py", line 144, in get_issue
+    issue = self.jira.get_issue(
+  File "/app/.venv/lib/python3.10/site-packages/atlassian/jira.py", line 1195, in get_issue
+    return self.get(url, params=params)
+  File "/app/.venv/lib/python3.10/site-packages/atlassian/rest_client.py", line 556, in get
+    response = self.request(
+  File "/app/.venv/lib/python3.10/site-packages/atlassian/rest_client.py", line 445, in request
+    self.raise_for_status(response)
+  File "/app/.venv/lib/python3.10/site-packages/atlassian/rest_client.py", line 994, in raise_for_status
+    raise HTTPError(error_msg, response=response)
+requests.exceptions.HTTPError: Issue Does Not Exist
+DEBUG - mcp.server.lowlevel.server - Response sent
+DEBUG - mcp.server.streamable_http - Closing SSE writer
+DEBUG - sse_starlette.sse - chunk: b'event: message\r\ndata: {"jsonrpc":"2.0","id":4,"result":{"content":[{"type":"text","text":"Error calling tool \'get_issue\'"}],"isError":true}}\r\n\r\n'
+DEBUG - sse_starlette.sse - ping: b': ping - 2025-11-13 15:21:08.
