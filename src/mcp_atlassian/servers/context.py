@@ -21,4 +21,6 @@ class MainAppContext:
     full_confluence_config: ConfluenceConfig | None = None
     full_bitbucket_config: BitbucketConfig | None = None
     read_only: bool = False
+    cli_read_only: bool | None = None
+    env_read_only: bool | None = None
     enabled_tools: list[str] | None = None
