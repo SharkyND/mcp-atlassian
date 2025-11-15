@@ -463,6 +463,8 @@ def test_get_project_issue_types_exception(projects_mixin: ProjectsMixin):
 def test_get_project_issues_count(projects_mixin: ProjectsMixin):
     """Test get_project_issues_count method."""
     jql_result = {"total": 42}
+    projects_mixin.config = MagicMock()
+    projects_mixin.config.is_cloud = False
     projects_mixin.jira.jql.return_value = jql_result
 
     result = projects_mixin.get_project_issues_count("PROJ1")
@@ -477,6 +479,8 @@ def test_get_project_issues_count__project_with_reserved_keyword(
 ):
     """Test get_project_issues_count method."""
     jql_result = {"total": 42}
+    projects_mixin.config = MagicMock()
+    projects_mixin.config.is_cloud = False
     projects_mixin.jira.jql.return_value = jql_result
 
     result = projects_mixin.get_project_issues_count("AND")
@@ -489,6 +493,8 @@ def test_get_project_issues_count__project_with_reserved_keyword(
 def test_get_project_issues_count_invalid_response(projects_mixin: ProjectsMixin):
     """Test get_project_issues_count method with invalid response."""
     # No total field
+    projects_mixin.config = MagicMock()
+    projects_mixin.config.is_cloud = False
     projects_mixin.jira.jql.return_value = {}
 
     result = projects_mixin.get_project_issues_count("PROJ1")
@@ -504,8 +510,72 @@ def test_get_project_issues_count_invalid_response(projects_mixin: ProjectsMixin
     projects_mixin.jira.jql.assert_called_once()
 
 
+def test_get_project_issues_count_cloud(projects_mixin: ProjectsMixin):
+    """Ensure Cloud counting iterates through paginated search results."""
+    projects_mixin.config = MagicMock()
+    projects_mixin.config.is_cloud = True
+    projects_mixin.config.url = "https://test.example.com"
+
+    projects_mixin.jira.resource_url.side_effect = lambda path: path
+    projects_mixin.jira.get.side_effect = [
+        {
+            "issues": [
+                {"id": "1", "key": "PROJ1-1", "fields": {"summary": "One"}},
+                {"id": "2", "key": "PROJ1-2", "fields": {"summary": "Two"}},
+            ],
+            "nextPageToken": "token-123",
+            "isLast": False,
+        },
+        {
+            "issues": [{"id": "3", "key": "PROJ1-3", "fields": {"summary": "Three"}}],
+            "nextPageToken": None,
+            "isLast": True,
+        },
+    ]
+
+    result = projects_mixin.get_project_issues_count("PROJ1")
+
+    assert result == 3
+    assert projects_mixin.jira.get.call_count == 2
+    first_call_params = projects_mixin.jira.get.call_args_list[0][1]["params"]
+    assert first_call_params["jql"] == 'project = "PROJ1"'
+    assert first_call_params["maxResults"] == 5000
+    projects_mixin.jira.jql.assert_not_called()
+
+
+def test_get_project_issues_count_cloud_handles_empty_page(
+    projects_mixin: ProjectsMixin,
+):
+    """Ensure Cloud counting stops gracefully on empty pages with tokens."""
+    projects_mixin.config = MagicMock()
+    projects_mixin.config.is_cloud = True
+    projects_mixin.config.url = "https://test.example.com"
+
+    projects_mixin.jira.resource_url.side_effect = lambda path: path
+    projects_mixin.jira.get.side_effect = [
+        {
+            "issues": [{"id": "1", "key": "PROJ1-1", "fields": {"summary": "One"}}],
+            "nextPageToken": "token-123",
+            "isLast": False,
+        },
+        {
+            "issues": [],
+            "nextPageToken": "token-456",
+            "isLast": False,
+        },
+    ]
+
+    result = projects_mixin.get_project_issues_count("PROJ1")
+
+    assert result == 1
+    assert projects_mixin.jira.get.call_count == 2
+    projects_mixin.jira.jql.assert_not_called()
+
+
 def test_get_project_issues_count_exception(projects_mixin: ProjectsMixin):
     """Test get_project_issues_count method with exception."""
+    projects_mixin.config = MagicMock()
+    projects_mixin.config.is_cloud = False
     projects_mixin.jira.jql.side_effect = Exception("API error")
 
     result = projects_mixin.get_project_issues_count("PROJ1")

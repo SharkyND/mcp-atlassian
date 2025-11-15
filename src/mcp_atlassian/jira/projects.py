@@ -284,6 +284,56 @@ class ProjectsMixin(JiraClient, SearchOperationsProto):
         try:
             # Use JQL to count issues in the project
             jql = f'project = "{project_key}"'
+            if getattr(self.config, "is_cloud", False):
+                total_count = 0
+                next_page_token: str | None = None
+
+                while True:
+                    params: dict[str, Any] = {
+                        "jql": jql,
+                        "maxResults": 5000,
+                        "fields": "id",
+                    }
+                    if next_page_token:
+                        params["nextPageToken"] = next_page_token
+
+                    response = self.jira.get(
+                        self.jira.resource_url("search/jql"), params=params
+                    )
+                    if not isinstance(response, dict):
+                        msg = (
+                            "Unexpected return value type from Jira search/jql during "
+                            f"project count: {type(response)}"
+                        )
+                        logger.error(msg)
+                        raise TypeError(msg)
+
+                    issues = response.get("issues") or []
+                    if not isinstance(issues, list):
+                        msg = (
+                            "Unexpected issues payload type from Jira search/jql during "
+                            f"project count: {type(issues)}"
+                        )
+                        logger.error(msg)
+                        raise TypeError(msg)
+
+                    total_count += len(issues)
+
+                    next_page_token = response.get("nextPageToken")
+                    is_last_page = response.get("isLast")
+
+                    if not issues and next_page_token:
+                        logger.warning(
+                            "Received empty issues page while counting project issues; "
+                            "stopping pagination."
+                        )
+                        break
+
+                    if not next_page_token or is_last_page:
+                        break
+
+                return total_count
+
             result = self.jira.jql(jql=jql, fields="key", limit=1)
             if not isinstance(result, dict):
                 msg = f"Unexpected return value type from `jira.jql`: {type(result)}"
@@ -292,7 +342,7 @@ class ProjectsMixin(JiraClient, SearchOperationsProto):
 
             # Extract total from the response
             total = 0
-            if isinstance(result, dict) and "total" in result:
+            if "total" in result:
                 total = result.get("total", 0)
 
             return total

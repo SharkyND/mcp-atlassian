@@ -44,6 +44,8 @@ def test_init_with_basic_auth():
             password="test_token",
             cloud=True,
             verify_ssl=True,
+            backoff_and_retry=True,
+            retry_status_codes=[429, 500, 502, 503, 504],
         )
 
         # Verify SSL verification was configured
