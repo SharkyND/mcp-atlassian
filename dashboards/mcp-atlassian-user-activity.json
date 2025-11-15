@@ -25,7 +25,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "be2ld59cfka9sa"
       },
       "fieldConfig": {
         "defaults": {
@@ -76,9 +76,9 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "be2ld59cfka9sa"
           },
-          "expr": "count(count by (username) (mcp_atlassian_user_activity_total))",
+          "expr": "count by () (group by (username) (mcp_atlassian_user_activity_total > 0))",
           "refId": "A"
         }
       ],
@@ -88,7 +88,71 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "be2ld59cfka9sa"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 0
+      },
+      "id": 11,
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true
+      },
+      "pluginVersion": "10.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "be2ld59cfka9sa"
+          },
+          "expr": "sum by (username) (mcp_atlassian_user_activity_total)",
+          "format": "table",
+          "refId": "A"
+        }
+      ],
+      "title": "User List with Activity",
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "be2ld59cfka9sa"
       },
       "fieldConfig": {
         "defaults": {
@@ -143,7 +207,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "be2ld59cfka9sa"
           },
           "expr": "count(count by (username) (rate(mcp_atlassian_user_activity_total[1h]) > 0))",
           "refId": "A"
@@ -155,7 +219,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "be2ld59cfka9sa"
       },
       "fieldConfig": {
         "defaults": {
@@ -210,7 +274,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "be2ld59cfka9sa"
           },
           "expr": "count(count by (username) (rate(mcp_atlassian_user_activity_total[24h]) > 0))",
           "refId": "A"
@@ -222,7 +286,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "be2ld59cfka9sa"
       },
       "fieldConfig": {
         "defaults": {
@@ -299,7 +363,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "be2ld59cfka9sa"
           },
           "expr": "count(count by (username) (rate(mcp_atlassian_user_activity_total[1h]) > 0))",
           "legendFormat": "Active Users (1h)",
@@ -308,7 +372,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "be2ld59cfka9sa"
           },
           "expr": "count(count by (username) (rate(mcp_atlassian_user_activity_total[24h]) > 0))",
           "legendFormat": "Daily Active Users (24h)",
@@ -321,7 +385,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "be2ld59cfka9sa"
       },
       "fieldConfig": {
         "defaults": {
@@ -368,7 +432,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "be2ld59cfka9sa"
           },
           "expr": "sum by (activity_type) (rate(mcp_atlassian_user_activity_total[1h]))",
           "legendFormat": "{{activity_type}}",
@@ -381,7 +445,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "be2ld59cfka9sa"
       },
       "fieldConfig": {
         "defaults": {
@@ -428,7 +492,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "be2ld59cfka9sa"
           },
           "expr": "count by (user_agent) (mcp_atlassian_user_activity_total)",
           "legendFormat": "{{user_agent}}",
@@ -441,7 +505,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "be2ld59cfka9sa"
       },
       "fieldConfig": {
         "defaults": {
@@ -493,7 +557,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "be2ld59cfka9sa"
           },
           "expr": "topk(10, sum by (username) (rate(mcp_atlassian_user_activity_total[1h])))",
           "format": "table",

@@ -18,14 +18,13 @@
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
-  "id": null,
+  "id": 3117,
   "links": [],
-  "liveNow": false,
   "panels": [
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "be2ld59cfka9sa"
       },
       "fieldConfig": {
         "defaults": {
@@ -37,8 +36,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -62,24 +60,33 @@
         "graphMode": "area",
         "justifyMode": "auto",
         "orientation": "auto",
+        "percentChangeColorMode": "standard",
         "reduceOptions": {
-          "values": false,
           "calcs": [
             "lastNotNull"
           ],
-          "fields": ""
+          "fields": "",
+          "values": false
         },
-        "textMode": "auto"
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
       },
-      "pluginVersion": "10.0.0",
+      "pluginVersion": "12.0.1",
       "targets": [
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "be2ld59cfka9sa"
           },
-          "expr": "count(count by (pod) (mcp_atlassian_http_requests_total))",
-          "refId": "A"
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "count(count by(pod) (mcp_atlassian_http_requests_total{cluster=\"itx-ana-xenacluster-production\"}))",
+          "fullMetaSearch": false,
+          "includeNullMetadata": true,
+          "range": true,
+          "refId": "A",
+          "useBackend": false
         }
       ],
       "title": "Total Pods",
@@ -88,7 +95,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "be2ld59cfka9sa"
       },
       "fieldConfig": {
         "defaults": {
@@ -100,8 +107,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "red",
-                "value": null
+                "color": "red"
               },
               {
                 "color": "yellow",
@@ -129,24 +135,33 @@
         "graphMode": "area",
         "justifyMode": "auto",
         "orientation": "auto",
+        "percentChangeColorMode": "standard",
         "reduceOptions": {
-          "values": false,
           "calcs": [
             "lastNotNull"
           ],
-          "fields": ""
+          "fields": "",
+          "values": false
         },
-        "textMode": "auto"
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
       },
-      "pluginVersion": "10.0.0",
+      "pluginVersion": "12.0.1",
       "targets": [
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "be2ld59cfka9sa"
           },
-          "expr": "count(count by (pod) (rate(mcp_atlassian_http_requests_total[5m]) > 0))",
-          "refId": "A"
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "count(count by(pod) (rate(mcp_atlassian_http_requests_total{cluster=\"itx-ana-xenacluster-production\"}[5m]))) > 0",
+          "fullMetaSearch": false,
+          "includeNullMetadata": true,
+          "range": true,
+          "refId": "A",
+          "useBackend": false
         }
       ],
       "title": "Active Pods",
@@ -155,7 +170,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "be2ld59cfka9sa"
       },
       "fieldConfig": {
         "defaults": {
@@ -167,8 +182,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "yellow",
@@ -196,24 +210,33 @@
         "graphMode": "area",
         "justifyMode": "auto",
         "orientation": "auto",
+        "percentChangeColorMode": "standard",
         "reduceOptions": {
-          "values": false,
           "calcs": [
             "lastNotNull"
           ],
-          "fields": ""
+          "fields": "",
+          "values": false
         },
-        "textMode": "auto"
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
       },
-      "pluginVersion": "10.0.0",
+      "pluginVersion": "12.0.1",
       "targets": [
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "be2ld59cfka9sa"
           },
-          "expr": "sum(mcp_atlassian_concurrent_requests)",
-          "refId": "A"
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "sum(mcp_atlassian_concurrent_requests{cluster=\"itx-ana-xenacluster-production\"})",
+          "fullMetaSearch": false,
+          "includeNullMetadata": true,
+          "range": true,
+          "refId": "A",
+          "useBackend": false
         }
       ],
       "title": "Total Load (Concurrent Requests)",
@@ -222,7 +245,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "be2ld59cfka9sa"
       },
       "fieldConfig": {
         "defaults": {
@@ -230,17 +253,23 @@
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
             "axisLabel": "",
             "axisPlacement": "auto",
             "barAlignment": 0,
+            "barWidthFactor": 0.6,
             "drawStyle": "line",
             "fillOpacity": 10,
             "gradientMode": "none",
             "hideFrom": {
               "legend": false,
               "tooltip": false,
-              "vis": false
+              "vis": false,
+              "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -262,8 +291,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -290,20 +318,27 @@
           "showLegend": true
         },
         "tooltip": {
+          "hideZeros": false,
           "mode": "single",
           "sort": "none"
         }
       },
-      "pluginVersion": "10.0.0",
+      "pluginVersion": "12.0.1",
       "targets": [
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "be2ld59cfka9sa"
           },
-          "expr": "sum by (pod) (rate(mcp_atlassian_http_requests_total[5m]))",
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "sum by(pod) (rate(mcp_atlassian_http_requests_total{cluster=\"itx-ana-xenacluster-production\"}[5m]))",
+          "fullMetaSearch": false,
+          "includeNullMetadata": true,
           "legendFormat": "{{pod}}",
-          "refId": "A"
+          "range": true,
+          "refId": "A",
+          "useBackend": false
         }
       ],
       "title": "Request Distribution Across Pods",
@@ -312,7 +347,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "be2ld59cfka9sa"
       },
       "fieldConfig": {
         "defaults": {
@@ -320,17 +355,23 @@
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
             "axisLabel": "",
             "axisPlacement": "auto",
             "barAlignment": 0,
+            "barWidthFactor": 0.6,
             "drawStyle": "line",
             "fillOpacity": 10,
             "gradientMode": "none",
             "hideFrom": {
               "legend": false,
               "tooltip": false,
-              "vis": false
+              "vis": false,
+              "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -352,8 +393,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -380,20 +420,27 @@
           "showLegend": true
         },
         "tooltip": {
+          "hideZeros": false,
           "mode": "single",
           "sort": "none"
         }
       },
-      "pluginVersion": "10.0.0",
+      "pluginVersion": "12.0.1",
       "targets": [
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "be2ld59cfka9sa"
           },
-          "expr": "sum by (pod) (mcp_atlassian_concurrent_requests)",
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "sum by(pod) (mcp_atlassian_concurrent_requests{cluster=\"itx-ana-xenacluster-production\"})",
+          "fullMetaSearch": false,
+          "includeNullMetadata": true,
           "legendFormat": "{{pod}}",
-          "refId": "A"
+          "range": true,
+          "refId": "A",
+          "useBackend": false
         }
       ],
       "title": "Load Balance - Concurrent Requests per Pod",
@@ -402,7 +449,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "be2ld59cfka9sa"
       },
       "fieldConfig": {
         "defaults": {
@@ -410,17 +457,23 @@
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
             "axisLabel": "",
             "axisPlacement": "auto",
             "barAlignment": 0,
+            "barWidthFactor": 0.6,
             "drawStyle": "line",
             "fillOpacity": 10,
             "gradientMode": "none",
             "hideFrom": {
               "legend": false,
               "tooltip": false,
-              "vis": false
+              "vis": false,
+              "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -442,8 +495,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -470,19 +522,22 @@
           "showLegend": true
         },
         "tooltip": {
+          "hideZeros": false,
           "mode": "single",
           "sort": "none"
         }
       },
-      "pluginVersion": "10.0.0",
+      "pluginVersion": "12.0.1",
       "targets": [
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "be2ld59cfka9sa"
           },
-          "expr": "sum by (pod) (rate(mcp_atlassian_http_requests_total{status_code=~\"4..|5..\"}[5m])) / sum by (pod) (rate(mcp_atlassian_http_requests_total[5m]))",
+          "editorMode": "builder",
+          "expr": "sum by (pod) (rate(mcp_atlassian_http_requests_total{cluster=\"itx-ana-xenacluster-production\",status_code=~\"4..|5..\"}[5m])) / sum by (pod) (rate(mcp_atlassian_http_requests_total{cluster=\"itx-ana-xenacluster-production\"}[5m]))",
           "legendFormat": "{{pod}}",
+          "range": true,
           "refId": "A"
         }
       ],
@@ -492,7 +547,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "be2ld59cfka9sa"
       },
       "fieldConfig": {
         "defaults": {
@@ -500,17 +555,23 @@
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
             "axisLabel": "",
             "axisPlacement": "auto",
             "barAlignment": 0,
+            "barWidthFactor": 0.6,
             "drawStyle": "line",
             "fillOpacity": 10,
             "gradientMode": "none",
             "hideFrom": {
               "legend": false,
               "tooltip": false,
-              "vis": false
+              "vis": false,
+              "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -532,8 +593,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -560,20 +620,27 @@
           "showLegend": true
         },
         "tooltip": {
+          "hideZeros": false,
           "mode": "single",
           "sort": "none"
         }
       },
-      "pluginVersion": "10.0.0",
+      "pluginVersion": "12.0.1",
       "targets": [
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "be2ld59cfka9sa"
           },
-          "expr": "histogram_quantile(0.95, sum by (pod) (rate(mcp_atlassian_http_request_duration_seconds_bucket[5m])))",
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "histogram_quantile(0.95, sum by(pod) (rate(mcp_atlassian_http_request_duration_seconds_bucket{cluster=\"itx-ana-xenacluster-production\"}[5m])))",
+          "fullMetaSearch": false,
+          "includeNullMetadata": true,
           "legendFormat": "{{pod}}",
-          "refId": "A"
+          "range": true,
+          "refId": "A",
+          "useBackend": false
         }
       ],
       "title": "P95 Response Time by Pod",
@@ -582,7 +649,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "be2ld59cfka9sa"
       },
       "fieldConfig": {
         "defaults": {
@@ -590,17 +657,23 @@
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
             "axisLabel": "",
             "axisPlacement": "auto",
             "barAlignment": 0,
+            "barWidthFactor": 0.6,
             "drawStyle": "line",
             "fillOpacity": 10,
             "gradientMode": "none",
             "hideFrom": {
               "legend": false,
               "tooltip": false,
-              "vis": false
+              "vis": false,
+              "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -622,8 +695,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -650,20 +722,27 @@
           "showLegend": true
         },
         "tooltip": {
+          "hideZeros": false,
           "mode": "single",
           "sort": "none"
         }
       },
-      "pluginVersion": "10.0.0",
+      "pluginVersion": "12.0.1",
       "targets": [
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "be2ld59cfka9sa"
           },
-          "expr": "sum by (pod) (rate(mcp_atlassian_user_activity_total[5m]))",
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "sum by(pod) (rate(mcp_atlassian_user_activity_total{cluster=\"itx-ana-xenacluster-production\"}[5m]))",
+          "fullMetaSearch": false,
+          "includeNullMetadata": true,
           "legendFormat": "{{pod}}",
-          "refId": "A"
+          "range": true,
+          "refId": "A",
+          "useBackend": false
         }
       ],
       "title": "User Activity Distribution Across Pods",
@@ -672,7 +751,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "be2ld59cfka9sa"
       },
       "fieldConfig": {
         "defaults": {
@@ -686,7 +765,19 @@
             },
             "inspect": false
           },
-          "mappings": []
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
         },
         "overrides": [
           {
@@ -735,6 +826,15 @@
       },
       "id": 9,
       "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
         "showHeader": true,
         "sortBy": [
           {
@@ -743,41 +843,47 @@
           }
         ]
       },
-      "pluginVersion": "10.0.0",
+      "pluginVersion": "12.0.1",
       "targets": [
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "be2ld59cfka9sa"
           },
-          "expr": "sum by (pod) (rate(mcp_atlassian_http_requests_total[5m]))",
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "sum by(pod) (rate(mcp_atlassian_http_requests_total{cluster=\"itx-ana-xenacluster-production\"}[5m]))",
           "format": "table",
-          "refId": "A"
+          "fullMetaSearch": false,
+          "includeNullMetadata": true,
+          "range": true,
+          "refId": "A",
+          "useBackend": false
         },
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "be2ld59cfka9sa"
           },
-          "expr": "sum by (pod) (rate(mcp_atlassian_http_requests_total{status_code=~\"4..|5..\"}[5m])) / sum by (pod) (rate(mcp_atlassian_http_requests_total[5m]))",
+          "expr": "sum by (pod) (rate(mcp_atlassian_http_requests_total{cluster=\"itx-ana-xenacluster-production\",status_code=~\"4..|5..\"}[5m])) / sum by (pod) (rate(mcp_atlassian_http_requests_total{cluster=\"itx-ana-xenacluster-production\"}[5m]))",
           "format": "table",
           "refId": "B"
         },
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "be2ld59cfka9sa"
           },
-          "expr": "histogram_quantile(0.95, sum by (pod) (rate(mcp_atlassian_http_request_duration_seconds_bucket[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (pod) (rate(mcp_atlassian_http_request_duration_seconds_bucket{cluster=\"itx-ana-xenacluster-production\"}[5m])))",
           "format": "table",
           "refId": "C"
         },
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "be2ld59cfka9sa"
           },
-          "expr": "sum by (pod) (mcp_atlassian_concurrent_requests)",
+          "expr": "sum by (pod) (mcp_atlassian_concurrent_requests{cluster=\"itx-ana-xenacluster-production\"})",
           "format": "table",
           "refId": "D"
         }
@@ -811,15 +917,10 @@
       "type": "table"
     }
   ],
+  "preload": false,
   "refresh": "30s",
-  "schemaVersion": 37,
-  "style": "dark",
-  "tags": [
-    "mcp-atlassian",
-    "kubernetes",
-    "pods",
-    "scaling"
-  ],
+  "schemaVersion": 41,
+  "tags": [],
   "templating": {
     "list": []
   },
@@ -829,9 +930,7 @@
   },
   "timepicker": {},
   "timezone": "",
-  "title": "MCP Atlassian - Kubernetes Pods",
-  "uid": "mcp-atlassian-k8s",
-  "version": 1,
-  "weekStart": "",
-  "gnetId": null
+  "title": "MCP Atlassian - Kubernetes Pods Copy",
+  "uid": "d52ff65c-c3aa-4546-bcb9-badf3202f01d",
+  "version": 9
 }

@@ -25,7 +25,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "be2ld59cfka9sa"
       },
       "fieldConfig": {
         "defaults": {
@@ -80,9 +80,9 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "be2ld59cfka9sa"
           },
-          "expr": "sum(rate(mcp_atlassian_http_requests_total[5m]))",
+          "expr": "sum(rate(mcp_atlassian_http_requests_total{cluster=\"itx-ana-xenacluster-production\"}[5m]))",
           "refId": "A"
         }
       ],
@@ -92,7 +92,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "be2ld59cfka9sa"
       },
       "fieldConfig": {
         "defaults": {
@@ -147,9 +147,9 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "be2ld59cfka9sa"
           },
-          "expr": "sum(rate(mcp_atlassian_http_requests_total{status_code=~\"4..|5..\"}[5m])) / sum(rate(mcp_atlassian_http_requests_total[5m]))",
+          "expr": "sum(rate(mcp_atlassian_http_requests_total{cluster=\"itx-ana-xenacluster-production\",status_code=~\"4..|5..\"}[5m])) / sum(rate(mcp_atlassian_http_requests_total{cluster=\"itx-ana-xenacluster-production\"}[5m]))",
           "refId": "A"
         }
       ],
@@ -159,7 +159,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "be2ld59cfka9sa"
       },
       "fieldConfig": {
         "defaults": {
@@ -214,9 +214,9 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "be2ld59cfka9sa"
           },
-          "expr": "rate(mcp_atlassian_http_request_duration_seconds_sum[5m]) / rate(mcp_atlassian_http_request_duration_seconds_count[5m])",
+          "expr": "rate(mcp_atlassian_http_request_duration_seconds_sum{cluster=\"itx-ana-xenacluster-production\"}[5m]) / rate(mcp_atlassian_http_request_duration_seconds_count{cluster=\"itx-ana-xenacluster-production\"}[5m])",
           "refId": "A"
         }
       ],
@@ -226,7 +226,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "be2ld59cfka9sa"
       },
       "fieldConfig": {
         "defaults": {
@@ -281,7 +281,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "be2ld59cfka9sa"
           },
           "expr": "sum(mcp_atlassian_concurrent_requests)",
           "refId": "A"
@@ -293,7 +293,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "be2ld59cfka9sa"
       },
       "fieldConfig": {
         "defaults": {
@@ -370,36 +370,36 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "be2ld59cfka9sa"
           },
-          "expr": "sum(rate(mcp_atlassian_http_requests_total[5m]))",
+          "expr": "sum(rate(mcp_atlassian_http_requests_total{cluster=\"itx-ana-xenacluster-production\"}[5m]))",
           "legendFormat": "Total Requests",
           "refId": "A"
         },
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "be2ld59cfka9sa"
           },
-          "expr": "sum(rate(mcp_atlassian_http_requests_total{status_code=~\"2..\"}[5m]))",
+          "expr": "sum(rate(mcp_atlassian_http_requests_total{cluster=\"itx-ana-xenacluster-production\",status_code=~\"2..\"}[5m]))",
           "legendFormat": "2xx Success",
           "refId": "B"
         },
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "be2ld59cfka9sa"
           },
-          "expr": "sum(rate(mcp_atlassian_http_requests_total{status_code=~\"4..\"}[5m]))",
+          "expr": "sum(rate(mcp_atlassian_http_requests_total{cluster=\"itx-ana-xenacluster-production\",status_code=~\"4..\"}[5m]))",
           "legendFormat": "4xx Client Error",
           "refId": "C"
         },
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "be2ld59cfka9sa"
           },
-          "expr": "sum(rate(mcp_atlassian_http_requests_total{status_code=~\"5..\"}[5m]))",
+          "expr": "sum(rate(mcp_atlassian_http_requests_total{cluster=\"itx-ana-xenacluster-production\",status_code=~\"5..\"}[5m]))",
           "legendFormat": "5xx Server Error",
           "refId": "D"
         }
@@ -410,7 +410,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "be2ld59cfka9sa"
       },
       "fieldConfig": {
         "defaults": {
@@ -487,36 +487,36 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "be2ld59cfka9sa"
           },
-          "expr": "histogram_quantile(0.50, rate(mcp_atlassian_http_request_duration_seconds_bucket[5m]))",
+          "expr": "histogram_quantile(0.50, rate(mcp_atlassian_http_request_duration_seconds_bucket{cluster=\"itx-ana-xenacluster-production\"}[5m]))",
           "legendFormat": "P50",
           "refId": "A"
         },
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "be2ld59cfka9sa"
           },
-          "expr": "histogram_quantile(0.95, rate(mcp_atlassian_http_request_duration_seconds_bucket[5m]))",
+          "expr": "histogram_quantile(0.95, rate(mcp_atlassian_http_request_duration_seconds_bucket{cluster=\"itx-ana-xenacluster-production\"}[5m]))",
           "legendFormat": "P95",
           "refId": "B"
         },
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "be2ld59cfka9sa"
           },
-          "expr": "histogram_quantile(0.99, rate(mcp_atlassian_http_request_duration_seconds_bucket[5m]))",
+          "expr": "histogram_quantile(0.99, rate(mcp_atlassian_http_request_duration_seconds_bucket{cluster=\"itx-ana-xenacluster-production\"}[5m]))",
           "legendFormat": "P99",
           "refId": "C"
         },
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "be2ld59cfka9sa"
           },
-          "expr": "rate(mcp_atlassian_http_request_duration_seconds_sum[5m]) / rate(mcp_atlassian_http_request_duration_seconds_count[5m])",
+          "expr": "rate(mcp_atlassian_http_request_duration_seconds_sum{cluster=\"itx-ana-xenacluster-production\"}[5m]) / rate(mcp_atlassian_http_request_duration_seconds_count{cluster=\"itx-ana-xenacluster-production\"}[5m])",
           "legendFormat": "Average",
           "refId": "D"
         }
@@ -527,7 +527,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "be2ld59cfka9sa"
       },
       "fieldConfig": {
         "defaults": {
@@ -604,9 +604,9 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "be2ld59cfka9sa"
           },
-          "expr": "sum by (endpoint) (rate(mcp_atlassian_http_requests_total[5m]))",
+          "expr": "sum by (endpoint) (rate(mcp_atlassian_http_requests_total{cluster=\"itx-ana-xenacluster-production\"}[5m]))",
           "legendFormat": "{{endpoint}}",
           "refId": "A"
         }
@@ -617,7 +617,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "be2ld59cfka9sa"
       },
       "fieldConfig": {
         "defaults": {
@@ -694,7 +694,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "be2ld59cfka9sa"
           },
           "expr": "sum by (pod) (mcp_atlassian_concurrent_requests)",
           "legendFormat": "{{pod}}",
@@ -707,7 +707,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "be2ld59cfka9sa"
       },
       "fieldConfig": {
         "defaults": {
@@ -771,18 +771,18 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "be2ld59cfka9sa"
           },
-          "expr": "sum by (endpoint) (rate(mcp_atlassian_http_requests_total[5m]))",
+          "expr": "sum by (endpoint) (rate(mcp_atlassian_http_requests_total{cluster=\"itx-ana-xenacluster-production\"}[5m]))",
           "format": "table",
           "refId": "A"
         },
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "be2ld59cfka9sa"
           },
-          "expr": "histogram_quantile(0.95, sum by (endpoint) (rate(mcp_atlassian_http_request_duration_seconds_bucket[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (endpoint) (rate(mcp_atlassian_http_request_duration_seconds_bucket{cluster=\"itx-ana-xenacluster-production\"}[5m])))",
           "format": "table",
           "refId": "B"
         }
