@@ -4,6 +4,7 @@ import json
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -11,11 +12,12 @@ from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 from starlette.requests import Request
 
-from src.mcp_atlassian.jira import JiraFetcher
-from src.mcp_atlassian.jira.config import JiraConfig
-from src.mcp_atlassian.servers.context import MainAppContext
-from src.mcp_atlassian.servers.main import AtlassianMCP
-from src.mcp_atlassian.utils.oauth import OAuthConfig
+from mcp_atlassian.exceptions import MCPAtlassianAuthenticationError
+from mcp_atlassian.jira import JiraFetcher
+from mcp_atlassian.jira.config import JiraConfig
+from mcp_atlassian.servers.context import MainAppContext
+from mcp_atlassian.servers.main import AtlassianMCP
+from mcp_atlassian.utils.oauth import OAuthConfig
 from tests.fixtures.jira_mocks import (
     MOCK_JIRA_COMMENTS_SIMPLIFIED,
     MOCK_JIRA_ISSUE_RESPONSE_SIMPLIFIED,
@@ -33,6 +35,102 @@ def mock_jira_fetcher():
     mock_fetcher.config.read_only = False
     mock_fetcher.config.url = "https://test.atlassian.net"
     mock_fetcher.config.projects_filter = None  # Explicitly set to None by default
+    mock_fetcher.config.is_cloud = True
+
+    mock_fetcher.search_fields.return_value = [
+        {"id": "summary", "name": "Summary", "custom": False}
+    ]
+
+    project_issues_result = MagicMock()
+    project_issues_result.to_simplified_dict.return_value = {
+        "issues": [{"key": "PROJ-1"}],
+        "total": 1,
+        "start_at": 0,
+        "max_results": 10,
+    }
+    mock_fetcher.get_project_issues.return_value = project_issues_result
+
+    mock_fetcher.get_available_transitions.return_value = [
+        {"id": "11", "name": "Start Progress"}
+    ]
+    mock_fetcher.get_worklogs.return_value = [
+        {"author": {"displayName": "Test User"}, "timeSpent": "1h"}
+    ]
+    mock_fetcher.download_issue_attachments.return_value = {
+        "issue": "TEST-123",
+        "target_dir": "/tmp/downloads",
+        "downloaded": 2,
+    }
+
+    board_mock = MagicMock()
+    board_mock.to_simplified_dict.return_value = {"id": 1, "name": "Sample Board"}
+    mock_fetcher.get_all_agile_boards_model.return_value = [board_mock]
+
+    board_issues_result = MagicMock()
+    board_issues_result.to_simplified_dict.return_value = {
+        "issues": [{"key": "BOARD-1"}],
+        "total": 1,
+    }
+    mock_fetcher.get_board_issues.return_value = board_issues_result
+
+    sprint_mock = MagicMock()
+    sprint_mock.to_simplified_dict.return_value = {"id": 7, "name": "Sprint 1"}
+    mock_fetcher.get_all_sprints_from_board_model.return_value = [sprint_mock]
+
+    sprint_issues_result = MagicMock()
+    sprint_issues_result.to_simplified_dict.return_value = {
+        "issues": [{"key": "SPR-1"}],
+        "total": 1,
+    }
+    mock_fetcher.get_sprint_issues.return_value = sprint_issues_result
+
+    link_type_mock = MagicMock()
+    link_type_mock.to_simplified_dict.return_value = {
+        "id": "100",
+        "name": "Relates",
+        "inward": "is related to",
+        "outward": "relates to",
+    }
+    mock_fetcher.get_issue_link_types.return_value = [link_type_mock]
+
+    changelog_entry = MagicMock()
+    changelog_entry.to_simplified_dict.return_value = {"field": "status"}
+    mock_fetcher.batch_get_changelogs.return_value = [
+        SimpleNamespace(id="TEST-1", changelogs=[changelog_entry])
+    ]
+
+    updated_issue = MagicMock()
+    updated_issue.to_simplified_dict.return_value = {"key": "TEST-321"}
+    updated_issue.custom_fields = {"attachment_results": [{"file": "doc.txt"}]}
+    mock_fetcher.update_issue.return_value = updated_issue
+
+    transition_issue = MagicMock()
+    transition_issue.to_simplified_dict.return_value = {"key": "TEST-999"}
+    mock_fetcher.transition_issue.return_value = transition_issue
+
+    mock_fetcher.add_comment.return_value = {"id": "10000", "body": "Added comment"}
+    mock_fetcher.add_worklog.return_value = {"id": "worklog-1", "timeSpent": "1h"}
+
+    linked_issue = MagicMock()
+    linked_issue.to_simplified_dict.return_value = {"key": "TEST-100"}
+    mock_fetcher.link_issue_to_epic.return_value = linked_issue
+
+    mock_fetcher.create_issue_link.return_value = {"status": "LINKED"}
+    mock_fetcher.create_remote_issue_link.return_value = {"id": "remote-link"}
+    mock_fetcher.remove_issue_link.return_value = {"removed": True}
+
+    sprint_obj = MagicMock()
+    sprint_obj.to_simplified_dict.return_value = {"id": 77, "name": "Created Sprint"}
+    mock_fetcher.create_sprint.return_value = sprint_obj
+
+    sprint_updated_obj = MagicMock()
+    sprint_updated_obj.to_simplified_dict.return_value = {
+        "id": 77,
+        "name": "Updated Sprint",
+    }
+    mock_fetcher.update_sprint.return_value = sprint_updated_obj
+
+    mock_fetcher.create_project_version.return_value = {"id": "version-1"}
 
     # Configure common methods
     mock_fetcher.get_current_user_account_id.return_value = "test-account-id"
@@ -218,7 +316,7 @@ def mock_jira_fetcher():
         ]
     }
 
-    from src.mcp_atlassian.models.jira.common import JiraUser
+    from mcp_atlassian.models.jira.common import JiraUser
 
     mock_user = MagicMock(spec=JiraUser)
     mock_user.to_simplified_dict.return_value = {
@@ -272,7 +370,7 @@ def test_jira_mcp(mock_jira_fetcher, mock_base_jira_config):
     test_mcp = AtlassianMCP(name="TestJira", lifespan=test_lifespan)
 
     # Mount the actual jira MCP instance
-    from src.mcp_atlassian.servers.jira import jira_mcp
+    from mcp_atlassian.servers.jira import jira_mcp
 
     test_mcp.mount(jira_mcp, "jira")
     return test_mcp
@@ -296,7 +394,7 @@ def no_fetcher_test_jira_mcp(mock_base_jira_config):
         lifespan=no_fetcher_test_lifespan,
     )
     # Mount the actual jira MCP instance
-    from src.mcp_atlassian.servers.jira import jira_mcp
+    from mcp_atlassian.servers.jira import jira_mcp
 
     test_mcp.mount(jira_mcp, "jira")
     return test_mcp
@@ -325,13 +423,16 @@ class DirectJiraToolCaller:
         from fastmcp.server.context import Context
         from starlette.requests import Request
 
-        from src.mcp_atlassian.servers.jira import (
+        from mcp_atlassian.servers.jira import (
             add_comment,
+            add_worklog,
             batch_create_issues,
             batch_create_versions,
             batch_get_changelogs,
             create_issue,
             create_issue_link,
+            create_remote_issue_link,
+            create_sprint,
             create_version,
             delete_issue,
             download_attachments,
@@ -347,9 +448,13 @@ class DirectJiraToolCaller:
             get_transitions,
             get_user_profile,
             get_worklog,
+            link_to_epic,
+            remove_issue_link,
             search,
             search_fields,
+            transition_issue,
             update_issue,
+            update_sprint,
         )
 
         # Create mock context
@@ -384,6 +489,13 @@ class DirectJiraToolCaller:
             "jira_create_issue_link": create_issue_link.fn,
             "jira_create_version": create_version.fn,
             "jira_batch_create_versions": batch_create_versions.fn,
+            "jira_add_worklog": add_worklog.fn,
+            "jira_link_to_epic": link_to_epic.fn,
+            "jira_create_remote_issue_link": create_remote_issue_link.fn,
+            "jira_remove_issue_link": remove_issue_link.fn,
+            "jira_transition_issue": transition_issue.fn,
+            "jira_create_sprint": create_sprint.fn,
+            "jira_update_sprint": update_sprint.fn,
         }
 
         if tool_name not in tools:
@@ -420,11 +532,11 @@ async def jira_client(test_jira_mcp, mock_jira_fetcher, mock_request):
     """Create a direct tool caller that avoids FastMCP transport hanging."""
     with (
         patch(
-            "src.mcp_atlassian.servers.jira.get_jira_fetcher",
+            "mcp_atlassian.servers.jira.get_jira_fetcher",
             AsyncMock(return_value=mock_jira_fetcher),
         ),
         patch(
-            "src.mcp_atlassian.servers.dependencies.get_http_request",
+            "mcp_atlassian.servers.dependencies.get_http_request",
             return_value=mock_request,
         ),
     ):
@@ -502,6 +614,160 @@ async def test_search(jira_client, mock_jira_fetcher):
         projects_filter=None,
         expand=None,
     )
+
+
+@pytest.mark.anyio
+async def test_search_fields_tool(jira_client, mock_jira_fetcher):
+    """Test the jira_search_fields tool."""
+    response = await jira_client.call_tool(
+        "jira_search_fields", {"keyword": "sum", "limit": 5, "refresh": True}
+    )
+    mock_jira_fetcher.search_fields.assert_called_once_with(
+        "sum", limit=5, refresh=True
+    )
+    result = json.loads(response.content[0].text)
+    assert isinstance(result, list)
+    assert result[0]["name"] == "Summary"
+
+
+@pytest.mark.anyio
+async def test_get_project_issues_tool(jira_client, mock_jira_fetcher):
+    """Test jira_get_project_issues returns simplified search result."""
+    response = await jira_client.call_tool(
+        "jira_get_project_issues", {"project_key": "PROJ", "limit": 5, "start_at": 2}
+    )
+    mock_jira_fetcher.get_project_issues.assert_called_once_with(
+        project_key="PROJ", start=2, limit=5
+    )
+    payload = json.loads(response.content[0].text)
+    assert payload["total"] == 1
+    assert payload["issues"][0]["key"] == "PROJ-1"
+
+
+@pytest.mark.anyio
+async def test_get_transitions_tool(jira_client, mock_jira_fetcher):
+    """Test jira_get_transitions returns available transitions."""
+    response = await jira_client.call_tool(
+        "jira_get_transitions", {"issue_key": "PROJ-1"}
+    )
+    mock_jira_fetcher.get_available_transitions.assert_called_once_with("PROJ-1")
+    data = json.loads(response.content[0].text)
+    assert data[0]["name"] == "Start Progress"
+
+
+@pytest.mark.anyio
+async def test_get_worklog_tool(jira_client, mock_jira_fetcher):
+    """Test jira_get_worklog returns worklogs."""
+    response = await jira_client.call_tool("jira_get_worklog", {"issue_key": "PROJ-1"})
+    mock_jira_fetcher.get_worklogs.assert_called_once_with("PROJ-1")
+    payload = json.loads(response.content[0].text)
+    assert payload["worklogs"][0]["timeSpent"] == "1h"
+
+
+@pytest.mark.anyio
+async def test_download_attachments_tool(jira_client, mock_jira_fetcher):
+    """Test jira_download_attachments returns download summary."""
+    response = await jira_client.call_tool(
+        "jira_download_attachments",
+        {"issue_key": "PROJ-1", "target_dir": "/tmp/downloads"},
+    )
+    mock_jira_fetcher.download_issue_attachments.assert_called_once_with(
+        issue_key="PROJ-1", target_dir="/tmp/downloads"
+    )
+    payload = json.loads(response.content[0].text)
+    assert payload["downloaded"] == 2
+
+
+@pytest.mark.anyio
+async def test_get_agile_boards_tool(jira_client, mock_jira_fetcher):
+    """Test jira_get_agile_boards returns boards."""
+    response = await jira_client.call_tool(
+        "jira_get_agile_boards",
+        {"board_name": "Sample", "project_key": "PROJ", "board_type": "scrum"},
+    )
+    mock_jira_fetcher.get_all_agile_boards_model.assert_called_once()
+    boards = json.loads(response.content[0].text)
+    assert boards[0]["name"] == "Sample Board"
+
+
+@pytest.mark.anyio
+async def test_get_board_issues_tool(jira_client, mock_jira_fetcher):
+    """Test jira_get_board_issues converts field list."""
+    response = await jira_client.call_tool(
+        "jira_get_board_issues",
+        {"board_id": "1", "jql": "project = PROJ", "fields": "summary,status"},
+    )
+    mock_jira_fetcher.get_board_issues.assert_called_once_with(
+        board_id="1",
+        jql="project = PROJ",
+        fields=["summary", "status"],
+        start=0,
+        limit=10,
+        expand="version",
+    )
+    data = json.loads(response.content[0].text)
+    assert data["issues"][0]["key"] == "BOARD-1"
+
+
+@pytest.mark.anyio
+async def test_get_sprints_from_board_tool(jira_client, mock_jira_fetcher):
+    """Test jira_get_sprints_from_board returns sprint list."""
+    response = await jira_client.call_tool(
+        "jira_get_sprints_from_board", {"board_id": "1", "state": "active"}
+    )
+    mock_jira_fetcher.get_all_sprints_from_board_model.assert_called_once()
+    data = json.loads(response.content[0].text)
+    assert data[0]["name"] == "Sprint 1"
+
+
+@pytest.mark.anyio
+async def test_get_sprint_issues_tool(jira_client, mock_jira_fetcher):
+    """Test jira_get_sprint_issues returns issues."""
+    response = await jira_client.call_tool(
+        "jira_get_sprint_issues",
+        {"sprint_id": "7", "fields": "summary,status", "limit": 3},
+    )
+    mock_jira_fetcher.get_sprint_issues.assert_called_once_with(
+        sprint_id="7", fields=["summary", "status"], start=0, limit=3
+    )
+    payload = json.loads(response.content[0].text)
+    assert payload["issues"][0]["key"] == "SPR-1"
+
+
+@pytest.mark.anyio
+async def test_get_link_types_tool(jira_client, mock_jira_fetcher):
+    """Test jira_get_link_types returns formatted link types."""
+    response = await jira_client.call_tool("jira_get_link_types", {})
+    mock_jira_fetcher.get_issue_link_types.assert_called_once()
+    data = json.loads(response.content[0].text)
+    assert data[0]["name"] == "Relates"
+
+
+@pytest.mark.anyio
+async def test_batch_get_changelogs_tool(jira_client, mock_jira_fetcher):
+    """Test jira_batch_get_changelogs returns changelogs."""
+    response = await jira_client.call_tool(
+        "jira_batch_get_changelogs",
+        {"issue_ids_or_keys": ["PROJ-1"], "fields": ["status"], "limit": 1},
+    )
+    mock_jira_fetcher.batch_get_changelogs.assert_called_once_with(
+        issue_ids_or_keys=["PROJ-1"], fields=["status"]
+    )
+    data = json.loads(response.content[0].text)
+    assert data[0]["issue_id"] == "TEST-1"
+    assert len(data[0]["changelogs"]) == 1
+
+
+@pytest.mark.anyio
+async def test_batch_get_changelogs_not_cloud(jira_client, mock_jira_fetcher):
+    """Ensure jira_batch_get_changelogs errors on server/DC."""
+    mock_jira_fetcher.config.is_cloud = False
+    with pytest.raises(NotImplementedError):
+        await jira_client.call_tool(
+            "jira_batch_get_changelogs",
+            {"issue_ids_or_keys": ["PROJ-1"], "fields": None},
+        )
+    mock_jira_fetcher.config.is_cloud = True
 
 
 @pytest.mark.anyio
@@ -635,6 +901,50 @@ async def test_get_user_profile_tool_not_found(jira_client, mock_jira_fetcher):
 
 
 @pytest.mark.anyio
+async def test_get_user_profile_tool_auth_error(jira_client, mock_jira_fetcher):
+    """Test authentication errors are surfaced in get_user_profile."""
+    original_side_effect = mock_jira_fetcher.get_user_profile_by_identifier.side_effect
+    mock_jira_fetcher.get_user_profile_by_identifier.side_effect = (
+        MCPAtlassianAuthenticationError("denied")
+    )
+    response = await jira_client.call_tool(
+        "jira_get_user_profile", {"user_identifier": "denied@example.com"}
+    )
+    payload = json.loads(response.content[0].text)
+    assert payload["success"] is False
+    assert "denied" in payload["error"]
+    mock_jira_fetcher.get_user_profile_by_identifier.side_effect = original_side_effect
+
+
+@pytest.mark.anyio
+async def test_get_user_profile_tool_network_error(jira_client, mock_jira_fetcher):
+    """Test network errors are captured."""
+    original_side_effect = mock_jira_fetcher.get_user_profile_by_identifier.side_effect
+    mock_jira_fetcher.get_user_profile_by_identifier.side_effect = OSError("boom")
+    response = await jira_client.call_tool(
+        "jira_get_user_profile", {"user_identifier": "network@example.com"}
+    )
+    payload = json.loads(response.content[0].text)
+    assert payload["success"] is False
+    assert payload["error"] == "boom"
+    mock_jira_fetcher.get_user_profile_by_identifier.side_effect = original_side_effect
+
+
+@pytest.mark.anyio
+async def test_get_user_profile_tool_unexpected_error(jira_client, mock_jira_fetcher):
+    """Test unexpected exceptions in get_user_profile."""
+    original_side_effect = mock_jira_fetcher.get_user_profile_by_identifier.side_effect
+    mock_jira_fetcher.get_user_profile_by_identifier.side_effect = RuntimeError("boom")
+    response = await jira_client.call_tool(
+        "jira_get_user_profile", {"user_identifier": "oops@example.com"}
+    )
+    payload = json.loads(response.content[0].text)
+    assert payload["success"] is False
+    assert "oops@example.com" in payload["user_identifier"]
+    mock_jira_fetcher.get_user_profile_by_identifier.side_effect = original_side_effect
+
+
+@pytest.mark.anyio
 async def test_no_fetcher_get_issue(no_fetcher_client_fixture, mock_request):
     """Test that get_issue fails when Jira client is not configured (global config missing)."""
 
@@ -645,11 +955,11 @@ async def test_no_fetcher_get_issue(no_fetcher_client_fixture, mock_request):
 
     with (
         patch(
-            "src.mcp_atlassian.servers.jira.get_jira_fetcher",
+            "mcp_atlassian.servers.jira.get_jira_fetcher",
             AsyncMock(side_effect=mock_get_fetcher_error),
         ),
         patch(
-            "src.mcp_atlassian.servers.dependencies.get_http_request",
+            "mcp_atlassian.servers.dependencies.get_http_request",
             return_value=mock_request,
         ),
     ):
@@ -681,17 +991,17 @@ async def test_get_issue_with_user_specific_fetcher_in_state(
     expected_fields_list = ["summary", "status", "issuetype"]
 
     # Import the real get_jira_fetcher to test its interaction with request.state
-    from src.mcp_atlassian.servers.dependencies import (
+    from mcp_atlassian.servers.dependencies import (
         get_jira_fetcher as get_jira_fetcher_real,
     )
 
     with (
         patch(
-            "src.mcp_atlassian.servers.dependencies.get_http_request",
+            "mcp_atlassian.servers.dependencies.get_http_request",
             return_value=_mock_request_with_fetcher_in_state,
         ) as mock_get_http,
         patch(
-            "src.mcp_atlassian.servers.jira.get_jira_fetcher",
+            "mcp_atlassian.servers.jira.get_jira_fetcher",
             side_effect=AsyncMock(wraps=get_jira_fetcher_real),
         ),
     ):
@@ -713,6 +1023,214 @@ async def test_get_issue_with_user_specific_fetcher_in_state(
     )
     result_data = json.loads(response.content[0].text)
     assert result_data["key"] == "USER-STATE-1"
+
+
+@pytest.mark.anyio
+async def test_update_issue_with_attachments(jira_client, mock_jira_fetcher):
+    """Test jira_update_issue handles attachments and additional fields."""
+    response = await jira_client.call_tool(
+        "jira_update_issue",
+        {
+            "issue_key": "PROJ-1",
+            "fields": {"summary": "Updated summary"},
+            "additional_fields": {"customfield_1": "value"},
+            "attachments": '["/tmp/file.txt"]',
+        },
+    )
+    mock_jira_fetcher.update_issue.assert_called_once_with(
+        issue_key="PROJ-1",
+        summary="Updated summary",
+        customfield_1="value",
+        attachments=["/tmp/file.txt"],
+    )
+    payload = json.loads(response.content[0].text)
+    assert payload["issue"]["attachment_results"][0]["file"] == "doc.txt"
+
+
+@pytest.mark.anyio
+async def test_update_issue_invalid_attachments(jira_client):
+    """Test jira_update_issue validates attachment format."""
+    with pytest.raises(ToolError):
+        await jira_client.call_tool(
+            "jira_update_issue",
+            {
+                "issue_key": "PROJ-1",
+                "fields": {"summary": "Updated"},
+                "attachments": 123,
+            },
+        )
+
+
+@pytest.mark.anyio
+async def test_delete_issue_tool(jira_client, mock_jira_fetcher):
+    """Test jira_delete_issue performs deletion."""
+    response = await jira_client.call_tool("jira_delete_issue", {"issue_key": "PROJ-9"})
+    mock_jira_fetcher.delete_issue.assert_called_once_with("PROJ-9")
+    payload = json.loads(response.content[0].text)
+    assert "deleted" in payload["message"]
+
+
+@pytest.mark.anyio
+async def test_add_comment_tool(jira_client, mock_jira_fetcher):
+    """Test jira_add_comment returns comment payload."""
+    response = await jira_client.call_tool(
+        "jira_add_comment", {"issue_key": "PROJ-1", "comment": "Nice work!"}
+    )
+    mock_jira_fetcher.add_comment.assert_called_once_with("PROJ-1", "Nice work!")
+    payload = json.loads(response.content[0].text)
+    assert payload["body"] == "Added comment"
+
+
+@pytest.mark.anyio
+async def test_add_worklog_tool(jira_client, mock_jira_fetcher):
+    """Test jira_add_worklog returns success message."""
+    response = await jira_client.call_tool(
+        "jira_add_worklog",
+        {
+            "issue_key": "PROJ-1",
+            "time_spent": "1h",
+            "comment": "Worked on task",
+        },
+    )
+    mock_jira_fetcher.add_worklog.assert_called_once()
+    payload = json.loads(response.content[0].text)
+    assert payload["message"].startswith("Worklog")
+
+
+@pytest.mark.anyio
+async def test_link_to_epic_tool(jira_client, mock_jira_fetcher):
+    """Test jira_link_to_epic returns updated issue."""
+    response = await jira_client.call_tool(
+        "jira_link_to_epic", {"issue_key": "PROJ-1", "epic_key": "EPIC-9"}
+    )
+    mock_jira_fetcher.link_issue_to_epic.assert_called_once_with("PROJ-1", "EPIC-9")
+    payload = json.loads(response.content[0].text)
+    assert "linked to epic" in payload["message"]
+
+
+@pytest.mark.anyio
+async def test_create_issue_link_tool(jira_client, mock_jira_fetcher):
+    """Test jira_create_issue_link forwards payload."""
+    response = await jira_client.call_tool(
+        "jira_create_issue_link",
+        {
+            "link_type": "Relates",
+            "inward_issue_key": "PROJ-1",
+            "outward_issue_key": "PROJ-2",
+        },
+    )
+    mock_jira_fetcher.create_issue_link.assert_called_once()
+    link_payload = mock_jira_fetcher.create_issue_link.call_args.args[0]
+    assert link_payload["type"]["name"] == "Relates"
+    assert link_payload["inwardIssue"]["key"] == "PROJ-1"
+    payload = json.loads(response.content[0].text)
+    assert payload["status"] == "LINKED"
+
+
+@pytest.mark.anyio
+async def test_create_remote_issue_link_requires_fields(jira_client):
+    """Missing required fields should raise ToolError."""
+    with pytest.raises(ToolError):
+        await jira_client.call_tool(
+            "jira_create_remote_issue_link",
+            {"issue_key": "PROJ-1", "url": "", "title": ""},
+        )
+
+
+@pytest.mark.anyio
+async def test_create_remote_issue_link_success(jira_client, mock_jira_fetcher):
+    """Test jira_create_remote_issue_link builds link data."""
+    response = await jira_client.call_tool(
+        "jira_create_remote_issue_link",
+        {
+            "issue_key": "PROJ-1",
+            "url": "https://example.com",
+            "title": "Docs",
+            "summary": "See docs",
+            "relationship": "relates to",
+            "icon_url": "https://example.com/icon.png",
+        },
+    )
+    mock_jira_fetcher.create_remote_issue_link.assert_called_once()
+    payload = json.loads(response.content[0].text)
+    assert payload["id"] == "remote-link"
+
+
+@pytest.mark.anyio
+async def test_remove_issue_link_tool(jira_client, mock_jira_fetcher):
+    """Test jira_remove_issue_link returns status."""
+    response = await jira_client.call_tool("jira_remove_issue_link", {"link_id": "55"})
+    mock_jira_fetcher.remove_issue_link.assert_called_once_with("55")
+    payload = json.loads(response.content[0].text)
+    assert payload["removed"] is True
+
+
+@pytest.mark.anyio
+async def test_transition_issue_validation(jira_client):
+    """Missing issue_key/transition_id should raise ToolError."""
+    with pytest.raises(ToolError):
+        await jira_client.call_tool(
+            "jira_transition_issue",
+            {"issue_key": "", "transition_id": "", "fields": {"resolution": "Done"}},
+        )
+
+
+@pytest.mark.anyio
+async def test_transition_issue_success(jira_client, mock_jira_fetcher):
+    """Test jira_transition_issue returns message."""
+    response = await jira_client.call_tool(
+        "jira_transition_issue",
+        {
+            "issue_key": "PROJ-1",
+            "transition_id": "31",
+            "fields": {"resolution": {"name": "Done"}},
+        },
+    )
+    mock_jira_fetcher.transition_issue.assert_called_once()
+    payload = json.loads(response.content[0].text)
+    assert "transitioned successfully" in payload["message"]
+
+
+@pytest.mark.anyio
+async def test_create_sprint_tool(jira_client, mock_jira_fetcher):
+    """Test jira_create_sprint returns sprint info."""
+    response = await jira_client.call_tool(
+        "jira_create_sprint",
+        {
+            "board_id": "1",
+            "sprint_name": "Sprint 1",
+            "start_date": "2024-01-01T00:00:00.000+0000",
+            "end_date": "2024-01-15T00:00:00.000+0000",
+            "goal": "Ship feature",
+        },
+    )
+    mock_jira_fetcher.create_sprint.assert_called_once()
+    payload = json.loads(response.content[0].text)
+    assert payload["name"] == "Created Sprint"
+
+
+@pytest.mark.anyio
+async def test_update_sprint_tool(jira_client, mock_jira_fetcher):
+    """Test jira_update_sprint returns updated sprint."""
+    response = await jira_client.call_tool(
+        "jira_update_sprint",
+        {
+            "sprint_id": "7",
+            "sprint_name": "Renamed",
+            "state": "active",
+            "goal": "Keep delivering",
+        },
+    )
+    mock_jira_fetcher.update_sprint.assert_called_once_with(
+        sprint_id="7",
+        sprint_name="Renamed",
+        state="active",
+        start_date=None,
+        end_date=None,
+        goal="Keep delivering",
+    )
+    payload = json.loads(response.content[0].text)
+    assert payload["name"] == "Updated Sprint"
 
 
 @pytest.mark.anyio
@@ -1089,8 +1607,6 @@ async def test_get_all_projects_tool_authentication_error_handling(
     jira_client, mock_jira_fetcher
 ):
     """Test tool handles authentication errors gracefully."""
-    from mcp_atlassian.exceptions import MCPAtlassianAuthenticationError
-
     mock_jira_fetcher.get_all_projects.side_effect = MCPAtlassianAuthenticationError(
         "Authentication failed"
     )
@@ -1214,3 +1730,21 @@ async def test_batch_create_versions_empty(jira_client, mock_jira_fetcher):
     )
     content = json.loads(response.content[0].text)
     assert content == []
+
+
+@pytest.mark.anyio
+async def test_create_version_error_handling(jira_client, mock_jira_fetcher):
+    """Test jira_create_version returns error payload."""
+    mock_jira_fetcher.create_project_version.side_effect = Exception("boom")
+    response = await jira_client.call_tool(
+        "jira_create_version",
+        {
+            "project_key": "PROJ",
+            "name": "Version X",
+            "start_date": "2024-01-01",
+            "release_date": "2024-02-01",
+        },
+    )
+    data = json.loads(response.content[0].text)
+    assert data["success"] is False
+    mock_jira_fetcher.create_project_version.side_effect = None

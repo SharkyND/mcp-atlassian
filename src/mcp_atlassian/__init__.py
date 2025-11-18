@@ -264,6 +264,9 @@ def main(
         f"Final path for Streamable HTTP: {final_path if final_path else 'FastMCP default'}"
     )
 
+    cli_read_only_value = str(read_only).lower()
+    os.environ["CLI_READ_ONLY_MODE"] = cli_read_only_value
+
     # Set env vars for downstream config
     if click_ctx and was_option_provided(click_ctx, "enabled_tools"):
         os.environ["ENABLED_TOOLS"] = enabled_tools
@@ -296,7 +299,8 @@ def main(
     if click_ctx and was_option_provided(click_ctx, "oauth_access_token"):
         os.environ["ATLASSIAN_OAUTH_ACCESS_TOKEN"] = oauth_access_token
     if click_ctx and was_option_provided(click_ctx, "read_only"):
-        os.environ["READ_ONLY_MODE"] = str(read_only).lower()
+        if os.getenv("READ_ONLY_MODE") is None:
+            os.environ["READ_ONLY_MODE"] = cli_read_only_value
     if click_ctx and was_option_provided(click_ctx, "confluence_ssl_verify"):
         os.environ["CONFLUENCE_SSL_VERIFY"] = str(confluence_ssl_verify).lower()
     if click_ctx and was_option_provided(click_ctx, "confluence_spaces_filter"):

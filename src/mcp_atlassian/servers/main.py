@@ -24,7 +24,11 @@ from mcp_atlassian.confluence.config import ConfluenceConfig
 from mcp_atlassian.jira import JiraFetcher
 from mcp_atlassian.jira.config import JiraConfig
 from mcp_atlassian.utils.environment import get_available_services
-from mcp_atlassian.utils.io import is_read_only_mode
+from mcp_atlassian.utils.io import (
+    get_cli_read_only_flag,
+    get_env_read_only_flag,
+    resolve_read_only_mode,
+)
 from mcp_atlassian.utils.logging import mask_sensitive
 from mcp_atlassian.utils.prometheus_metrics import get_metrics, initialize_metrics
 from mcp_atlassian.utils.tools import get_enabled_tools, should_include_tool
@@ -67,7 +71,9 @@ async def metrics_endpoint(request: Request) -> Response:
 async def main_lifespan(app: FastMCP[MainAppContext]) -> AsyncIterator[dict]:
     logger.info("Main Atlassian MCP server lifespan starting...")
     services = get_available_services()
-    read_only = is_read_only_mode()
+    cli_read_only = get_cli_read_only_flag()
+    env_read_only = get_env_read_only_flag()
+    read_only = resolve_read_only_mode(cli_read_only, env_read_only, None)
     enabled_tools = get_enabled_tools()
 
     loaded_jira_config: JiraConfig | None = None
@@ -121,9 +127,16 @@ async def main_lifespan(app: FastMCP[MainAppContext]) -> AsyncIterator[dict]:
         full_confluence_config=loaded_confluence_config,
         full_bitbucket_config=loaded_bitbucket_config,
         read_only=read_only,
+        cli_read_only=cli_read_only,
+        env_read_only=env_read_only,
         enabled_tools=enabled_tools,
     )
-    logger.info(f"Read-only mode: {'ENABLED' if read_only else 'DISABLED'}")
+    logger.info(
+        "Read-only mode resolved: %s (cli=%s, env=%s)",
+        "ENABLED" if read_only else "DISABLED",
+        cli_read_only,
+        env_read_only,
+    )
     logger.info(f"Enabled tools filter: {enabled_tools or 'All tools enabled'}")
 
     try:
@@ -160,38 +173,69 @@ class AtlassianMCP(FastMCP[MainAppContext]):
             )
             return []
 
-        lifespan_ctx_dict = req_context.lifespan_context
-        app_lifespan_state: MainAppContext | None = (
-            lifespan_ctx_dict.get("app_lifespan_context")
-            if isinstance(lifespan_ctx_dict, dict)
-            else None
-        )
-        read_only = (
-            getattr(app_lifespan_state, "read_only", False)
-            if app_lifespan_state
-            else False
-        )
+        lifespan_ctx = req_context.lifespan_context
+        if isinstance(lifespan_ctx, MainAppContext):
+            app_lifespan_state: MainAppContext | None = lifespan_ctx
+        elif isinstance(lifespan_ctx, dict):
+            app_lifespan_state = lifespan_ctx.get("app_lifespan_context")
+        else:
+            app_lifespan_state = None
         enabled_tools_filter = (
             getattr(app_lifespan_state, "enabled_tools", None)
             if app_lifespan_state
             else None
         )
 
+        base_read_only = (
+            getattr(app_lifespan_state, "read_only", None)
+            if app_lifespan_state
+            else None
+        )
+
+        if app_lifespan_state:
+            cli_read_only = getattr(app_lifespan_state, "cli_read_only", None)
+            env_read_only = getattr(app_lifespan_state, "env_read_only", None)
+        else:
+            cli_read_only = get_cli_read_only_flag()
+            env_read_only = get_env_read_only_flag()
+
+        header_read_only = None
         header_based_services = {"jira": False, "confluence": False, "bitbucket": False}
         if hasattr(req_context, "request") and hasattr(req_context.request, "state"):
-            service_headers = getattr(
-                req_context.request.state, "atlassian_service_headers", {}
-            )
+            request_state = req_context.request.state
+            service_headers = getattr(request_state, "atlassian_service_headers", {})
+            header_read_only = getattr(request_state, "read_only_mode_header", None)
             if service_headers:
                 header_based_services = get_available_services(service_headers)
                 logger.debug(
                     f"Header-based service availability: {header_based_services}"
                 )
 
+        effective_read_only = resolve_read_only_mode(
+            cli_read_only=cli_read_only,
+            env_read_only=env_read_only,
+            header_read_only=header_read_only,
+        )
+
+        if (
+            header_read_only is None
+            and env_read_only is None
+            and cli_read_only is None
+            and base_read_only is not None
+        ):
+            effective_read_only = bool(base_read_only)
+
         logger.debug(
-            f"_main_mcp_list_tools: read_only={read_only}, "
-            f"enabled_tools_filter={enabled_tools_filter}, "
-            f"header_services={header_based_services}"
+            "_main_mcp_list_tools: base_read_only=%s, cli_read_only=%s, "
+            "env_read_only=%s, header_read_only=%s, effective_read_only=%s, "
+            "enabled_tools_filter=%s, header_services=%s",
+            base_read_only,
+            cli_read_only,
+            env_read_only,
+            header_read_only,
+            effective_read_only,
+            enabled_tools_filter,
+            header_based_services,
         )
 
         all_tools: dict[str, FastMCPTool] = await self.get_tools()
@@ -208,7 +252,7 @@ class AtlassianMCP(FastMCP[MainAppContext]):
                 logger.debug(f"Excluding tool '{registered_name}' (not enabled)")
                 continue
 
-            if tool_obj and read_only and "write" in tool_tags:
+            if tool_obj and effective_read_only and "write" in tool_tags:
                 logger.debug(
                     f"Excluding tool '{registered_name}' due to read-only mode "
                     f"and 'write' tag"
@@ -392,6 +436,22 @@ class UserTokenMiddleware:
         if request_path == mcp_path and method == "POST":
             # Parse headers from scope (headers are byte tuples per ASGI spec)
             headers = dict(scope.get("headers", []))
+
+            read_only_header_bytes = headers.get(b"x-atlassian-read-only-mode")
+            read_only_header_value = (
+                read_only_header_bytes.decode("latin-1")
+                if read_only_header_bytes
+                else None
+            )
+            read_only_header_value = (
+                read_only_header_value.strip() if read_only_header_value else None
+            )
+            scope_copy["state"]["read_only_mode_header"] = read_only_header_value
+            if read_only_header_value:
+                logger.debug(
+                    "UserTokenMiddleware: X-Atlassian-Read-Only-Mode header: %s",
+                    read_only_header_value,
+                )
 
             # Extract User-Agent header for tracking and make it lowercase
             user_agent_header = headers.get(b"user-agent")
@@ -788,9 +848,7 @@ class UserTokenMiddleware:
             raise
 
 
-main_mcp = AtlassianMCP(name="Atlassian MCP")
-# Set the lifespan after construction to avoid deprecation warnings
-main_mcp._lifespan = main_lifespan
+main_mcp = AtlassianMCP(name="Atlassian MCP", lifespan=main_lifespan)
 main_mcp.mount(jira_mcp, prefix="jira")
 main_mcp.mount(confluence_mcp, prefix="confluence")
 main_mcp.mount(bitbucket_mcp, prefix="bitbucket")
