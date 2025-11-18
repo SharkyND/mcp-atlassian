@@ -951,6 +951,7 @@ Use the header to temporarily override server defaults for a single client reque
 - `confluence_get_page`: Get content of a specific page
 - `confluence_create_page`: Create a new page
 - `confluence_update_page`: Update an existing page
+- `confluence_get_user_details`: Gets information about a conflunce user
 
 #### Bitbucket Tools
 
@@ -982,7 +983,7 @@ Use the header to temporarily override server defaults for a single client reque
 |           | `jira_get_project_issues`     | `confluence_get_comments`      | `list_branches`                    |
 |           | `jira_get_worklog`            | `confluence_get_labels`        | `get_default_branch`               |
 |           | `jira_get_transitions`        | `confluence_search_user`       | `get_file_content`                 |
-|           | `jira_search_fields`          |                                | `list_directory`                   |
+|           | `jira_search_fields`          | `confluence_get_user_details`  | `list_directory`                   |
 |           | `jira_get_agile_boards`       |                                | `list_pull_requests`               |
 |           | `jira_get_board_issues`       |                                | `pull_request_activities`          |
 |           | `jira_get_sprints_from_board` |                                | `get_pull_request`                 |
