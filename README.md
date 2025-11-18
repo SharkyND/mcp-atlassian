@@ -898,6 +898,40 @@ Returns 400 error if missing when enabled.
 - Grafana dashboard provisioning via ConfigMaps
 - ServiceMonitor for Prometheus Operator
 
+## Read-Only Mode
+
+Read-only mode removes all tools tagged with `write` from tool discovery and blocks direct calls to write handlers. Unless configured, the server runs in read/write mode. The effective state is recalculated on every request using this priority:
+
+1. **HTTP header** `X-Atlassian-Read-Only-Mode` &mdash; highest precedence per request. Truthy strings (`true`, `1`, `yes`, `on`) enable read-only; falsy strings (`false`, `0`, `no`, `off`) force read/write even if other controls enabled.
+2. **Environment variable** `READ_ONLY_MODE` &mdash; process-wide default when the header is absent.
+3. **CLI flag** `--read-only` &mdash; fallback applied only when header and env variable are not provided.
+
+When enabled, write operations are hidden in `tools/list`, and the `@check_write_access` decorator raises `ValueError` if a client tries to invoke one directly.
+
+### Enabling examples
+
+```bash
+# CLI flag
+uv run mcp-atlassian --transport streamable-http --port 8889 --read-only
+```
+
+```bash
+# Environment variable
+set READ_ONLY_MODE=true            # Windows CMD
+$Env:READ_ONLY_MODE = "true"       # PowerShell
+export READ_ONLY_MODE=true         # macOS/Linux
+```
+
+```json
+{
+  "headers": {
+    "X-Atlassian-Read-Only-Mode": "false"
+  }
+}
+```
+
+Use the header to temporarily override server defaults for a single client request without restarting.
+
 ## Tools
 
 ### Key Tools
@@ -917,6 +951,7 @@ Returns 400 error if missing when enabled.
 - `confluence_get_page`: Get content of a specific page
 - `confluence_create_page`: Create a new page
 - `confluence_update_page`: Update an existing page
+- `confluence_get_user_details`: Gets information about a conflunce user
 
 #### Bitbucket Tools
 
@@ -948,7 +983,7 @@ Returns 400 error if missing when enabled.
 |           | `jira_get_project_issues`     | `confluence_get_comments`      | `list_branches`                    |
 |           | `jira_get_worklog`            | `confluence_get_labels`        | `get_default_branch`               |
 |           | `jira_get_transitions`        | `confluence_search_user`       | `get_file_content`                 |
-|           | `jira_search_fields`          |                                | `list_directory`                   |
+|           | `jira_search_fields`          | `confluence_get_user_details`  | `list_directory`                   |
 |           | `jira_get_agile_boards`       |                                | `list_pull_requests`               |
 |           | `jira_get_board_issues`       |                                | `pull_request_activities`          |
 |           | `jira_get_sprints_from_board` |                                | `get_pull_request`                 |
