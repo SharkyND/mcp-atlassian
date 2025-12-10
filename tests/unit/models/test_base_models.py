@@ -6,8 +6,8 @@ from typing import Any
 
 import pytest
 
-from src.mcp_atlassian.models.base import ApiModel, TimestampMixin
-from src.mcp_atlassian.models.constants import EMPTY_STRING
+from mcp_atlassian.models.base import ApiModel, TimestampMixin
+from mcp_atlassian.models.constants import EMPTY_STRING
 
 
 class TestApiModel:
@@ -80,6 +80,23 @@ class TestTimestampMixin:
 
         assert result == invalid_timestamp  # Should return the original string
 
+    def test_format_timestamp_plus_without_colon(self):
+        """Handle timezone offsets without colon (positive)."""
+        formatter = TimestampMixin()
+        result = formatter.format_timestamp("2024-01-01T12:34:56.000+0530")
+        assert result == "2024-01-01 12:34:56"
+
+    def test_format_timestamp_minus_without_colon(self):
+        """Handle timezone offsets without colon (negative)."""
+        formatter = TimestampMixin()
+        result = formatter.format_timestamp("2024-01-01T12:34:56.000-0400")
+        assert result == "2024-01-01 12:34:56"
+
+    def test_format_timestamp_empty_string(self):
+        """Empty strings should return EMPTY_STRING."""
+        formatter = TimestampMixin()
+        assert formatter.format_timestamp("") == EMPTY_STRING
+
     def test_is_valid_timestamp_valid(self):
         """Test validating a valid ISO 8601 timestamp."""
         timestamp = "2024-01-01T12:34:56.789+0000"
@@ -106,3 +123,13 @@ class TestTimestampMixin:
         formatter = TimestampMixin()
 
         assert formatter.is_valid_timestamp(invalid_timestamp) is False
+
+    def test_is_valid_timestamp_minus_offset(self):
+        """Ensure timestamps with negative offsets are supported."""
+        formatter = TimestampMixin()
+        assert formatter.is_valid_timestamp("2024-01-01T12:34:56.000-0500") is True
+
+    def test_is_valid_timestamp_empty_string(self):
+        """Empty strings should be invalid."""
+        formatter = TimestampMixin()
+        assert formatter.is_valid_timestamp("") is False

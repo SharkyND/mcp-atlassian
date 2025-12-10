@@ -17,6 +17,8 @@ class TestMainAppContext:
         assert context.full_jira_config is None
         assert context.full_confluence_config is None
         assert context.read_only is False
+        assert context.cli_read_only is None
+        assert context.env_read_only is None
         assert context.enabled_tools is None
 
     def test_initialization_with_all_parameters(self):
@@ -41,6 +43,8 @@ class TestMainAppContext:
             full_jira_config=jira_config,
             full_confluence_config=confluence_config,
             read_only=True,
+            cli_read_only=True,
+            env_read_only=False,
             enabled_tools=enabled_tools,
         )
 
@@ -48,6 +52,8 @@ class TestMainAppContext:
         assert context.full_jira_config is jira_config
         assert context.full_confluence_config is confluence_config
         assert context.read_only is True
+        assert context.cli_read_only is True
+        assert context.env_read_only is False
         assert context.enabled_tools == enabled_tools
 
     def test_initialization_with_partial_parameters(self):
@@ -60,12 +66,15 @@ class TestMainAppContext:
         )
 
         # Act
-        context = MainAppContext(full_jira_config=jira_config, read_only=True)
+        context = MainAppContext(
+            full_jira_config=jira_config, read_only=True, cli_read_only=True
+        )
 
         # Assert
         assert context.full_jira_config is jira_config
         assert context.full_confluence_config is None
         assert context.read_only is True
+        assert context.cli_read_only is True
         assert context.enabled_tools is None
 
     def test_frozen_dataclass_behavior(self):

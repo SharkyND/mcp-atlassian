@@ -1,137 +1,268 @@
-"""Unit tests for ConfluenceV2Adapter class."""
+"""Tests for the Confluence v2 adapter."""
 
-from unittest.mock import MagicMock, Mock
+from __future__ import annotations
+
+from unittest.mock import MagicMock, patch
 
 import pytest
-import requests
+from requests import Session
 from requests.exceptions import HTTPError
 
 from mcp_atlassian.confluence.v2_adapter import ConfluenceV2Adapter
 
 
-class TestConfluenceV2Adapter:
-    """Test cases for ConfluenceV2Adapter."""
+def make_response(json_data: dict | None = None, status_code: int = 200) -> MagicMock:
+    """Helper to build a mock response."""
+    response = MagicMock()
+    response.json.return_value = json_data or {}
+    response.status_code = status_code
+    response.text = "response-body"
+    response.raise_for_status.return_value = None
+    return response
 
-    @pytest.fixture
-    def mock_session(self):
-        """Create a mock session."""
-        return MagicMock(spec=requests.Session)
 
-    @pytest.fixture
-    def v2_adapter(self, mock_session):
-        """Create a ConfluenceV2Adapter instance."""
-        return ConfluenceV2Adapter(
-            session=mock_session, base_url="https://example.atlassian.net/wiki"
+def make_http_error(response: MagicMock | None = None) -> HTTPError:
+    """Helper to build an HTTPError with optional response."""
+    error = HTTPError("boom")
+    error.response = response
+    return error
+
+
+def build_adapter(session: Session | None = None) -> ConfluenceV2Adapter:
+    """Convenience factory for the adapter."""
+    return ConfluenceV2Adapter(
+        session or MagicMock(spec=Session), "https://example.atlassian.net/wiki"
+    )
+
+
+class TestGetSpaceId:
+    def test_get_space_id_success(self):
+        session = MagicMock(spec=Session)
+        session.get.return_value = make_response({"results": [{"id": "42"}]})
+        adapter = build_adapter(session)
+
+        result = adapter._get_space_id("SPACE")
+
+        assert result == "42"
+        session.get.assert_called_once_with(
+            "https://example.atlassian.net/wiki/api/v2/spaces",
+            params={"keys": "SPACE"},
         )
 
-    def test_get_page_success(self, v2_adapter, mock_session):
-        """Test successful page retrieval."""
-        # Mock the v2 API response
-        mock_response = Mock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "id": "123456",
+    def test_get_space_id_missing_space_raises(self):
+        session = MagicMock(spec=Session)
+        session.get.return_value = make_response({"results": []})
+        adapter = build_adapter(session)
+
+        with pytest.raises(ValueError) as exc:
+            adapter._get_space_id("MISSING")
+
+        assert "not found" in str(exc.value)
+
+    def test_get_space_id_http_error(self):
+        session = MagicMock(spec=Session)
+        response = make_response()
+        http_error = make_http_error(response)
+        response.raise_for_status.side_effect = http_error
+        session.get.return_value = response
+        adapter = build_adapter(session)
+
+        with pytest.raises(ValueError) as exc:
+            adapter._get_space_id("SPACE")
+
+        assert "Failed to get space ID" in str(exc.value)
+
+
+class TestCreatePage:
+    def test_create_page_success(self):
+        session = MagicMock(spec=Session)
+        response = make_response(
+            {
+                "id": "123",
+                "title": "Example",
+                "spaceId": "1",
+                "status": "current",
+                "version": {"number": 1},
+                "_links": {},
+            }
+        )
+        session.post.return_value = response
+        adapter = build_adapter(session)
+
+        with (
+            patch.object(adapter, "_get_space_id", return_value="1") as mock_space,
+            patch.object(
+                adapter, "_convert_v2_to_v1_format", return_value={"id": "123"}
+            ) as mock_convert,
+        ):
+            result = adapter.create_page("SPACE", "Example", "<p>Hello</p>")
+
+        assert result == {"id": "123"}
+        mock_space.assert_called_once_with("SPACE")
+        session.post.assert_called_once()
+        mock_convert.assert_called_once()
+
+    def test_create_page_http_error(self):
+        session = MagicMock(spec=Session)
+        http_error = make_http_error(make_response())
+        session.post.return_value = make_response()
+        session.post.return_value.raise_for_status.side_effect = http_error
+        adapter = build_adapter(session)
+
+        with patch.object(adapter, "_get_space_id", return_value="1"):
+            with pytest.raises(ValueError):
+                adapter.create_page("SPACE", "Title", "Body")
+
+
+class TestGetPageVersion:
+    def test_get_page_version_success(self):
+        session = MagicMock(spec=Session)
+        session.get.return_value = make_response({"version": {"number": 5}})
+        adapter = build_adapter(session)
+
+        assert adapter._get_page_version("123") == 5
+
+    def test_get_page_version_missing_version(self):
+        session = MagicMock(spec=Session)
+        session.get.return_value = make_response({})
+        adapter = build_adapter(session)
+
+        with pytest.raises(ValueError):
+            adapter._get_page_version("123")
+
+
+class TestUpdatePage:
+    def test_update_page_success(self):
+        session = MagicMock(spec=Session)
+        update_response = make_response(
+            {
+                "id": "123",
+                "spaceId": "space-id",
+                "title": "Updated",
+                "status": "current",
+                "version": {"number": 2},
+            }
+        )
+        session.put.return_value = update_response
+        adapter = build_adapter(session)
+
+        with (
+            patch.object(adapter, "_get_page_version", return_value=1),
+            patch.object(adapter, "_get_space_key_from_id", return_value="SPACE"),
+            patch.object(
+                adapter, "_convert_v2_to_v1_format", return_value={"converted": True}
+            ) as mock_convert,
+        ):
+            result = adapter.update_page("123", "Updated", "<p>Body</p>")
+
+        assert result == {"converted": True}
+        mock_convert.assert_called_once_with(update_response.json.return_value, "SPACE")
+
+    def test_update_page_http_error(self):
+        session = MagicMock(spec=Session)
+        response = make_response()
+        response.raise_for_status.side_effect = make_http_error(response)
+        session.put.return_value = response
+        adapter = build_adapter(session)
+
+        with patch.object(adapter, "_get_page_version", return_value=1):
+            with pytest.raises(ValueError):
+                adapter.update_page("123", "Title", "Body")
+
+
+class TestSpaceKeyLookup:
+    def test_get_space_key_from_id_success(self):
+        session = MagicMock(spec=Session)
+        session.get.return_value = make_response({"key": "DOC"})
+        adapter = build_adapter(session)
+
+        assert adapter._get_space_key_from_id("999") == "DOC"
+
+    def test_get_space_key_from_id_http_error_returns_id(self):
+        session = MagicMock(spec=Session)
+        response = make_response()
+        response.raise_for_status.side_effect = make_http_error(response)
+        session.get.return_value = response
+        adapter = build_adapter(session)
+
+        assert adapter._get_space_key_from_id("999") == "999"
+
+    def test_get_space_key_from_id_general_exception(self):
+        session = MagicMock(spec=Session)
+        session.get.side_effect = RuntimeError("oops")
+        adapter = build_adapter(session)
+        assert adapter._get_space_key_from_id("999") == "999"
+
+
+class TestGetPage:
+    def test_get_page_success(self):
+        session = MagicMock(spec=Session)
+        page_data = {
+            "id": "123",
             "status": "current",
-            "title": "Test Page",
-            "spaceId": "789",
-            "version": {"number": 5},
-            "body": {
-                "storage": {"value": "<p>Test content</p>", "representation": "storage"}
-            },
-            "_links": {"webui": "/pages/viewpage.action?pageId=123456"},
+            "title": "Example",
+            "spaceId": "space-id",
+            "body": {"storage": {"value": "<p>Hi</p>"}},
+            "version": {"number": 3},
+            "_links": {"self": "url"},
         }
-        mock_session.get.return_value = mock_response
+        session.get.return_value = make_response(page_data)
+        adapter = build_adapter(session)
 
-        # Mock space key lookup
-        space_response = Mock()
-        space_response.status_code = 200
-        space_response.json.return_value = {"key": "TEST"}
-        mock_session.get.side_effect = [mock_response, space_response]
+        with patch.object(adapter, "_get_space_key_from_id", return_value="SPACE"):
+            result = adapter.get_page("123")
 
-        # Call the method
-        result = v2_adapter.get_page("123456")
+        assert result["space"]["key"] == "SPACE"
+        assert result["body"]["storage"]["value"] == "<p>Hi</p>"
+        assert result["version"]["number"] == 3
 
-        # Verify the API call
-        assert mock_session.get.call_count == 2
-        mock_session.get.assert_any_call(
-            "https://example.atlassian.net/wiki/api/v2/pages/123456",
-            params={"body-format": "storage"},
+    def test_get_page_http_error(self):
+        session = MagicMock(spec=Session)
+        response = make_response()
+        response.raise_for_status.side_effect = make_http_error(response)
+        session.get.return_value = response
+        adapter = build_adapter(session)
+
+        with pytest.raises(ValueError):
+            adapter.get_page("123")
+
+
+class TestDeletePage:
+    def test_delete_page_success(self):
+        session = MagicMock(spec=Session)
+        session.delete.return_value = make_response(status_code=204)
+        adapter = build_adapter(session)
+
+        assert adapter.delete_page("123") is True
+        session.delete.assert_called_once_with(
+            "https://example.atlassian.net/wiki/api/v2/pages/123"
         )
 
-        # Verify the response format
-        assert result["id"] == "123456"
-        assert result["type"] == "page"
-        assert result["title"] == "Test Page"
-        assert result["space"]["key"] == "TEST"
-        assert result["space"]["id"] == "789"
-        assert result["version"]["number"] == 5
-        assert result["body"]["storage"]["value"] == "<p>Test content</p>"
-        assert result["body"]["storage"]["representation"] == "storage"
+    def test_delete_page_http_error(self):
+        session = MagicMock(spec=Session)
+        response = make_response()
+        response.raise_for_status.side_effect = make_http_error(response)
+        session.delete.return_value = response
+        adapter = build_adapter(session)
 
-    def test_get_page_not_found(self, v2_adapter, mock_session):
-        """Test page retrieval when page doesn't exist."""
-        # Mock a 404 response
-        mock_response = Mock()
-        mock_response.status_code = 404
-        mock_response.text = "Page not found"
-        mock_response.raise_for_status.side_effect = HTTPError(response=mock_response)
-        mock_session.get.return_value = mock_response
+        with pytest.raises(ValueError):
+            adapter.delete_page("123")
 
-        # Call the method and expect an exception
-        with pytest.raises(ValueError, match="Failed to get page '999999'"):
-            v2_adapter.get_page("999999")
 
-    def test_get_page_with_minimal_response(self, v2_adapter, mock_session):
-        """Test page retrieval with minimal v2 response."""
-        # Mock the v2 API response without optional fields
-        mock_response = Mock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "id": "123456",
-            "status": "current",
-            "title": "Minimal Page",
-        }
-        mock_session.get.return_value = mock_response
+def test_convert_v2_to_v1_format():
+    adapter = build_adapter()
+    v2_data = {
+        "id": "1",
+        "status": "current",
+        "title": "Title",
+        "spaceId": "space-id",
+        "version": {"number": 4},
+        "_links": {},
+        "body": {"storage": {"value": "<p>Body</p>"}},
+    }
 
-        # Call the method
-        result = v2_adapter.get_page("123456")
+    converted = adapter._convert_v2_to_v1_format(v2_data, "SPACE")
 
-        # Verify the response handles missing fields gracefully
-        assert result["id"] == "123456"
-        assert result["type"] == "page"
-        assert result["title"] == "Minimal Page"
-        assert result["space"]["key"] == "unknown"  # Fallback when no spaceId
-        assert result["version"]["number"] == 1  # Default version
-
-    def test_get_page_network_error(self, v2_adapter, mock_session):
-        """Test page retrieval with network error."""
-        # Mock a network error
-        mock_session.get.side_effect = requests.RequestException("Network error")
-
-        # Call the method and expect an exception
-        with pytest.raises(ValueError, match="Failed to get page '123456'"):
-            v2_adapter.get_page("123456")
-
-    def test_get_page_with_expand_parameter(self, v2_adapter, mock_session):
-        """Test that expand parameter is accepted but not used."""
-        # Mock the v2 API response
-        mock_response = Mock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "id": "123456",
-            "status": "current",
-            "title": "Test Page",
-        }
-        mock_session.get.return_value = mock_response
-
-        # Call with expand parameter
-        result = v2_adapter.get_page("123456", expand="body.storage,version")
-
-        # Verify the API call doesn't include expand in params
-        mock_session.get.assert_called_once_with(
-            "https://example.atlassian.net/wiki/api/v2/pages/123456",
-            params={"body-format": "storage"},
-        )
-
-        # Verify we still get a result
-        assert result["id"] == "123456"
+    assert converted["space"]["key"] == "SPACE"
+    assert converted["version"]["number"] == 4
+    assert converted["body"]["storage"]["value"] == "<p>Body</p>"
