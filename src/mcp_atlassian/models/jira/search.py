@@ -24,6 +24,8 @@ class JiraSearchResult(ApiModel):
     start_at: int = 0
     max_results: int = 0
     issues: list[JiraIssue] = Field(default_factory=list)
+    next_page_token: str | None = None
+    is_last: bool | None = None
 
     @classmethod
     def from_api_response(
@@ -61,6 +63,8 @@ class JiraSearchResult(ApiModel):
         raw_total = data.get("total")
         raw_start_at = data.get("startAt")
         raw_max_results = data.get("maxResults")
+        raw_next_page_token = data.get("nextPageToken")
+        raw_is_last = data.get("isLast")
 
         try:
             total = int(raw_total) if raw_total is not None else -1
@@ -77,11 +81,24 @@ class JiraSearchResult(ApiModel):
         except (ValueError, TypeError):
             max_results = -1
 
+        if raw_total is None:
+            if raw_next_page_token in (None, "") and (
+                raw_is_last is True or raw_is_last is None
+            ):
+                total = len(issues)
+            else:
+                total = -1
+
+        if raw_start_at is None:
+            start_at = 0
+
         return cls(
             total=total,
             start_at=start_at,
             max_results=max_results,
             issues=issues,
+            next_page_token=raw_next_page_token,
+            is_last=raw_is_last,
         )
 
     @model_validator(mode="after")
@@ -104,4 +121,6 @@ class JiraSearchResult(ApiModel):
             "start_at": self.start_at,
             "max_results": self.max_results,
             "issues": [issue.to_simplified_dict() for issue in self.issues],
+            "next_page_token": self.next_page_token,
+            "is_last": self.is_last,
         }

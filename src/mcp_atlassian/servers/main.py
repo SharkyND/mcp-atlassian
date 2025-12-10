@@ -849,9 +849,9 @@ class UserTokenMiddleware:
 
 
 main_mcp = AtlassianMCP(name="Atlassian MCP", lifespan=main_lifespan)
-main_mcp.mount(jira_mcp, prefix="jira")
-main_mcp.mount(confluence_mcp, prefix="confluence")
-main_mcp.mount(bitbucket_mcp, prefix="bitbucket")
+main_mcp.mount(server=jira_mcp, prefix="jira")
+main_mcp.mount(server=confluence_mcp, prefix="confluence")
+main_mcp.mount(server=bitbucket_mcp, prefix="bitbucket")
 
 
 @main_mcp.custom_route("/healthz", methods=["GET"], include_in_schema=False)
