@@ -857,6 +857,116 @@ class TestMCPProtocolIntegration:
             tool_names = [tool.name for tool in tools]
             assert tool_names == ["jira_get_issue"]
 
+    async def test_xray_tools_require_enable_header(
+        self, atlassian_mcp_server, mock_jira_config
+    ):
+        """Verify Xray tools are hidden unless the enable header is set to true."""
+        with MockEnvironment.basic_auth_env():
+            xray_config = MagicMock()
+            app_context = MainAppContext(
+                full_jira_config=mock_jira_config,
+                full_confluence_config=None,
+                full_bitbucket_config=None,
+                full_xray_config=xray_config,
+                read_only=False,
+                enabled_tools=None,
+            )
+
+            request_state = MagicMock()
+            request_state.atlassian_service_headers = {}
+            request_state.read_only_mode_header = None
+            request_state.enable_xray_header = None
+
+            request = MagicMock()
+            request.state = request_state
+
+            request_context = MagicMock()
+            request_context.lifespan_context = {"app_lifespan_context": app_context}
+            request_context.request = request
+
+            atlassian_mcp_server._mcp_server = MagicMock()
+            atlassian_mcp_server._mcp_server.request_context = request_context
+
+            async def mock_get_tools():
+                tools = {}
+                for tool_name, tags in [
+                    ("jira_get_issue", {"jira", "read"}),
+                    ("xray_get_tests", {"xray", "read"}),
+                ]:
+                    tool = MagicMock(spec=FastMCPTool)
+                    tool.tags = tags
+                    tool.to_mcp_tool.return_value = MCPTool(
+                        name=tool_name,
+                        description=f"Tool {tool_name}",
+                        inputSchema={"type": "object", "properties": {}},
+                    )
+                    tools[tool_name] = tool
+                return tools
+
+            atlassian_mcp_server.get_tools = mock_get_tools
+
+            tools = await atlassian_mcp_server._mcp_list_tools()
+
+            tool_names = [tool.name for tool in tools]
+            assert "jira_get_issue" in tool_names
+            assert "xray_get_tests" not in tool_names
+
+    async def test_xray_tools_enabled_with_header(
+        self, atlassian_mcp_server, mock_jira_config
+    ):
+        """Verify Xray tools are available when the enable header is true."""
+        with MockEnvironment.basic_auth_env():
+            xray_config = MagicMock()
+            app_context = MainAppContext(
+                full_jira_config=mock_jira_config,
+                full_confluence_config=None,
+                full_bitbucket_config=None,
+                full_xray_config=xray_config,
+                read_only=False,
+                enabled_tools=None,
+            )
+
+            request_state = MagicMock()
+            request_state.atlassian_service_headers = {
+                "X-Atlassian-Enable-Xray": "true"
+            }
+            request_state.read_only_mode_header = None
+            request_state.enable_xray_header = "true"
+
+            request = MagicMock()
+            request.state = request_state
+
+            request_context = MagicMock()
+            request_context.lifespan_context = {"app_lifespan_context": app_context}
+            request_context.request = request
+
+            atlassian_mcp_server._mcp_server = MagicMock()
+            atlassian_mcp_server._mcp_server.request_context = request_context
+
+            async def mock_get_tools():
+                tools = {}
+                for tool_name, tags in [
+                    ("jira_get_issue", {"jira", "read"}),
+                    ("xray_get_tests", {"xray", "read"}),
+                ]:
+                    tool = MagicMock(spec=FastMCPTool)
+                    tool.tags = tags
+                    tool.to_mcp_tool.return_value = MCPTool(
+                        name=tool_name,
+                        description=f"Tool {tool_name}",
+                        inputSchema={"type": "object", "properties": {}},
+                    )
+                    tools[tool_name] = tool
+                return tools
+
+            atlassian_mcp_server.get_tools = mock_get_tools
+
+            tools = await atlassian_mcp_server._mcp_list_tools()
+
+            tool_names = [tool.name for tool in tools]
+            assert "jira_get_issue" in tool_names
+            assert "xray_get_tests" in tool_names
+
     async def test_request_context_missing(self, atlassian_mcp_server):
         """Test handling when request context is missing."""
         # Set up server without request context
