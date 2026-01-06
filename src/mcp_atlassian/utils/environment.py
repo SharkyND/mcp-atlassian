@@ -200,6 +200,51 @@ def get_available_services(
             bitbucket_is_setup = True
             logger.info("Using Bitbucket authentication from header personal token")
 
+    # Xray for Jira reuses Jira URL and credentials (Server/Data Center only)
+    xray_is_setup = False
+    xray_url = jira_url or headers.get("X-Atlassian-Jira-Url")
+    jira_pat_header = headers.get("X-Atlassian-Jira-Personal-Token")
+    jira_headers_present = jira_pat_header and xray_url
+
+    # Check X-Atlassian-Enable-Xray header
+    enable_xray_header_raw = headers.get("X-Atlassian-Enable-Xray")
+    enable_xray_header = (
+        enable_xray_header_raw.strip().lower() if enable_xray_header_raw else None
+    )
+    headers_provided = bool(headers)
+    xray_explicitly_disabled = enable_xray_header == "false"
+    xray_header_enabled = enable_xray_header == "true"
+
+    if xray_explicitly_disabled:
+        logger.info(
+            "Xray for Jira is explicitly disabled via X-Atlassian-Enable-Xray header."
+        )
+    elif headers_provided and not xray_header_enabled:
+        logger.info(
+            "Xray for Jira is disabled because X-Atlassian-Enable-Xray header is "
+            "missing or not 'true'."
+        )
+    elif jira_is_setup and jira_url:
+        if is_atlassian_cloud_url(jira_url):
+            logger.info(
+                "Jira is configured for Cloud; Xray for Jira is disabled because it "
+                "is only supported on Server/Data Center."
+            )
+        else:
+            xray_is_setup = True
+            logger.info("Xray for Jira is enabled using Jira credentials.")
+    elif jira_headers_present:
+        if is_atlassian_cloud_url(str(xray_url)):
+            logger.warning(
+                f"Xray for Jira is not supported for Atlassian Cloud URLs. "
+                f"Ignoring header authentication for cloud URL: {xray_url}"
+            )
+        else:
+            xray_is_setup = True
+            logger.info(
+                "Using Jira personal token and URL from headers for Xray for Jira."
+            )
+
     # Log setup status
     if not confluence_is_setup:
         logger.info(
@@ -213,9 +258,14 @@ def get_available_services(
         logger.info(
             "Bitbucket is not configured or required environment variables are missing."
         )
+    if not xray_is_setup:
+        logger.info(
+            "Xray is not configured or required environment variables are missing."
+        )
 
     return {
         "confluence": confluence_is_setup,
         "jira": jira_is_setup,
         "bitbucket": bitbucket_is_setup,
+        "xray": xray_is_setup,
     }

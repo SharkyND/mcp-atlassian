@@ -32,11 +32,14 @@ from mcp_atlassian.utils.io import (
 from mcp_atlassian.utils.logging import mask_sensitive
 from mcp_atlassian.utils.prometheus_metrics import get_metrics, initialize_metrics
 from mcp_atlassian.utils.tools import get_enabled_tools, should_include_tool
+from mcp_atlassian.xray import XrayFetcher
+from mcp_atlassian.xray.config import XrayConfig
 
 from .bitbucket import bitbucket_mcp
 from .confluence import confluence_mcp
 from .context import MainAppContext
 from .jira import jira_mcp
+from .xray import xray_mcp
 
 logger = logging.getLogger("mcp-atlassian.server.main")
 
@@ -79,6 +82,7 @@ async def main_lifespan(app: FastMCP[MainAppContext]) -> AsyncIterator[dict]:
     loaded_jira_config: JiraConfig | None = None
     loaded_confluence_config: ConfluenceConfig | None = None
     loaded_bitbucket_config: BitbucketConfig | None = None
+    loaded_xray_config: XrayConfig | None = None
 
     if services.get("jira"):
         try:
@@ -121,11 +125,35 @@ async def main_lifespan(app: FastMCP[MainAppContext]) -> AsyncIterator[dict]:
             )
         except Exception as e:
             logger.error(f"Failed to load Bitbucket configuration: {e}", exc_info=True)
+    if services.get("xray"):
+        if not loaded_jira_config:
+            logger.warning(
+                "Xray for Jira is enabled but Jira configuration is unavailable. "
+                "Xray tools will be disabled."
+            )
+        else:
+            try:
+                xray_config = XrayConfig.from_jira_config(loaded_jira_config)
+                if xray_config.is_auth_configured():
+                    loaded_xray_config = xray_config
+                    logger.info(
+                        "Xray for Jira configuration loaded using Jira credentials."
+                    )
+                else:
+                    logger.warning(
+                        "Jira configuration loaded but authentication is not fully "
+                        "configured for Xray for Jira. Xray tools will be unavailable."
+                    )
+            except Exception as e:
+                logger.error(
+                    f"Failed to load Xray for Jira configuration: {e}", exc_info=True
+                )
 
     app_context = MainAppContext(
         full_jira_config=loaded_jira_config,
         full_confluence_config=loaded_confluence_config,
         full_bitbucket_config=loaded_bitbucket_config,
+        full_xray_config=loaded_xray_config,
         read_only=read_only,
         cli_read_only=cli_read_only,
         env_read_only=env_read_only,
@@ -155,6 +183,8 @@ async def main_lifespan(app: FastMCP[MainAppContext]) -> AsyncIterator[dict]:
                 logger.debug("Cleaning up Confluence resources...")
             if loaded_bitbucket_config:
                 logger.debug("Cleaning up Bitbucket resources...")
+            if loaded_xray_config:
+                logger.debug("Cleaning up Xray resources...")
         except Exception as e:
             logger.error(f"Error during cleanup: {e}", exc_info=True)
         logger.info("Main Atlassian MCP server lifespan shutdown complete.")
@@ -200,11 +230,19 @@ class AtlassianMCP(FastMCP[MainAppContext]):
             env_read_only = get_env_read_only_flag()
 
         header_read_only = None
-        header_based_services = {"jira": False, "confluence": False, "bitbucket": False}
+        enable_xray_header = None
+        header_based_services = {
+            "jira": False,
+            "confluence": False,
+            "bitbucket": False,
+            "xray": False,
+        }
         if hasattr(req_context, "request") and hasattr(req_context.request, "state"):
             request_state = req_context.request.state
             service_headers = getattr(request_state, "atlassian_service_headers", {})
             header_read_only = getattr(request_state, "read_only_mode_header", None)
+            enable_xray_header = getattr(request_state, "enable_xray_header", None)
+
             if service_headers:
                 header_based_services = get_available_services(service_headers)
                 logger.debug(
@@ -238,6 +276,9 @@ class AtlassianMCP(FastMCP[MainAppContext]):
             header_based_services,
         )
 
+        xray_header_enabled = enable_xray_header == "true"
+        xray_header_log_value = enable_xray_header or "missing"
+
         all_tools: dict[str, FastMCPTool] = await self.get_tools()
         logger.debug(
             f"Aggregated {len(all_tools)} tools before filtering: "
@@ -263,6 +304,7 @@ class AtlassianMCP(FastMCP[MainAppContext]):
             is_jira_tool = "jira" in tool_tags
             is_confluence_tool = "confluence" in tool_tags
             is_bitbucket_tool = "bitbucket" in tool_tags
+            is_xray_tool = "xray" in tool_tags
             service_configured_and_available = True
             if app_lifespan_state:
                 jira_available = (
@@ -274,6 +316,9 @@ class AtlassianMCP(FastMCP[MainAppContext]):
                 bitbucket_available = (
                     app_lifespan_state.full_bitbucket_config is not None
                 ) or header_based_services.get("bitbucket", False)
+                xray_available = (
+                    app_lifespan_state.full_xray_config is not None
+                ) or header_based_services.get("xray", False)
 
                 if is_jira_tool and not jira_available:
                     logger.debug(
@@ -297,10 +342,28 @@ class AtlassianMCP(FastMCP[MainAppContext]):
                     )
                     service_configured_and_available = False
 
-            elif is_jira_tool or is_confluence_tool or is_bitbucket_tool:
+                if is_xray_tool and not xray_available:
+                    logger.debug(
+                        f"Excluding Xray tool '{registered_name}' as Xray configuration/authentication is incomplete and no header-based auth available."
+                    )
+                    service_configured_and_available = False
+
+                if is_xray_tool and service_configured_and_available:
+                    if not xray_header_enabled:
+                        logger.debug(
+                            f"Excluding Xray tool '{registered_name}' because "
+                            f"X-Atlassian-Enable-Xray header is missing or not 'true' "
+                            f"(value: {xray_header_log_value})"
+                        )
+                        service_configured_and_available = False
+
+            elif (
+                is_jira_tool or is_confluence_tool or is_bitbucket_tool or is_xray_tool
+            ):
                 jira_available = header_based_services.get("jira", False)
                 confluence_available = header_based_services.get("confluence", False)
                 bitbucket_available = header_based_services.get("bitbucket", False)
+                xray_available = header_based_services.get("xray", False)
 
                 if is_jira_tool and not jira_available:
                     logger.debug(
@@ -319,6 +382,20 @@ class AtlassianMCP(FastMCP[MainAppContext]):
                         f"Excluding Bitbucket tool '{registered_name}' as no Bitbucket authentication available."
                     )
                     service_configured_and_available = False
+                if is_xray_tool and not xray_available:
+                    logger.debug(
+                        f"Excluding Xray tool '{registered_name}' as no Xray authentication available."
+                    )
+                    service_configured_and_available = False
+
+                if is_xray_tool and service_configured_and_available:
+                    if not xray_header_enabled:
+                        logger.debug(
+                            f"Excluding Xray tool '{registered_name}' because "
+                            f"X-Atlassian-Enable-Xray header is missing or not 'true' "
+                            f"(value: {xray_header_log_value})"
+                        )
+                        service_configured_and_available = False
 
             if not service_configured_and_available:
                 continue
@@ -364,6 +441,7 @@ token_validation_cache: TTLCache[
         JiraFetcher | None,
         ConfluenceFetcher | None,
         BitbucketFetcher | None,
+        XrayFetcher | None,
     ],
 ] = TTLCache(maxsize=100, ttl=300)
 
@@ -453,6 +531,25 @@ class UserTokenMiddleware:
                     read_only_header_value,
                 )
 
+            # Extract X-Atlassian-Enable-Xray header
+            enable_xray_header_bytes = headers.get(b"x-atlassian-enable-xray")
+            enable_xray_header_value = (
+                enable_xray_header_bytes.decode("latin-1")
+                if enable_xray_header_bytes
+                else None
+            )
+            enable_xray_header_value = (
+                enable_xray_header_value.strip().lower()
+                if enable_xray_header_value
+                else None
+            )
+            scope_copy["state"]["enable_xray_header"] = enable_xray_header_value
+            if enable_xray_header_value:
+                logger.debug(
+                    "UserTokenMiddleware: X-Atlassian-Enable-Xray header: %s",
+                    enable_xray_header_value,
+                )
+
             # Extract User-Agent header for tracking and make it lowercase
             user_agent_header = headers.get(b"user-agent")
             user_agent = (
@@ -537,6 +634,8 @@ class UserTokenMiddleware:
             bitbucket_url_header_str = (
                 bitbucket_url_header.decode("latin-1") if bitbucket_url_header else None
             )
+            effective_xray_token = None
+            effective_xray_url = None
 
             # Track service-specific user activity for business intelligence
             activity_type = None
@@ -630,6 +729,10 @@ class UserTokenMiddleware:
                         service_to_use = "bitbucket"
                         username_to_use = username
                         activity_type = activity_type or "bitbucket_access"
+                    elif effective_xray_token and effective_xray_url:
+                        service_to_use = "xray"
+                        username_to_use = username
+                        activity_type = activity_type or "xray_access"
 
                 # Track the activity for the determined service
                 if service_to_use:
@@ -687,6 +790,8 @@ class UserTokenMiddleware:
                 )
             if bitbucket_url_header_str:
                 service_headers["X-Atlassian-Bitbucket-Url"] = bitbucket_url_header_str
+            if enable_xray_header_value is not None:
+                service_headers["X-Atlassian-Enable-Xray"] = enable_xray_header_value
 
             scope_copy["state"]["atlassian_service_headers"] = service_headers
             if service_headers:
@@ -764,8 +869,10 @@ class UserTokenMiddleware:
                 )
                 return
             else:
-                if (jira_token_header_str and jira_url_header_str) or (
-                    confluence_token_header_str and confluence_url_header_str
+                if (
+                    (jira_token_header_str and jira_url_header_str)
+                    or (confluence_token_header_str and confluence_url_header_str)
+                    or (bitbucket_token_header_str and bitbucket_url_header_str)
                 ):
                     logger.debug(
                         f"Header-based authentication detected for {request_path}. "
@@ -852,6 +959,7 @@ main_mcp = AtlassianMCP(name="Atlassian MCP", lifespan=main_lifespan)
 main_mcp.mount(jira_mcp, prefix="jira")
 main_mcp.mount(confluence_mcp, prefix="confluence")
 main_mcp.mount(bitbucket_mcp, prefix="bitbucket")
+main_mcp.mount(xray_mcp, prefix="xray")
 
 
 @main_mcp.custom_route("/healthz", methods=["GET"], include_in_schema=False)
