@@ -122,7 +122,17 @@ This option is useful in scenarios where OAuth credential management is centrali
 
 With header-based authentication, you can pass Jira, Confluence, and Bitbucket credentials directly through HTTP headers on each request. Xray for Jira automatically reuses the Jira headers. This method supports both Personal Access Tokens (PAT) for Server/Data Center and API tokens for Cloud deployments.
 
-**Required Headers:**
+**Multi-Tenant Mode Environment Variables:**
+
+To enable tools without full authentication credentials at server startup, set these environment variables:
+
+| Environment Variable | Description |
+|---------------------|-------------|
+| `JIRA_MULTI_TENANT_ENABLE` | Set to `true` to enable Jira tools without server-side credentials |
+| `CONFLUENCE_MULTI_TENANT_ENABLE` | Set to `true` to enable Confluence tools without server-side credentials |
+| `BITBUCKET_MULTI_TENANT_ENABLE` | Set to `true` to enable Bitbucket tools without server-side credentials |
+
+**Headers:**
 
 For **Jira authentication**:
 - `X-Atlassian-Jira-Personal-Token`: Your Jira PAT or API token
@@ -141,7 +151,7 @@ For **Xray for Jira authentication**:
 - Xray for Jira tools are disabled by default. To enable Xray for Jira tools, set the `X-Atlassian-Enable-Xray` header to `true`.
 
 **Benefits:**
-- ✅ No environment variables required
+- ✅ No environment variables required (or minimal config with multi-tenant mode)
 - ✅ Per-request authentication
 - ✅ Multi-tenant support
 - ✅ Dynamic credential management

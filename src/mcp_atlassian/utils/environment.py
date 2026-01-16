@@ -69,6 +69,16 @@ def get_available_services(
         logger.info(
             "Using Confluence minimal OAuth configuration - expecting user-provided tokens via headers"
         )
+    elif os.getenv("CONFLUENCE_MULTI_TENANT_ENABLE", "").lower() in (
+        "true",
+        "1",
+        "yes",
+    ):
+        confluence_is_setup = True
+        logger.info(
+            "Using Confluence multi-tenant mode - "
+            "expecting user-provided tokens via headers"
+        )
 
     if not confluence_is_setup:
         confluence_token = headers.get("X-Atlassian-Confluence-Personal-Token")
@@ -128,6 +138,12 @@ def get_available_services(
         jira_is_setup = True
         logger.info(
             "Using Jira minimal OAuth configuration - expecting user-provided tokens via headers"
+        )
+    elif os.getenv("JIRA_MULTI_TENANT_ENABLE", "").lower() in ("true", "1", "yes"):
+        jira_is_setup = True
+        logger.info(
+            "Using Jira multi-tenant mode - "
+            "expecting user-provided tokens via headers"
         )
 
     if not jira_is_setup:
@@ -190,6 +206,16 @@ def get_available_services(
         bitbucket_is_setup = True
         logger.info(
             "Using Bitbucket minimal OAuth configuration - expecting user-provided tokens via headers"
+        )
+    elif os.getenv("BITBUCKET_MULTI_TENANT_ENABLE", "").lower() in (
+        "true",
+        "1",
+        "yes",
+    ):
+        bitbucket_is_setup = True
+        logger.info(
+            "Using Bitbucket multi-tenant mode - "
+            "expecting user-provided tokens via headers"
         )
 
     if not bitbucket_is_setup:

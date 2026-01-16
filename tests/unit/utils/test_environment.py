@@ -406,3 +406,148 @@ class TestGetAvailableServices:
             _assert_authentication_logs(
                 caplog, "not_configured", ["confluence", "jira", "bitbucket", "xray"]
             )
+
+    @pytest.mark.parametrize("enable_value", ["true", "1", "yes", "TRUE", "Yes"])
+    def test_confluence_multi_tenant_mode(self, enable_value, caplog):
+        """Test that Confluence multi-tenant mode enables the service."""
+        with MockEnvironment.clean_env():
+            import os
+
+            os.environ["CONFLUENCE_MULTI_TENANT_ENABLE"] = enable_value
+
+            result = get_available_services()
+            _assert_service_availability(
+                result,
+                confluence_expected=True,
+                jira_expected=False,
+                bitbucket_expected=False,
+                xray_expected=False,
+            )
+            assert_log_contains(
+                caplog,
+                "INFO",
+                "Using Confluence multi-tenant mode - expecting user-provided tokens via headers",
+            )
+
+    @pytest.mark.parametrize("enable_value", ["true", "1", "yes", "TRUE", "Yes"])
+    def test_jira_multi_tenant_mode(self, enable_value, caplog):
+        """Test that Jira multi-tenant mode enables the service."""
+        with MockEnvironment.clean_env():
+            import os
+
+            os.environ["JIRA_MULTI_TENANT_ENABLE"] = enable_value
+
+            result = get_available_services()
+            _assert_service_availability(
+                result,
+                confluence_expected=False,
+                jira_expected=True,
+                bitbucket_expected=False,
+                xray_expected=False,
+            )
+            assert_log_contains(
+                caplog,
+                "INFO",
+                "Using Jira multi-tenant mode - expecting user-provided tokens via headers",
+            )
+
+    @pytest.mark.parametrize("enable_value", ["true", "1", "yes", "TRUE", "Yes"])
+    def test_bitbucket_multi_tenant_mode(self, enable_value, caplog):
+        """Test that Bitbucket multi-tenant mode enables the service."""
+        with MockEnvironment.clean_env():
+            import os
+
+            os.environ["BITBUCKET_MULTI_TENANT_ENABLE"] = enable_value
+
+            result = get_available_services()
+            _assert_service_availability(
+                result,
+                confluence_expected=False,
+                jira_expected=False,
+                bitbucket_expected=True,
+                xray_expected=False,
+            )
+            assert_log_contains(
+                caplog,
+                "INFO",
+                "Using Bitbucket multi-tenant mode - expecting user-provided tokens via headers",
+            )
+
+    def test_all_services_multi_tenant_mode(self, caplog):
+        """Test that all services can be enabled via multi-tenant mode simultaneously."""
+        with MockEnvironment.clean_env():
+            import os
+
+            os.environ["CONFLUENCE_MULTI_TENANT_ENABLE"] = "true"
+            os.environ["JIRA_MULTI_TENANT_ENABLE"] = "true"
+            os.environ["BITBUCKET_MULTI_TENANT_ENABLE"] = "true"
+
+            result = get_available_services()
+            _assert_service_availability(
+                result,
+                confluence_expected=True,
+                jira_expected=True,
+                bitbucket_expected=True,
+                xray_expected=False,
+            )
+            assert_log_contains(
+                caplog,
+                "INFO",
+                "Using Confluence multi-tenant mode",
+            )
+            assert_log_contains(
+                caplog,
+                "INFO",
+                "Using Jira multi-tenant mode",
+            )
+            assert_log_contains(
+                caplog,
+                "INFO",
+                "Using Bitbucket multi-tenant mode",
+            )
+
+    @pytest.mark.parametrize("invalid_value", ["false", "0", "no", "", "invalid"])
+    def test_multi_tenant_mode_invalid_values(self, invalid_value, caplog):
+        """Test that invalid values for multi-tenant mode don't enable services."""
+        with MockEnvironment.clean_env():
+            import os
+
+            os.environ["CONFLUENCE_MULTI_TENANT_ENABLE"] = invalid_value
+            os.environ["JIRA_MULTI_TENANT_ENABLE"] = invalid_value
+            os.environ["BITBUCKET_MULTI_TENANT_ENABLE"] = invalid_value
+
+            result = get_available_services()
+            _assert_service_availability(
+                result,
+                confluence_expected=False,
+                jira_expected=False,
+                bitbucket_expected=False,
+                xray_expected=False,
+            )
+
+    def test_multi_tenant_mode_precedence(self, env_scenarios, caplog):
+        """Test that OAuth/Basic Auth takes precedence over multi-tenant mode."""
+        with MockEnvironment.clean_env():
+            import os
+
+            # Set both OAuth and multi-tenant mode
+            for key, value in env_scenarios["oauth_cloud"].items():
+                os.environ[key] = value
+            os.environ["CONFLUENCE_MULTI_TENANT_ENABLE"] = "true"
+            os.environ["JIRA_MULTI_TENANT_ENABLE"] = "true"
+            os.environ["BITBUCKET_MULTI_TENANT_ENABLE"] = "true"
+
+            result = get_available_services()
+            _assert_service_availability(
+                result,
+                confluence_expected=True,
+                jira_expected=True,
+                bitbucket_expected=True,
+                xray_expected=False,
+            )
+
+            # Should use OAuth, not multi-tenant mode
+            _assert_authentication_logs(
+                caplog, "oauth", ["confluence", "jira", "bitbucket"]
+            )
+            assert "multi-tenant mode" not in caplog.text
