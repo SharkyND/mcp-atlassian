@@ -358,7 +358,7 @@ class TestUserTokenMiddleware:
         await middleware(scope, mock_receive, mock_send)
 
         # Verify JWT was detected and token_format is set to 'jwt'
-        assert scope["state"]["user_atlassian_token_format"] == "jwt"
+        assert scope["state"]["user_atlassian_auth_format"] == "jwt"
         assert scope["state"]["user_atlassian_auth_type"] == "pat"
         assert scope["state"]["user_atlassian_token"] == jwt_token
         middleware.app.assert_called_once()
@@ -391,7 +391,7 @@ class TestUserTokenMiddleware:
         await middleware(scope, mock_receive, mock_send)
 
         # Verify non-JWT Bearer token is detected as 'bearer' format
-        assert scope["state"]["user_atlassian_token_format"] == "bearer"
+        assert scope["state"]["user_atlassian_auth_format"] == "bearer"
         assert scope["state"]["user_atlassian_auth_type"] == "pat"
         assert scope["state"]["user_atlassian_token"] == simple_token
         middleware.app.assert_called_once()
@@ -423,7 +423,7 @@ class TestUserTokenMiddleware:
         await middleware(scope, mock_receive, mock_send)
 
         # Verify PAT token is detected as 'pat' format
-        assert scope["state"]["user_atlassian_token_format"] == "pat"
+        assert scope["state"]["user_atlassian_auth_format"] == "pat"
         assert scope["state"]["user_atlassian_auth_type"] == "pat"
         assert scope["state"]["user_atlassian_token"] == pat_token
         middleware.app.assert_called_once()

@@ -283,10 +283,14 @@ async def get_jira_fetcher(ctx: Context) -> JiraFetcher:
                 )
 
             cloud_id_info = f" with cloudId {user_cloud_id}" if user_cloud_id else ""
-            # Use token_format for display (jwt, bearer, pat) while auth_type is used for logic
-            token_format = getattr(request.state, "user_atlassian_token_format", user_auth_type)
+            # Use token_format for display while auth_type is used for logic
+            token_format = getattr(
+                request.state, "user_atlassian_auth_format", user_auth_type
+            )
             logger.info(
-                f"Creating user-specific JiraFetcher (type: {token_format}) for user {user_email or 'unknown'} (token ...{str(user_token)[-8:]}){cloud_id_info}"
+                f"Creating user-specific JiraFetcher (type: {token_format}) "
+                f"for user {user_email or 'unknown'} "
+                f"(token ...{str(user_token)[-8:]}){cloud_id_info}"
             )
             user_specific_config = _create_user_config_for_fetcher(
                 base_config=app_lifespan_ctx.full_jira_config,
@@ -453,10 +457,14 @@ async def get_confluence_fetcher(ctx: Context) -> ConfluenceFetcher:
                 )
 
             cloud_id_info = f" with cloudId {user_cloud_id}" if user_cloud_id else ""
-            # Use token_format for display (jwt, bearer, pat) while auth_type is used for logic
-            token_format = getattr(request.state, "user_atlassian_token_format", user_auth_type)
+            # Use token_format for display while auth_type is used for logic
+            token_format = getattr(
+                request.state, "user_atlassian_auth_format", user_auth_type
+            )
             logger.info(
-                f"Creating user-specific ConfluenceFetcher (type: {token_format}) for user {user_email or 'unknown'} (token ...{str(user_token)[-8:]}){cloud_id_info}"
+                f"Creating user-specific ConfluenceFetcher (type: {token_format}) "
+                f"for user {user_email or 'unknown'} "
+                f"(token ...{str(user_token)[-8:]}){cloud_id_info}"
             )
             user_specific_config = _create_user_config_for_fetcher(
                 base_config=app_lifespan_ctx.full_confluence_config,
@@ -640,10 +648,14 @@ async def get_bitbucket_fetcher(ctx: Context) -> BitbucketFetcher:
                 )
 
             cloud_id_info = f" with cloudId {user_cloud_id}" if user_cloud_id else ""
-            # Use token_format for display (jwt, bearer, pat) while auth_type is used for logic
-            token_format = getattr(request.state, "user_atlassian_token_format", user_auth_type)
+            # Use token_format for display while auth_type is used for logic
+            token_format = getattr(
+                request.state, "user_atlassian_auth_format", user_auth_type
+            )
             logger.info(
-                f"Creating user-specific BitbucketFetcher (type: {token_format}) for user {user_email or 'unknown'} (token ...{str(user_token)[-8:]}){cloud_id_info}"
+                f"Creating user-specific BitbucketFetcher (type: {token_format}) "
+                f"for user {user_email or 'unknown'} "
+                f"(token ...{str(user_token)[-8:]}){cloud_id_info}"
             )
             user_specific_config = _create_user_config_for_fetcher(
                 base_config=app_lifespan_ctx.full_bitbucket_config,
@@ -834,12 +846,14 @@ async def get_xray_fetcher(ctx: Context) -> XrayFetcher:
                 )
 
             cloud_id_info = f" with cloudId {user_cloud_id}" if user_cloud_id else ""
-            # Use token_format for display (jwt, bearer, pat) while auth_type is used for logic
-            token_format = getattr(request.state, "user_atlassian_token_format", user_auth_type)
+            # Use token_format for display while auth_type is used for logic
+            token_format = getattr(
+                request.state, "user_atlassian_auth_format", user_auth_type
+            )
             logger.info(
-                f"Creating user-specific Xray for Jira fetcher (type: {token_format}) for user "
-                f"{user_email or 'unknown'} (token ...{str(user_token)[-8:]})"
-                f"{cloud_id_info}"
+                f"Creating user-specific Xray for Jira fetcher "
+                f"(type: {token_format}) for user {user_email or 'unknown'} "
+                f"(token ...{str(user_token)[-8:]}){cloud_id_info}"
             )
             user_specific_config = _create_user_config_for_fetcher(
                 base_config=app_lifespan_ctx.full_xray_config,

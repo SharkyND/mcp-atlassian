@@ -390,7 +390,7 @@ class TestMCPProtocolIntegration:
 
     async def test_middleware_oauth_token_processing(self):
         """Test UserTokenMiddleware Bearer token extraction and processing.
-        
+
         Note: Bearer tokens are now treated as PAT auth type for compatibility
         with both JWT tokens and traditional PAT tokens.
         """

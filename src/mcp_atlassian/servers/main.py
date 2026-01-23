@@ -838,7 +838,7 @@ class UserTokenMiddleware:
                 # both JWT tokens and traditional PAT tokens
                 scope_copy["state"]["user_atlassian_auth_type"] = "pat"
                 # Store the actual token format for logging purposes
-                scope_copy["state"]["user_atlassian_token_format"] = token_format
+                scope_copy["state"]["user_atlassian_auth_format"] = token_format
                 scope_copy["state"]["user_atlassian_email"] = None
                 logger.debug(
                     f"UserTokenMiddleware.__call__: Set scope state (pre-validation): "
@@ -860,7 +860,7 @@ class UserTokenMiddleware:
                 )
                 scope_copy["state"]["user_atlassian_token"] = token
                 scope_copy["state"]["user_atlassian_auth_type"] = "pat"
-                scope_copy["state"]["user_atlassian_token_format"] = "pat"
+                scope_copy["state"]["user_atlassian_auth_format"] = "pat"
                 scope_copy["state"]["user_atlassian_email"] = None
                 logger.debug(
                     "UserTokenMiddleware.__call__: Set scope state for PAT auth."
