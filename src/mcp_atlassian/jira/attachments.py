@@ -1,11 +1,15 @@
 """Attachment operations for Jira API."""
 
+import base64
+import io
 import logging
 import os
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from ..models.jira import JiraAttachment
+from .attachment_cache import get_attachment_cache
 from .client import JiraClient
 from .protocols import AttachmentsOperationsProto
 
@@ -66,29 +70,35 @@ class AttachmentsMixin(JiraClient, AttachmentsOperationsProto):
             return False
 
     def download_issue_attachments(
-        self, issue_key: str, target_dir: str
+        self, issue_key: str, target_dir: str = "", return_content: bool = True
     ) -> dict[str, Any]:
         """
         Download all attachments for a Jira issue.
 
         Args:
             issue_key: The Jira issue key (e.g., 'PROJ-123')
-            target_dir: The directory where attachments should be saved
+            target_dir: The directory where attachments should be saved (optional)
+            return_content: If True, returns MCP resource URIs instead of base64 content (default: True)
 
         Returns:
-            A dictionary with download results
+            A dictionary with download results, including resource URIs if requested
         """
-        # Convert to absolute path if relative
-        if not os.path.isabs(target_dir):
-            target_dir = os.path.abspath(target_dir)
+        # Handle target directory if saving files
+        target_path = None
+        if target_dir:
+            # Convert to absolute path if relative
+            if not os.path.isabs(target_dir):
+                target_dir = os.path.abspath(target_dir)
 
-        logger.info(
-            f"Downloading attachments for {issue_key} to directory: {target_dir}"
-        )
+            logger.info(
+                f"Downloading attachments for {issue_key} to directory: {target_dir}"
+            )
 
-        # Create the target directory if it doesn't exist
-        target_path = Path(target_dir)
-        target_path.mkdir(parents=True, exist_ok=True)
+            # Create the target directory if it doesn't exist
+            target_path = Path(target_dir)
+            target_path.mkdir(parents=True, exist_ok=True)
+        else:
+            logger.info(f"Fetching attachments for {issue_key} (content only)")
 
         # Get the issue with attachments
         logger.info(f"Fetching issue {issue_key} with attachments")
@@ -125,6 +135,7 @@ class AttachmentsMixin(JiraClient, AttachmentsOperationsProto):
         # Download each attachment
         downloaded = []
         failed = []
+        cache = get_attachment_cache()
 
         for attachment in attachments:
             if not attachment.url:
@@ -134,24 +145,77 @@ class AttachmentsMixin(JiraClient, AttachmentsOperationsProto):
                 )
                 continue
 
-            # Create a safe filename
-            safe_filename = Path(attachment.filename).name
-            file_path = target_path / safe_filename
+            try:
+                # Fetch the attachment content
+                response = self.jira._session.get(attachment.url, stream=True)
+                response.raise_for_status()
+                content_bytes = response.content
 
-            # Download the attachment
-            success = self.download_attachment(attachment.url, str(file_path))
+                # Create a safe filename
+                safe_filename = Path(attachment.filename).name
+                
+                attachment_info = {
+                    "filename": attachment.filename,
+                    "size": attachment.size,
+                }
 
-            if success:
-                downloaded.append(
-                    {
-                        "filename": attachment.filename,
-                        "path": str(file_path),
-                        "size": attachment.size,
-                    }
-                )
-            else:
+                # Store in cache and return resource URI if requested
+                if return_content:
+                    try:
+                        # Determine MIME type from attachment or use generic binary
+                        mime_type = attachment.content_type or "application/octet-stream"
+                        
+                        # Store in cache
+                        cache_key = cache.store(
+                            issue_key=issue_key,
+                            filename=attachment.filename,
+                            content=content_bytes,
+                            mime_type=mime_type,
+                        )
+                        
+                        # Static resource URI: issue_key + filename, no cache key needed.
+                        # Becomes immediately accessible in MCP resource browser.
+                        static_resource_uri = (
+                            f"jira://attachments/{issue_key}"
+                            f"/{quote(attachment.filename, safe='')}"
+                        )
+                        # Legacy cache-key URI (kept for backward compatibility)
+                        resource_uri = (
+                            f"jira://attachment/{cache_key}"
+                            f"/{quote(attachment.filename, safe='')}"
+                        )
+                        attachment_info["static_resource_uri"] = static_resource_uri
+                        attachment_info["resource_uri"] = resource_uri
+                        attachment_info["cache_key"] = cache_key
+                        attachment_info["mime_type"] = mime_type
+                        
+                        logger.info(
+                            f"Cached attachment {attachment.filename} with resource URI: {resource_uri}"
+                        )
+                    except Exception as cache_error:
+                        logger.warning(
+                            f"Failed to cache {attachment.filename}: {str(cache_error)}. "
+                            "Falling back to base64 encoding."
+                        )
+                        # Fallback to base64 if cache fails
+                        content_b64 = base64.b64encode(content_bytes).decode('utf-8')
+                        attachment_info["content"] = content_b64
+                        attachment_info["encoding"] = "base64"
+
+                # Save to disk if target_dir provided
+                if target_path:
+                    file_path = target_path / safe_filename
+                    with open(file_path, "wb") as f:
+                        f.write(content_bytes)
+                    attachment_info["path"] = str(file_path)
+                    logger.info(f"Saved attachment to {file_path}")
+
+                downloaded.append(attachment_info)
+
+            except Exception as e:
+                logger.error(f"Failed to download {attachment.filename}: {str(e)}")
                 failed.append(
-                    {"filename": attachment.filename, "error": "Download failed"}
+                    {"filename": attachment.filename, "error": str(e)}
                 )
 
         return {
@@ -224,6 +288,70 @@ class AttachmentsMixin(JiraClient, AttachmentsOperationsProto):
         except Exception as e:
             error_msg = str(e)
             logger.error(f"Error uploading attachment: {error_msg}")
+            return {"success": False, "error": error_msg}
+
+    def upload_attachment_from_bytes(
+        self,
+        issue_key: str,
+        filename: str,
+        content: bytes,
+        mime_type: str = "application/octet-stream",
+    ) -> dict[str, Any]:
+        """Upload attachment content directly from bytes to a Jira issue.
+
+        Used by the jira_upload_attachment MCP tool, which receives file content
+        from the staging store after the client POSTed files to /upload.
+
+        Args:
+            issue_key: The Jira issue key (e.g., 'PROJ-123').
+            filename: Display name for the attachment in Jira.
+            content: Raw file bytes.
+            mime_type: MIME type (used as the content-type in the multipart upload).
+
+        Returns:
+            A dictionary with upload result information.
+        """
+        if not issue_key:
+            return {"success": False, "error": "No issue key provided"}
+        if not filename:
+            return {"success": False, "error": "No filename provided"}
+        if not content:
+            return {"success": False, "error": "Empty file content"}
+
+        try:
+            logger.info(
+                "Uploading %d bytes as '%s' to issue %s",
+                len(content),
+                filename,
+                issue_key,
+            )
+            buf = io.BytesIO(content)
+            # Setting .name on the BytesIO causes requests to use it as the
+            # filename in the multipart form upload.
+            buf.name = filename
+            attachment = self.jira.add_attachment_object(issue_key, buf)
+            if attachment:
+                logger.info(
+                    "Successfully uploaded '%s' to %s (%d bytes)",
+                    filename,
+                    issue_key,
+                    len(content),
+                )
+                return {
+                    "success": True,
+                    "issue_key": issue_key,
+                    "filename": filename,
+                    "size": len(content),
+                    "id": attachment.get("id") if isinstance(attachment, dict) else None,
+                }
+            logger.error("Upload returned empty response for '%s'", filename)
+            return {
+                "success": False,
+                "error": f"Upload returned empty response for '{filename}'",
+            }
+        except Exception as e:
+            error_msg = str(e)
+            logger.error("Error uploading '%s': %s", filename, error_msg)
             return {"success": False, "error": error_msg}
 
     def upload_attachments(

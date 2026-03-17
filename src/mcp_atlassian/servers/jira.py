@@ -2,14 +2,19 @@
 
 import json
 import logging
+import mimetypes
 from typing import Annotated, Any
+from urllib.parse import quote, unquote
 
 from fastmcp import Context, FastMCP
+from fastmcp.resources import FunctionResource
 from pydantic import Field
 from requests.exceptions import HTTPError
 
 from mcp_atlassian.exceptions import MCPAtlassianAuthenticationError
+from mcp_atlassian.jira.attachment_cache import get_attachment_cache
 from mcp_atlassian.jira.constants import DEFAULT_READ_JIRA_FIELDS
+from mcp_atlassian.jira.upload_staging import get_upload_staging
 from mcp_atlassian.models.jira.common import JiraUser
 from mcp_atlassian.servers.dependencies import get_jira_fetcher
 from mcp_atlassian.utils.decorators import check_write_access
@@ -359,22 +364,40 @@ async def get_worklog(
 async def download_attachments(
     ctx: Context,
     issue_key: Annotated[str, Field(description="Jira issue key (e.g., 'PROJ-123')")],
-    target_dir: Annotated[
-        str, Field(description="Directory where attachments should be saved")
-    ],
 ) -> str:
-    """Download attachments from a Jira issue.
+    """Download attachments from a Jira issue and cache them as directly accessible MCP resources.
+
+    After calling this tool, each attachment is immediately available in the MCP resource browser
+    via a static URI — no cache key required:
+
+        jira://attachments/{issue_key}/{filename}
+
+    Examples:
+        jira://attachments/JDQU-2322/desktop-screenshot-1.png   ← renders as image
+        jira://attachments/JDQU-2322/SPyDR%20Metadata.txt       ← opens as text
+
+    Cached resources are valid for 10 minutes. Re-run this tool to refresh.
 
     Args:
         ctx: The FastMCP context.
-        issue_key: Jira issue key.
-        target_dir: Directory to save attachments.
+        issue_key: Jira issue key (e.g., 'PROJ-123').
 
     Returns:
-        JSON string indicating the result of the download operation.
+        JSON string with download results. Each attachment includes:
+        - filename: The attachment filename
+        - size: File size in bytes
+        - static_resource_uri: Direct MCP resource URI (click to open/render)
+        - mime_type: MIME type of the file
     """
     jira = await get_jira_fetcher(ctx)
-    result = jira.download_issue_attachments(issue_key=issue_key, target_dir=target_dir)
+    result = jira.download_issue_attachments(
+        issue_key=issue_key, target_dir="", return_content=True
+    )
+    # Dynamically register a concrete static MCP resource URI for every
+    # downloaded attachment so they appear as direct clickable links in the
+    # VS Code MCP resource browser — no manual input required.
+    for item in result.get("downloaded", []):
+        _register_static_attachment_resource(issue_key, item["filename"])
     return json.dumps(result, indent=2, ensure_ascii=False)
 
 
@@ -1655,3 +1678,494 @@ async def batch_create_versions(
             )
             results.append({"success": False, "error": str(e), "input": v})
     return json.dumps(results, indent=2, ensure_ascii=False)
+
+
+# ---------------------------------------------------------------------------
+# MCP Resource helpers
+# ---------------------------------------------------------------------------
+
+
+def _register_static_attachment_resource(issue_key: str, filename: str) -> None:
+    """Dynamically register a concrete (non-template) MCP resource URI.
+
+    Calling ``jira_mcp.add_resource_fn()`` at runtime creates a static entry in
+    the MCP resource list, which VS Code shows as a direct clickable link — no
+    manual text input required by the user.
+
+    The registered function checks the live cache, so it returns a clear error
+    if the 10-minute TTL has expired rather than silently returning stale data.
+    Calling ``download_attachments`` again re-registers and refreshes the cache.
+    """
+    enc = quote(filename, safe="")
+    uri = f"jira://attachments/{issue_key}/{enc}"
+
+    # Capture loop variables via default arguments to avoid late-binding closure
+    # issues when iterating over multiple attachments.
+    def _resource_fn(
+        _ik: str = issue_key,
+        _fn: str = filename,
+    ) -> bytes:
+        data = get_attachment_cache().get_by_issue_and_filename(_ik, _fn)
+        if not data:
+            raise ValueError(
+                f"Attachment '{_fn}' for issue '{_ik}' has expired (10-min TTL). "
+                "Re-run download_attachments to refresh."
+            )
+        return data["content"]
+
+    # Detect MIME type from filename extension (e.g. image/png for .png)
+    mime_type, _ = mimetypes.guess_type(filename)
+    mime_type = mime_type or "application/octet-stream"
+
+    resource = FunctionResource.from_function(
+        _resource_fn,
+        uri=uri,
+        name=f"{issue_key} — {filename}",
+        description=f"Jira attachment '{filename}' from issue {issue_key}",
+        mime_type=mime_type,
+    )
+
+    rm = jira_mcp._resource_manager  # type: ignore[attr-defined]
+    try:
+        # Remove any stale entry for this URI before re-registering
+        # (e.g. after a cache refresh / re-download).
+        rm._resources.pop(uri, None)
+        rm.add_resource(resource)
+        logger.info(f"Registered static MCP resource: {uri} ({mime_type})")
+    except Exception as exc:
+        logger.warning(f"Could not register resource {uri}: {exc}")
+
+
+# ---------------------------------------------------------------------------
+# MCP Resource handlers for Jira attachments
+# ---------------------------------------------------------------------------
+
+
+@jira_mcp.resource("jira://attachments/{issue_key}/{filename}")
+def get_attachment_by_issue_resource(issue_key: str, filename: str) -> bytes:
+    """
+    Serve a cached Jira attachment directly by issue key and filename.
+
+    These static URIs are auto-generated when download_attachments is called and
+    are valid for 10 minutes.  No cache key is required — just use the issue key
+    and the original filename (URL-encoded).
+
+    Example URIs (rendered automatically in VS Code / MCP clients):
+        jira://attachments/JDQU-2322/desktop-screenshot-1.png
+        jira://attachments/JDQU-2322/SPyDR%20Metadata.txt
+
+    Args:
+        issue_key: The Jira issue key (e.g., 'JDQU-2322')
+        filename: URL-encoded attachment filename (e.g., 'desktop-screenshot-1.png')
+
+    Returns:
+        Raw binary content — images render inline in MCP clients that support it.
+
+    Raises:
+        ValueError: If no matching entry is found or it has expired (10-min TTL).
+    """
+    cache = get_attachment_cache()
+    # Strip query-string params that some MCP clients (e.g. VS Code) append
+    # for cache-busting (e.g. ?version=1234567890).
+    actual_filename = unquote(filename).split("?")[0]
+    attachment_data = cache.get_by_issue_and_filename(issue_key, actual_filename)
+
+    if not attachment_data:
+        logger.warning(
+            f"Attachment not found for issue={issue_key}, filename={actual_filename}"
+        )
+        raise ValueError(
+            f"Attachment '{actual_filename}' for issue '{issue_key}' not found. "
+            "It may have expired (10-minute TTL). Re-run download_attachments to refresh."
+        )
+
+    logger.info(
+        f"Serving static resource: jira://attachments/{issue_key}/{filename}"
+    )
+    return attachment_data["content"]
+
+
+@jira_mcp.resource("jira://attachment/{cache_key}/{filename}")
+def get_attachment_resource(cache_key: str, filename: str) -> bytes:
+    """
+    Serve cached Jira attachment content via legacy cache-key URI.
+
+    Prefer jira://attachments/{issue_key}/{filename} for direct access.
+    This handler is kept for backward compatibility.
+
+    Args:
+        cache_key: The unique cache identifier returned from download_attachments tool
+        filename: URL-encoded attachment filename (with extension)
+
+    Returns:
+        Raw binary content of the attachment.
+
+    Raises:
+        ValueError: If the cache key is not found or has expired
+    """
+    cache = get_attachment_cache()
+    attachment_data = cache.get(cache_key)
+
+    if not attachment_data:
+        logger.warning(f"Attachment not found in cache: {cache_key}")
+        raise ValueError(
+            f"Attachment not found. Cache key '{cache_key}' may have expired or is invalid."
+        )
+
+    # Strip any query-string params appended by MCP clients for cache-busting.
+    actual_filename = unquote(filename).split("?")[0]
+    logger.info(
+        f"Serving attachment resource: {actual_filename} "
+        f"from issue {attachment_data['issue_key']} (key: {cache_key})"
+    )
+    return attachment_data["content"]
+
+
+@jira_mcp.tool(tags={"jira", "utility"})
+async def save_attachment_to_disk(
+    ctx: Context,
+    cache_key: Annotated[
+        str,
+        Field(description="The cache key from download_attachments response"),
+    ],
+    target_path: Annotated[
+        str,
+        Field(description="Full path on MCP SERVER filesystem (e.g., '/tmp/file.pdf' or 'C:/server/downloads/file.pdf')"),
+    ],
+) -> str:
+    """Save a cached attachment to the MCP SERVER's filesystem.
+
+    ⚠️ WARNING: This saves to the SERVER's filesystem, NOT your local client machine!
+    
+    Use cases:
+    - MCP server is running locally on your machine
+    - Need to save files on a remote server for server-side processing
+    - Saving to a shared network location accessible from server
+    
+    For CLIENT-SIDE saving (your local VS Code machine):
+    - Use the resource URI from download_attachments response
+    - Your MCP client (VS Code) will fetch and save it locally
+    
+    Args:
+        ctx: The FastMCP context.
+        cache_key: The cache_key returned from download_attachments tool
+        target_path: Full file path on SERVER filesystem (not client's local disk)
+
+    Returns:
+        JSON string with save result including absolute path on server
+
+    Example:
+        # This saves to SERVER filesystem, not your local machine!
+        save_attachment_to_disk(
+            cache_key="abc123def456", 
+            target_path="/server/storage/design.pdf"
+        )
+    """
+    import os
+    from pathlib import Path
+
+    cache = get_attachment_cache()
+    attachment_data = cache.get(cache_key)
+
+    if not attachment_data:
+        return json.dumps(
+            {
+                "success": False,
+                "error": f"Attachment not found in cache. Cache key '{cache_key}' may have expired or is invalid.",
+            },
+            indent=2,
+        )
+
+    try:
+        # Ensure parent directory exists
+        target_file = Path(target_path)
+        target_file.parent.mkdir(parents=True, exist_ok=True)
+
+        # Write file
+        with open(target_file, "wb") as f:
+            f.write(attachment_data["content"])
+
+        file_size = len(attachment_data["content"])
+        logger.info(
+            f"Saved attachment {attachment_data['filename']} to {target_path} "
+            f"({file_size} bytes)"
+        )
+
+        return json.dumps(
+            {
+                "success": True,
+                "filename": attachment_data["filename"],
+                "saved_to": str(target_file.absolute()),
+                "size_bytes": file_size,
+                "issue_key": attachment_data["issue_key"],
+            },
+            indent=2,
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to save attachment: {str(e)}")
+        return json.dumps(
+            {"success": False, "error": str(e)},
+            indent=2,
+        )
+
+
+@jira_mcp.tool(tags={"jira", "utility"})
+async def list_cached_attachments(ctx: Context) -> str:
+    """List all currently cached attachments available via MCP resources.
+
+    Each attachment exposes a static_resource_uri that can be opened directly in
+    the MCP resource browser without knowing the cache key:
+
+        jira://attachments/{issue_key}/{filename}
+
+    Images (PNG, JPEG, etc.) render inline. Text files open as-is.
+    All cached resources expire after 10 minutes.
+
+    Returns:
+        JSON string with list of cached attachments including URIs and metadata
+    """
+    cache = get_attachment_cache()
+    stats = cache.get_stats()
+
+    cached_items = []
+    for key, item in cache._cache.items():
+        encoded_filename = quote(item["filename"], safe="")
+        cached_items.append({
+            "cache_key": key,
+            "filename": item["filename"],
+            "issue_key": item["issue_key"],
+            "size_bytes": item["size"],
+            "mime_type": item["mime_type"],
+            "static_resource_uri": (
+                f"jira://attachments/{item['issue_key']}/{encoded_filename}"
+            ),
+            "resource_uri": f"jira://attachment/{key}/{encoded_filename}",
+            "created_at": item["created_at"].isoformat(),
+            "expires_at": item["expires_at"].isoformat(),
+        })
+
+    cached_items.sort(key=lambda x: x["created_at"], reverse=True)
+
+    result = {
+        "cache_stats": {
+            "total_items": stats["item_count"],
+            "total_size_bytes": stats["total_size_bytes"],
+            "total_size_mb": round(stats["total_size_bytes"] / (1024 * 1024), 2),
+            "utilization_percent": stats["utilization_percent"],
+            "ttl_minutes": 10,
+        },
+        "cached_attachments": cached_items,
+        "usage_instructions": {
+            "open_in_browser": "Click static_resource_uri in the MCP resource browser",
+            "images": "PNG/JPEG files render inline automatically",
+            "expiry": "Resources expire after 10 minutes — re-run download_attachments to refresh",
+        },
+    }
+
+    return json.dumps(result, indent=2, ensure_ascii=False)
+
+
+@jira_mcp.tool(tags={"jira", "utility"})
+async def construct_upload_endpoint(ctx: Context) -> str:
+    """Return the URL and session token needed to upload local files to the MCP server.
+
+    This is step 1 of the client-side file upload flow:
+
+    1. Call this tool to get upload_url + session_id.
+    2. POST your file(s) to upload_url using multipart/form-data with the
+       Mcp-Session-Id header set to session_id.
+
+       Windows PowerShell (handles paths with spaces):
+           curl.exe -X POST <upload_url> -H "Mcp-Session-Id: <id>" -F 'file=@"C:\\path with spaces\\file.pdf"'
+
+       Linux / macOS (handles paths with spaces):
+           curl -X POST <upload_url> -H "Mcp-Session-Id: <id>" -F "file=@'/path/with spaces/file.pdf'"
+
+       The server returns: {"uploaded": [{"filename": "...", "uri": "upload://...", "size": ...}]}
+
+    3. Pass the returned upload:// URIs to jira_upload_attachment.
+
+    Sessions expire after 30 minutes (configurable via UPLOAD_STAGING_TTL_MINUTES).
+    The base URL defaults to http://localhost:8932 and can be overridden by the
+    MCP_SERVER_BASE_URL environment variable.
+
+    Args:
+        ctx: The FastMCP context.
+
+    Returns:
+        JSON string with upload_url, session_id, required_headers, and OS-specific usage example.
+    """
+    import os
+    import platform
+
+    from fastmcp.server.dependencies import get_http_request
+
+    staging = get_upload_staging()
+    session_id = staging.create_session()
+
+    # Priority: 1) X-MCP-Upload-Base-URL request header, 2) MCP_SERVER_BASE_URL env var, 3) default
+    base_url: str | None = None
+    try:
+        http_request = get_http_request()
+        base_url = getattr(http_request.state, "upload_base_url", None)
+    except Exception:
+        pass  # Not in HTTP context (e.g. stdio transport) — fall back to env/default
+
+    if not base_url:
+        base_url = os.environ.get("MCP_SERVER_BASE_URL", "http://localhost:8932")
+    base_url = base_url.rstrip("/")
+    upload_url = f"{base_url}/upload"
+
+    is_windows = platform.system() == "Windows"
+    curl_cmd = "curl.exe" if is_windows else "curl"
+
+    if is_windows:
+        # PowerShell: -s silences progress bar; outer single-quotes + inner double-quotes
+        # handles paths with spaces. e.g. -F 'file=@"C:\My Documents\report.pdf"'
+        curl_example = (
+            f'{curl_cmd} -s -X POST "{upload_url}"'
+            f' -H "Mcp-Session-Id: {session_id}"'
+            " -F 'file=@\"C:\\path with spaces\\your_file.pdf\"'"
+        )
+    else:
+        # bash/zsh: -s silences progress bar; outer double-quotes + inner single-quotes
+        # handles paths with spaces. e.g. -F "file=@'/home/user/my docs/report.pdf'"
+        curl_example = (
+            f'{curl_cmd} -s -X POST "{upload_url}"'
+            f' -H "Mcp-Session-Id: {session_id}"'
+            " -F \"file=@'/path/with spaces/your_file.pdf'\""
+        )
+
+    return json.dumps(
+        {
+            "upload_url": upload_url,
+            "session_id": session_id,
+            "required_headers": {"Mcp-Session-Id": session_id},
+            "curl_example": curl_example,
+            "instructions": (
+                "1. Replace the path placeholder in curl_example with your actual file path. "
+                "2. Run the curl command in a terminal. "
+                "3. The command will output JSON. A successful upload looks like: "
+                '{\"success\": true, \"uploaded\": [{\"filename\": \"your_file.pdf\", \"uri\": \"upload://sessions/SESSION_ID/FILE_ID\", \"size\": 12345}]}. '
+                "4. Copy the uri value(s) from the uploaded array. "
+                "5. Call jira_upload_attachment with issue_key and those uri value(s)."
+            ),
+            "path_with_spaces_note": (
+                "Windows PowerShell — outer single quotes, path in double quotes: "
+                "-F 'file=@\"C:\\My Docs\\file.pdf\"'  |  "
+                "Linux/macOS bash — path in single quotes inside double quotes: "
+                "-F \"file=@'/my docs/file.pdf'\""
+            ),
+        },
+        indent=2,
+        ensure_ascii=False,
+    )
+
+
+@jira_mcp.tool(tags={"jira", "write"})
+@check_write_access
+async def jira_upload_attachment(
+    ctx: Context,
+    issue_key: Annotated[
+        str,
+        Field(description="Jira issue key to attach the file(s) to (e.g., 'PROJ-123')"),
+    ],
+    upload_uris: Annotated[
+        list[str],
+        Field(
+            description=(
+                "List of upload:// URIs returned by the /upload endpoint after calling "
+                "construct_upload_endpoint and uploading your files. "
+                "Example: ['upload://sessions/abc123/xyz456']"
+            )
+        ),
+    ],
+) -> str:
+    """Upload one or more staged files to a Jira issue as attachments.
+
+    This is step 3 of the client-side file upload flow (after construct_upload_endpoint
+    and POSTing files to /upload).
+
+    Each upload:// URI is resolved from the server-side staging store, then
+    uploaded directly to Jira via the REST API — no base64, no context-window
+    overhead.
+
+    Staged files are removed from the store after a successful upload.
+    Unused uploads expire automatically after 30 minutes.
+
+    Args:
+        ctx: The FastMCP context.
+        issue_key: Jira issue key (e.g., 'PROJ-123').
+        upload_uris: List of upload:// URIs from the /upload endpoint response.
+
+    Returns:
+        JSON string with per-file upload results.
+
+    Raises:
+        ValueError: If in read-only mode or Jira client is unavailable.
+    """
+    jira = await get_jira_fetcher(ctx)
+    staging = get_upload_staging()
+
+    uploaded = []
+    failed = []
+
+    for uri in upload_uris:
+        parsed = staging.parse_uri(uri)
+        if not parsed:
+            failed.append(
+                {
+                    "uri": uri,
+                    "error": (
+                        "Invalid upload URI format. "
+                        "Expected upload://sessions/<session_id>/<file_id>"
+                    ),
+                }
+            )
+            continue
+
+        session_id, file_id = parsed
+        entry = staging.get(session_id, file_id)
+        if not entry:
+            failed.append(
+                {
+                    "uri": uri,
+                    "error": (
+                        "Staged file not found or expired. "
+                        "Call construct_upload_endpoint and re-upload the file."
+                    ),
+                }
+            )
+            continue
+
+        result = jira.upload_attachment_from_bytes(
+            issue_key=issue_key,
+            filename=entry["filename"],
+            content=entry["content"],
+            mime_type=entry["mime_type"],
+        )
+
+        if result.get("success"):
+            staging.remove(session_id, file_id)
+            uploaded.append(
+                {
+                    "filename": result["filename"],
+                    "size": result["size"],
+                    "id": result.get("id"),
+                }
+            )
+        else:
+            failed.append({"uri": uri, "filename": entry["filename"], "error": result.get("error")})
+
+    return json.dumps(
+        {
+            "success": len(failed) == 0,
+            "issue_key": issue_key,
+            "total": len(upload_uris),
+            "uploaded": uploaded,
+            "failed": failed,
+        },
+        indent=2,
+        ensure_ascii=False,
+    )

@@ -17,6 +17,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
+from mcp_atlassian.jira.upload_staging import get_upload_staging
 from mcp_atlassian.bitbucket import BitbucketFetcher
 from mcp_atlassian.bitbucket.config import BitbucketConfig
 from mcp_atlassian.confluence import ConfluenceFetcher
@@ -51,6 +52,70 @@ logger.info(f"Metrics collection initialized for pod: {pod_name}")
 
 async def health_check() -> JSONResponse:
     return JSONResponse({"status": "ok"})
+
+
+async def upload_endpoint(request: Request) -> JSONResponse:
+    """Receive multipart file uploads and stage them for Jira attachment.
+
+    Expects:
+      - Header:  Mcp-Session-Id: <session_id>  (from construct_upload_endpoint)
+      - Body:    multipart/form-data with one or more file fields
+
+    Returns JSON:
+      {"uploaded": [{"filename": "...", "uri": "upload://sessions/…", "size": …}]}
+    """
+    from pathlib import Path
+
+    session_id = request.headers.get("mcp-session-id")
+    if not session_id:
+        return JSONResponse(
+            {"error": "Mcp-Session-Id header is required"},
+            status_code=400,
+        )
+
+    staging = get_upload_staging()
+    try:
+        form = await request.form()
+    except Exception as exc:
+        logger.error("Failed to parse upload form: %s", exc)
+        return JSONResponse({"error": "Invalid multipart form data"}, status_code=400)
+
+    uploaded = []
+    for _field_name, file_field in form.multi_items():
+        if not hasattr(file_field, "filename") or not file_field.filename:
+            continue
+        # Prevent path traversal: keep only the basename
+        safe_name = Path(file_field.filename).name
+        if not safe_name:
+            continue
+        try:
+            content: bytes = await file_field.read()
+        except Exception as exc:
+            logger.error("Failed to read uploaded file '%s': %s", safe_name, exc)
+            continue
+        mime_type: str = (
+            getattr(file_field, "content_type", None) or "application/octet-stream"
+        )
+        try:
+            file_id = staging.store(session_id, safe_name, content, mime_type)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=413)
+        uri = staging.make_uri(session_id, file_id)
+        uploaded.append({"filename": safe_name, "uri": uri, "size": len(content)})
+
+    if not uploaded:
+        return JSONResponse(
+            {"error": "No files found in request. Use multipart/form-data with file fields."},
+            status_code=400,
+        )
+
+    logger.info(
+        "Staged %d file(s) for session %s: %s",
+        len(uploaded),
+        session_id,
+        [u["filename"] for u in uploaded],
+    )
+    return JSONResponse({"success": True, "uploaded": uploaded})
 
 
 async def metrics_endpoint(request: Request) -> Response:
@@ -429,6 +494,8 @@ class AtlassianMCP(FastMCP[MainAppContext]):
 
         # Add metrics endpoint
         app.router.routes.append(Route("/metrics", metrics_endpoint, methods=["GET"]))
+        # Add file upload endpoint (used by construct_upload_endpoint / jira_upload_attachment flow)
+        app.router.routes.append(Route("/upload", upload_endpoint, methods=["POST"]))
 
         return app
 
@@ -548,6 +615,23 @@ class UserTokenMiddleware:
                 logger.debug(
                     "UserTokenMiddleware: X-Atlassian-Enable-Xray header: %s",
                     enable_xray_header_value,
+                )
+
+            # Extract X-MCP-Upload-Base-URL header for the file upload endpoint
+            upload_base_url_header = headers.get(b"x-mcp-upload-base-url")
+            upload_base_url_header_str = (
+                upload_base_url_header.decode("latin-1")
+                if upload_base_url_header
+                else None
+            )
+            upload_base_url_header_str = (
+                upload_base_url_header_str.strip() if upload_base_url_header_str else None
+            )
+            scope_copy["state"]["upload_base_url"] = upload_base_url_header_str
+            if upload_base_url_header_str:
+                logger.debug(
+                    "UserTokenMiddleware: X-MCP-Upload-Base-URL header: %s",
+                    upload_base_url_header_str,
                 )
 
             # Extract User-Agent header for tracking and make it lowercase
