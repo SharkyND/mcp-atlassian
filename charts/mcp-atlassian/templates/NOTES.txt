@@ -9,6 +9,9 @@
   Check your Gateway for the assigned address:
   kubectl get gateway {{ .Values.gatewayApi.gatewayName }} {{- if .Values.gatewayApi.gatewayNamespace }} -n {{ .Values.gatewayApi.gatewayNamespace }}{{ end }}
   {{- end }}
+  {{- if .Values.gatewayApi.sessionPersistence.enabled }}
+  Session persistence enabled ({{ .Values.gatewayApi.sessionPersistence.type | default "Header" }}) via BackendTrafficPolicy.
+  {{- end }}
 {{- else if .Values.ingress.enabled }}
 {{- range $host := .Values.ingress.hosts }}
   {{- range .paths }}

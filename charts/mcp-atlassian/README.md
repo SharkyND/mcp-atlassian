@@ -78,8 +78,15 @@ The following table lists the configurable parameters and their default values.
 | `gatewayApi.sectionName` | Listener section name on the Gateway | `""` |
 | `gatewayApi.annotations` | HTTPRoute annotations | `{}` |
 | `gatewayApi.hostnames` | Hostnames to match | `[]` |
-| `gatewayApi.parentRefs` | Override parentRefs entirely | `[]` |
-| `gatewayApi.rules` | Override routing rules entirely | `[]` |
+| `gatewayApi.rules` | Routing rules | `[{matches: [{path: {type: PathPrefix, value: /}}]}]` |
+| `gatewayApi.filters` | Filters to apply to all rules | `[]` |
+| `gatewayApi.timeouts.request` | Request timeout | `""` |
+| `gatewayApi.timeouts.backendRequest` | Backend request timeout | `""` |
+| `gatewayApi.sessionPersistence.enabled` | Enable sticky sessions (Envoy Gateway BackendTrafficPolicy) | `false` |
+| `gatewayApi.sessionPersistence.type` | Session persistence type: `Header` or `Cookie` | `Header` |
+| `gatewayApi.sessionPersistence.headerName` | Header name for header-based affinity | `x-session-id` |
+| `gatewayApi.sessionPersistence.absoluteTimeout` | Cookie timeout (Cookie type only) | `3600s` |
+| `gatewayApi.sessionPersistence.cookieLifetimeType` | Cookie lifetime: `Permanent` or `Session` | `Permanent` |
 
 ### High Availability Configuration
 
@@ -320,6 +327,11 @@ gatewayApi:
   gatewayNamespace: gateway-system
   hostnames:
     - mcp-atlassian.yourdomain.com
+  # Enable sticky sessions (Envoy Gateway only)
+  sessionPersistence:
+    enabled: true
+    type: Header
+    headerName: x-session-id
 
 resources:
   limits:
