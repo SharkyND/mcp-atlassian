@@ -1,0 +1,64 @@
+{{- if .Values.gatewayApi.enabled -}}
+{{- $fullName := include "mcp-atlassian.fullname" . -}}
+{{- $svcPort := .Values.service.port -}}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ $fullName }}
+  labels:
+    {{- include "mcp-atlassian.labels" . | nindent 4 }}
+  {{- with .Values.gatewayApi.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .Values.gatewayApi.gatewayNamespace }}
+  parentRefs:
+    - name: {{ .Values.gatewayApi.gatewayName }}
+      namespace: {{ .Values.gatewayApi.gatewayNamespace }}
+      {{- if .Values.gatewayApi.sectionName }}
+      sectionName: {{ .Values.gatewayApi.sectionName }}
+      {{- end }}
+  {{- else }}
+  parentRefs:
+    - name: {{ .Values.gatewayApi.gatewayName }}
+      {{- if .Values.gatewayApi.sectionName }}
+      sectionName: {{ .Values.gatewayApi.sectionName }}
+      {{- end }}
+  {{- end }}
+  {{- with .Values.gatewayApi.hostnames }}
+  hostnames:
+    {{- range . }}
+    - {{ . | quote }}
+    {{- end }}
+  {{- end }}
+  rules:
+    {{- range .Values.gatewayApi.rules }}
+    - matches:
+        {{- range .matches }}
+        - path:
+            {{- if .path.type }}
+            type: {{ .path.type }}
+            {{- end }}
+            {{- if .path.value }}
+            value: {{ .path.value }}
+            {{- end }}
+        {{- end }}
+      {{- if $.Values.gatewayApi.filters }}
+      filters:
+        {{- toYaml $.Values.gatewayApi.filters | nindent 8 }}
+      {{- end }}
+      {{- if $.Values.gatewayApi.timeouts }}
+      timeouts:
+        {{- if $.Values.gatewayApi.timeouts.request }}
+        request: {{ $.Values.gatewayApi.timeouts.request }}
+        {{- end }}
+        {{- if $.Values.gatewayApi.timeouts.backendRequest }}
+        backendRequest: {{ $.Values.gatewayApi.timeouts.backendRequest }}
+        {{- end }}
+      {{- end }}
+      backendRefs:
+        - name: {{ $fullName }}
+          port: {{ $svcPort }}
+    {{- end }}
+{{- end }}
