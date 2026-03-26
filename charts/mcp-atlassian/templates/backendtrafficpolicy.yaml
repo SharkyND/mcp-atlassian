@@ -1,0 +1,25 @@
+{{- if and .Values.gatewayApi.enabled .Values.gatewayApi.sessionPersistence.enabled -}}
+{{- $fullName := include "mcp-atlassian.fullname" . -}}
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: BackendTrafficPolicy
+metadata:
+  name: {{ $fullName }}
+  labels:
+    {{- include "mcp-atlassian.labels" . | nindent 4 }}
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: {{ $fullName }}
+  sessionPersistence:
+    type: {{ .Values.gatewayApi.sessionPersistence.type | default "Header" }}
+    {{- if eq ((.Values.gatewayApi.sessionPersistence.type | default "Header")) "Header" }}
+    header:
+      name: {{ .Values.gatewayApi.sessionPersistence.headerName | default "x-session-id" }}
+    {{- end }}
+    {{- if eq ((.Values.gatewayApi.sessionPersistence.type | default "Header")) "Cookie" }}
+    absoluteTimeout: {{ .Values.gatewayApi.sessionPersistence.absoluteTimeout | default "3600s" }}
+    cookieConfig:
+      lifetimeType: {{ .Values.gatewayApi.sessionPersistence.cookieLifetimeType | default "Permanent" }}
+    {{- end }}
+{{- end }}
