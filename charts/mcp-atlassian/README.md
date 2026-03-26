@@ -68,6 +68,19 @@ The following table lists the configurable parameters and their default values.
 | `ingress.hosts` | Ingress hosts configuration | `[{host: "mcp-atlassian.local", paths: [{path: "/", pathType: "Prefix"}]}]` |
 | `ingress.tls` | Ingress TLS configuration | `[]` |
 
+### Gateway API Configuration
+
+| Parameter | Description | Default |
+|-----------|-------------|--------|
+| `gatewayApi.enabled` | Enable Gateway API HTTPRoute | `false` |
+| `gatewayApi.gatewayName` | Name of the Gateway to attach to | `""` |
+| `gatewayApi.gatewayNamespace` | Namespace of the Gateway (if different) | `""` |
+| `gatewayApi.sectionName` | Listener section name on the Gateway | `""` |
+| `gatewayApi.annotations` | HTTPRoute annotations | `{}` |
+| `gatewayApi.hostnames` | Hostnames to match | `[]` |
+| `gatewayApi.parentRefs` | Override parentRefs entirely | `[]` |
+| `gatewayApi.rules` | Override routing rules entirely | `[]` |
+
 ### High Availability Configuration
 
 | Parameter | Description | Default |
@@ -294,6 +307,19 @@ securityContext:
   capabilities:
     drop:
     - ALL
+```
+
+### Gateway API Deployment
+
+```yaml
+# Use Gateway API instead of Ingress
+# Requires a Gateway API controller and Gateway resource
+gatewayApi:
+  enabled: true
+  gatewayName: my-gateway
+  gatewayNamespace: gateway-system
+  hostnames:
+    - mcp-atlassian.yourdomain.com
 
 resources:
   limits:
