@@ -116,16 +116,20 @@ gatewayApi:
   #   request: "60s"
   #   backendRequest: "60s"
 
-  # Session persistence (sticky sessions) via Envoy Gateway BackendTrafficPolicy
+  # Session persistence (sticky sessions) on HTTPRoute rules
   sessionPersistence:
     enabled: false
     # Type: "Header" or "Cookie"
     type: Header
-    # Header name for header-based session affinity
-    headerName: x-session-id
+    # Session name (reflected in cookie/header name)
+    sessionName: mcp-session
+    # Absolute timeout for the session
+    # absoluteTimeout: "10m"
+    # Idle timeout for the session
+    # idleTimeout: "5m"
     # Cookie settings (only used when type: Cookie)
-    # absoluteTimeout: "3600s"
-    # cookieLifetimeType: Permanent
+    # cookieConfig:
+    #   lifetimeType: Session
 
 resources: {}
   # We usually recommend not to specify default resources and to leave this as a conscious

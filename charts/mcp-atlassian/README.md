@@ -82,11 +82,12 @@ The following table lists the configurable parameters and their default values.
 | `gatewayApi.filters` | Filters to apply to all rules | `[]` |
 | `gatewayApi.timeouts.request` | Request timeout | `""` |
 | `gatewayApi.timeouts.backendRequest` | Backend request timeout | `""` |
-| `gatewayApi.sessionPersistence.enabled` | Enable sticky sessions (Envoy Gateway BackendTrafficPolicy) | `false` |
+| `gatewayApi.sessionPersistence.enabled` | Enable session persistence on HTTPRoute rules | `false` |
 | `gatewayApi.sessionPersistence.type` | Session persistence type: `Header` or `Cookie` | `Header` |
-| `gatewayApi.sessionPersistence.headerName` | Header name for header-based affinity | `x-session-id` |
-| `gatewayApi.sessionPersistence.absoluteTimeout` | Cookie timeout (Cookie type only) | `3600s` |
-| `gatewayApi.sessionPersistence.cookieLifetimeType` | Cookie lifetime: `Permanent` or `Session` | `Permanent` |
+| `gatewayApi.sessionPersistence.sessionName` | Session name (reflected in cookie/header) | `mcp-session` |
+| `gatewayApi.sessionPersistence.absoluteTimeout` | Absolute timeout for the session | `""` |
+| `gatewayApi.sessionPersistence.idleTimeout` | Idle timeout for the session | `""` |
+| `gatewayApi.sessionPersistence.cookieConfig` | Cookie config (Cookie type only), e.g. `{lifetimeType: Session}` | `{}` |
 
 ### High Availability Configuration
 
@@ -327,11 +328,11 @@ gatewayApi:
   gatewayNamespace: gateway-system
   hostnames:
     - mcp-atlassian.yourdomain.com
-  # Enable sticky sessions (Envoy Gateway only)
+  # Enable sticky sessions
   sessionPersistence:
     enabled: true
     type: Header
-    headerName: x-session-id
+    sessionName: mcp-session
 
 resources:
   limits:
