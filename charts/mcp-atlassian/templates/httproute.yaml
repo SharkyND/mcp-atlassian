@@ -57,6 +57,25 @@ spec:
         backendRequest: {{ $.Values.gatewayApi.timeouts.backendRequest }}
         {{- end }}
       {{- end }}
+      {{- if $.Values.gatewayApi.sessionPersistence.enabled }}
+      sessionPersistence:
+        type: {{ $.Values.gatewayApi.sessionPersistence.type | default "Header" }}
+        {{- if $.Values.gatewayApi.sessionPersistence.sessionName }}
+        sessionName: {{ $.Values.gatewayApi.sessionPersistence.sessionName }}
+        {{- end }}
+        {{- if $.Values.gatewayApi.sessionPersistence.absoluteTimeout }}
+        absoluteTimeout: {{ $.Values.gatewayApi.sessionPersistence.absoluteTimeout }}
+        {{- end }}
+        {{- if $.Values.gatewayApi.sessionPersistence.idleTimeout }}
+        idleTimeout: {{ $.Values.gatewayApi.sessionPersistence.idleTimeout }}
+        {{- end }}
+        {{- if eq ($.Values.gatewayApi.sessionPersistence.type | default "Header") "Cookie" }}
+        {{- with $.Values.gatewayApi.sessionPersistence.cookieConfig }}
+        cookieConfig:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        {{- end }}
+      {{- end }}
       backendRefs:
         - name: {{ $fullName }}
           port: {{ $svcPort }}
