@@ -121,8 +121,8 @@ gatewayApi:
     enabled: false
     # Type: "Header" or "Cookie"
     type: Header
-    # Session name (reflected in cookie/header name)
-    sessionName: mcp-session
+    # Session name (reflected in cookie/header name, matches MCP protocol header)
+    sessionName: mcp-session-id
     # Absolute timeout for the session
     # absoluteTimeout: "10m"
     # Idle timeout for the session
