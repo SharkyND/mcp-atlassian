@@ -1078,3 +1078,102 @@ async def add_pull_request_comment(
             log_level, f"bitbucket_add_pull_request_comment failed: {error_message}"
         )
         return json.dumps(error_result, indent=2)
+
+
+@bitbucket_mcp.tool(tags={"bitbucket", "write"})
+@check_write_access
+async def add_pull_request_inline_comment(
+    ctx: Context,
+    workspace: Annotated[
+        str,
+        Field(description="Workspace name (Cloud) or project key (Server/DC)"),
+    ],
+    repository: Annotated[
+        str,
+        Field(description="Repository name"),
+    ],
+    pull_request_id: Annotated[
+        int,
+        Field(description="Pull request ID"),
+    ],
+    comment: Annotated[
+        str,
+        Field(description="Comment text"),
+    ],
+    file_path: Annotated[
+        str,
+        Field(description="Path to the file being commented on (e.g. 'src/main.py')"),
+    ],
+    line: Annotated[
+        int,
+        Field(description="Line number in the file to attach the comment to", ge=1),
+    ],
+    line_type: Annotated[
+        Literal["ADDED", "REMOVED", "CONTEXT"],
+        Field(
+            description=(
+                "Type of the line being commented on. Only used for Bitbucket Server/DC. "
+                "'ADDED' for new lines, 'REMOVED' for deleted lines, 'CONTEXT' for unchanged lines."
+            ),
+            default="ADDED",
+        ),
+    ] = "ADDED",
+) -> str:
+    """
+    Add an inline comment on a specific line of a file in a pull request.
+
+    Args:
+        workspace: Workspace name or project key.
+        repository: Repository name.
+        pull_request_id: Pull request ID.
+        comment: Comment text.
+        file_path: Path to the file to comment on.
+        line: Line number to attach the comment to.
+        line_type: Line type for Server/DC ('ADDED', 'REMOVED', or 'CONTEXT').
+
+    Returns:
+        JSON string containing the created comment details.
+
+    Raises:
+        ValueError: If the Bitbucket client is not configured or available.
+    """
+    try:
+        bitbucket = await get_bitbucket_fetcher(ctx)
+
+        result = bitbucket.add_pull_request_inline_comment(
+            workspace, repository, pull_request_id, comment, file_path, line, line_type
+        )
+
+        return json.dumps(
+            {
+                "success": True,
+                "comment": result,
+                "pull_request_id": pull_request_id,
+                "file_path": file_path,
+                "line": line,
+            },
+            indent=2,
+        )
+    except Exception as e:
+        log_level = logging.ERROR
+        if isinstance(e, MCPAtlassianAuthenticationError):
+            error_message = f"Authentication/Permission Error: {str(e)}"
+        elif isinstance(e, OSError | HTTPError):
+            error_message = f"Network or API Error: {str(e)}"
+        elif isinstance(e, ValueError):
+            error_message = f"Configuration Error: {str(e)}"
+        else:
+            error_message = f"An unexpected error occurred while adding inline comment to PR {pull_request_id} in {workspace}/{repository}."
+            logger.exception(
+                "Unexpected error in bitbucket_add_pull_request_inline_comment:"
+            )
+
+        error_result = {
+            "success": False,
+            "error": error_message,
+        }
+        logger.log(
+            log_level,
+            f"bitbucket_add_pull_request_inline_comment failed: {error_message}",
+        )
+        return json.dumps(error_result, indent=2)
