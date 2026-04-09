@@ -57,9 +57,12 @@ def mock_jira_fetcher():
         {"author": {"displayName": "Test User"}, "timeSpent": "1h"}
     ]
     mock_fetcher.download_issue_attachments.return_value = {
-        "issue": "TEST-123",
-        "target_dir": "/tmp/downloads",
-        "downloaded": 2,
+        "issue_key": "TEST-123",
+        "downloaded": [
+            {"filename": "test-1.txt", "path": "/tmp/downloads/test-1.txt"},
+            {"filename": "test-2.txt", "path": "/tmp/downloads/test-2.txt"},
+        ],
+        "failed": [],
     }
 
     board_mock = MagicMock()
@@ -672,10 +675,75 @@ async def test_download_attachments_tool(jira_client, mock_jira_fetcher):
         {"issue_key": "PROJ-1", "target_dir": "/tmp/downloads"},
     )
     mock_jira_fetcher.download_issue_attachments.assert_called_once_with(
-        issue_key="PROJ-1", target_dir="/tmp/downloads"
+        issue_key="PROJ-1", target_dir="/tmp/downloads", return_content=False
     )
     payload = json.loads(response.content[0].text)
-    assert payload["downloaded"] == 2
+    assert len(payload["downloaded"]) == 2
+
+
+@pytest.mark.anyio
+async def test_download_attachments_tool_returns_resources_by_default(
+    jira_client, mock_jira_fetcher
+):
+    """Test jira_download_attachments defaults to resource caching without target_dir."""
+    mock_jira_fetcher.download_issue_attachments.return_value = {
+        "issue_key": "PROJ-1",
+        "downloaded": [
+            {
+                "filename": "test-1.txt",
+                "static_resource_uri": "jira://attachments/PROJ-1/test-1.txt",
+            }
+        ],
+        "failed": [],
+    }
+
+    with patch(
+        "mcp_atlassian.servers.jira._register_static_attachment_resource"
+    ) as mock_register:
+        response = await jira_client.call_tool(
+            "jira_download_attachments",
+            {"issue_key": "PROJ-1"},
+        )
+
+    mock_jira_fetcher.download_issue_attachments.assert_called_with(
+        issue_key="PROJ-1", target_dir="", return_content=True
+    )
+    mock_register.assert_called_once_with("PROJ-1", "test-1.txt")
+    payload = json.loads(response.content[0].text)
+    assert payload["downloaded"][0]["filename"] == "test-1.txt"
+
+
+def test_attachment_cache_clear_deregisters_static_resources(monkeypatch):
+    """Test cached attachment cleanup removes static resource registrations."""
+    from mcp_atlassian.servers import jira as jira_server
+
+    class DummyResourceManager:
+        def __init__(self) -> None:
+            self._resources = {}
+
+        def add_resource(self, resource) -> None:
+            self._resources[str(resource.uri)] = resource
+
+    cache = jira_server.get_attachment_cache()
+    cache.clear()
+
+    resource_manager = DummyResourceManager()
+    monkeypatch.setattr(jira_server.jira_mcp, "_resource_manager", resource_manager)
+
+    cache.store(
+        issue_key="PROJ-1",
+        filename="test-1.txt",
+        content=b"hello",
+        mime_type="text/plain",
+    )
+    jira_server._register_static_attachment_resource("PROJ-1", "test-1.txt")
+
+    uri = jira_server._make_attachment_resource_uri("PROJ-1", "test-1.txt")
+    assert uri in resource_manager._resources
+
+    cache.clear()
+
+    assert uri not in resource_manager._resources
 
 
 @pytest.mark.anyio

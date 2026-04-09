@@ -2,16 +2,22 @@
 
 import hashlib
 import logging
-from datetime import datetime, timedelta
+from collections.abc import Callable
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 logger = logging.getLogger("mcp-jira")
 
 
+def _utcnow() -> datetime:
+    """Return a timezone-aware UTC timestamp."""
+    return datetime.now(timezone.utc)
+
+
 class AttachmentCache:
     """Thread-safe in-memory cache for storing attachment data temporarily."""
 
-    def __init__(self, ttl_minutes: int = 10, max_size_mb: int = 100):
+    def __init__(self, ttl_minutes: int = 10, max_size_mb: int = 100) -> None:
         """
         Initialize the attachment cache.
 
@@ -23,19 +29,23 @@ class AttachmentCache:
         self._ttl_minutes = ttl_minutes
         self._max_size_bytes = max_size_mb * 1024 * 1024
         self._current_size_bytes = 0
+        self._remove_listeners: list[Callable[[str, str], None]] = []
+
+    def add_remove_listener(self, listener: Callable[[str, str], None]) -> None:
+        """Register a callback for when the last cached copy of a file is removed."""
+        if listener not in self._remove_listeners:
+            self._remove_listeners.append(listener)
 
     def _generate_key(self, issue_key: str, filename: str) -> str:
         """Generate a unique cache key for an attachment."""
-        content = f"{issue_key}:{filename}:{datetime.now().isoformat()}"
+        content = f"{issue_key}:{filename}:{_utcnow().isoformat()}"
         return hashlib.sha256(content.encode()).hexdigest()[:16]
 
     def _evict_expired(self) -> None:
         """Remove expired entries from cache."""
-        now = datetime.now()
+        now = _utcnow()
         expired_keys = [
-            key
-            for key, value in self._cache.items()
-            if now > value["expires_at"]
+            key for key, value in self._cache.items() if now > value["expires_at"]
         ]
         for key in expired_keys:
             self._remove(key)
@@ -46,9 +56,7 @@ class AttachmentCache:
             return
 
         # Sort by last accessed time
-        sorted_items = sorted(
-            self._cache.items(), key=lambda x: x[1]["last_accessed"]
-        )
+        sorted_items = sorted(self._cache.items(), key=lambda x: x[1]["last_accessed"])
 
         # Remove oldest 20% of items
         to_remove = max(1, len(sorted_items) // 5)
@@ -59,9 +67,28 @@ class AttachmentCache:
         """Remove an item from cache."""
         if key in self._cache:
             item = self._cache[key]
+            issue_key = item["issue_key"]
+            filename = item["filename"]
             self._current_size_bytes -= len(item["content"])
             del self._cache[key]
             logger.debug(f"Removed cached attachment: {key}")
+
+            has_remaining_copy = any(
+                cached_item["issue_key"] == issue_key
+                and cached_item["filename"] == filename
+                for cached_item in self._cache.values()
+            )
+            if not has_remaining_copy:
+                for listener in self._remove_listeners:
+                    try:
+                        listener(issue_key, filename)
+                    except Exception as exc:
+                        logger.warning(
+                            "Attachment cache remove listener failed for %s/%s: %s",
+                            issue_key,
+                            filename,
+                            exc,
+                        )
 
     def store(
         self, issue_key: str, filename: str, content: bytes, mime_type: str
@@ -100,15 +127,15 @@ class AttachmentCache:
 
         # Generate unique key and store
         cache_key = self._generate_key(issue_key, filename)
-        expires_at = datetime.now() + timedelta(minutes=self._ttl_minutes)
+        expires_at = _utcnow() + timedelta(minutes=self._ttl_minutes)
 
         self._cache[cache_key] = {
             "issue_key": issue_key,
             "filename": filename,
             "content": content,
             "mime_type": mime_type,
-            "created_at": datetime.now(),
-            "last_accessed": datetime.now(),
+            "created_at": _utcnow(),
+            "last_accessed": _utcnow(),
             "expires_at": expires_at,
             "size": content_size,
         }
@@ -149,7 +176,7 @@ class AttachmentCache:
         # Use the most recently created entry
         matches.sort(key=lambda x: x[1]["created_at"], reverse=True)
         key, item = matches[0]
-        item["last_accessed"] = datetime.now()
+        item["last_accessed"] = _utcnow()
 
         logger.debug(
             f"Cache hit for issue={issue_key}, filename={filename} (key: {key})"
@@ -178,7 +205,7 @@ class AttachmentCache:
             return None
 
         item = self._cache[cache_key]
-        item["last_accessed"] = datetime.now()
+        item["last_accessed"] = _utcnow()
 
         logger.debug(f"Cache hit for key: {cache_key} (file: {item['filename']})")
         return {
@@ -191,8 +218,8 @@ class AttachmentCache:
     def clear(self) -> None:
         """Clear all cached attachments."""
         count = len(self._cache)
-        self._cache.clear()
-        self._current_size_bytes = 0
+        for key in list(self._cache):
+            self._remove(key)
         logger.info(f"Cleared attachment cache ({count} items)")
 
     def get_stats(self) -> dict[str, Any]:

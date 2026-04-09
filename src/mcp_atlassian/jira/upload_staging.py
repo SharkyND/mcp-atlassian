@@ -9,10 +9,16 @@ URI scheme: upload://sessions/<session_id>/<file_id>
 import logging
 import os
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 logger = logging.getLogger("mcp-jira")
+
+
+def _utcnow() -> datetime:
+    """Return a timezone-aware UTC timestamp."""
+    return datetime.now(timezone.utc)
+
 
 _TTL_MINUTES = int(os.environ.get("UPLOAD_STAGING_TTL_MINUTES", "30"))
 _MAX_SIZE_MB = int(os.environ.get("UPLOAD_STAGING_MAX_SIZE_MB", "200"))
@@ -25,13 +31,22 @@ class UploadStagingStore:
     def __init__(self, ttl_minutes: int = 30, max_size_mb: int = 200) -> None:
         # {session_id: {file_id: entry_dict}}
         self._store: dict[str, dict[str, dict[str, Any]]] = {}
+        self._sessions: dict[str, datetime] = {}
         self._ttl = timedelta(minutes=ttl_minutes)
         self._max_size_bytes = max_size_mb * 1024 * 1024
         self._current_size_bytes = 0
 
     def create_session(self) -> str:
         """Generate a new opaque upload session token."""
-        return secrets.token_urlsafe(24)
+        session_id = secrets.token_urlsafe(24)
+        self._sessions[session_id] = _utcnow() + self._ttl
+        return session_id
+
+    def is_valid_session(self, session_id: str) -> bool:
+        """Return True when the session was issued by the server and is unexpired."""
+        self._evict_expired()
+        expires_at = self._sessions.get(session_id)
+        return expires_at is not None and _utcnow() <= expires_at
 
     def store(
         self, session_id: str, filename: str, content: bytes, mime_type: str
@@ -48,9 +63,16 @@ class UploadStagingStore:
             file_id component of the resulting upload:// URI.
 
         Raises:
+            PermissionError: If the session was not issued by the server or expired.
             ValueError: If the file is too large for the staging store.
         """
         self._evict_expired()
+
+        if not self.is_valid_session(session_id):
+            raise PermissionError(
+                "Upload session is invalid or expired. "
+                "Call construct_upload_endpoint to create a new session."
+            )
 
         content_size = len(content)
         if content_size > self._max_size_bytes:
@@ -71,8 +93,8 @@ class UploadStagingStore:
             "filename": filename,
             "content": content,
             "mime_type": mime_type,
-            "created_at": datetime.now(),
-            "expires_at": datetime.now() + self._ttl,
+            "created_at": _utcnow(),
+            "expires_at": _utcnow() + self._ttl,
         }
         self._store.setdefault(session_id, {})[file_id] = entry
         self._current_size_bytes += content_size
@@ -89,7 +111,7 @@ class UploadStagingStore:
         """Return a staged entry, or None if not found / expired."""
         self._evict_expired()
         entry = self._store.get(session_id, {}).get(file_id)
-        if entry and datetime.now() <= entry["expires_at"]:
+        if entry and _utcnow() <= entry["expires_at"]:
             return entry
         return None
 
@@ -102,6 +124,12 @@ class UploadStagingStore:
             if not session:
                 del self._store[session_id]
                 logger.debug("Removed empty upload session: %s", session_id)
+
+    def clear(self) -> None:
+        """Clear all staged files and issued sessions."""
+        self._store.clear()
+        self._sessions.clear()
+        self._current_size_bytes = 0
 
     # ------------------------------------------------------------------
     # URI helpers
@@ -120,7 +148,7 @@ class UploadStagingStore:
         """
         if not uri.startswith(_URI_PREFIX):
             return None
-        rest = uri[len(_URI_PREFIX):]
+        rest = uri[len(_URI_PREFIX) :]
         parts = rest.split("/", 1)
         if len(parts) != 2 or not parts[0] or not parts[1]:
             return None
@@ -131,7 +159,18 @@ class UploadStagingStore:
     # ------------------------------------------------------------------
 
     def _evict_expired(self) -> None:
-        now = datetime.now()
+        now = _utcnow()
+        expired_sessions = [
+            session_id
+            for session_id, expires_at in self._sessions.items()
+            if now > expires_at
+        ]
+        for session_id in expired_sessions:
+            session = self._store.pop(session_id, {})
+            for entry in session.values():
+                self._current_size_bytes -= len(entry["content"])
+            self._sessions.pop(session_id, None)
+
         for session_id in list(self._store):
             for file_id in list(self._store[session_id]):
                 if now > self._store[session_id][file_id]["expires_at"]:

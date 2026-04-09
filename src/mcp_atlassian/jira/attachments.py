@@ -1,6 +1,5 @@
 """Attachment operations for Jira API."""
 
-import base64
 import io
 import logging
 import os
@@ -70,7 +69,10 @@ class AttachmentsMixin(JiraClient, AttachmentsOperationsProto):
             return False
 
     def download_issue_attachments(
-        self, issue_key: str, target_dir: str = "", return_content: bool = True
+        self,
+        issue_key: str,
+        target_dir: str = "",
+        return_content: bool | None = None,
     ) -> dict[str, Any]:
         """
         Download all attachments for a Jira issue.
@@ -78,12 +80,17 @@ class AttachmentsMixin(JiraClient, AttachmentsOperationsProto):
         Args:
             issue_key: The Jira issue key (e.g., 'PROJ-123')
             target_dir: The directory where attachments should be saved (optional)
-            return_content: If True, returns MCP resource URIs instead of base64 content (default: True)
+            return_content: If True, returns MCP resource URIs. Defaults to True
+                when target_dir is omitted and False when target_dir is provided.
 
         Returns:
             A dictionary with download results, including resource URIs if requested
         """
         # Handle target directory if saving files
+        should_return_content = return_content
+        if should_return_content is None:
+            should_return_content = not bool(target_dir)
+
         target_path = None
         if target_dir:
             # Convert to absolute path if relative
@@ -146,25 +153,58 @@ class AttachmentsMixin(JiraClient, AttachmentsOperationsProto):
                 continue
 
             try:
-                # Fetch the attachment content
-                response = self.jira._session.get(attachment.url, stream=True)
-                response.raise_for_status()
-                content_bytes = response.content
-
                 # Create a safe filename
                 safe_filename = Path(attachment.filename).name
-                
+                file_path = target_path / safe_filename if target_path else None
+
                 attachment_info = {
                     "filename": attachment.filename,
                     "size": attachment.size,
                 }
 
+                if target_path and not should_return_content:
+                    if self.download_attachment(attachment.url, str(file_path)):
+                        attachment_info["path"] = str(file_path)
+                        downloaded.append(attachment_info)
+                    else:
+                        failed.append(
+                            {
+                                "filename": attachment.filename,
+                                "error": "Failed to download attachment",
+                            }
+                        )
+                    continue
+
+                response = self.jira._session.get(attachment.url, stream=True)
+                response.raise_for_status()
+
+                content_buffer = bytearray() if should_return_content else None
+                file_handle = open(file_path, "wb") if file_path else None
+                try:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        if not chunk:
+                            continue
+                        if file_handle:
+                            file_handle.write(chunk)
+                        if content_buffer is not None:
+                            content_buffer.extend(chunk)
+                finally:
+                    if file_handle:
+                        file_handle.close()
+
+                if file_path:
+                    attachment_info["path"] = str(file_path)
+                    logger.info(f"Saved attachment to {file_path}")
+
                 # Store in cache and return resource URI if requested
-                if return_content:
+                if should_return_content:
+                    content_bytes = bytes(content_buffer or b"")
                     try:
                         # Determine MIME type from attachment or use generic binary
-                        mime_type = attachment.content_type or "application/octet-stream"
-                        
+                        mime_type = (
+                            attachment.content_type or "application/octet-stream"
+                        )
+
                         # Store in cache
                         cache_key = cache.store(
                             issue_key=issue_key,
@@ -172,7 +212,7 @@ class AttachmentsMixin(JiraClient, AttachmentsOperationsProto):
                             content=content_bytes,
                             mime_type=mime_type,
                         )
-                        
+
                         # Static resource URI: issue_key + filename, no cache key needed.
                         # Becomes immediately accessible in MCP resource browser.
                         static_resource_uri = (
@@ -188,35 +228,31 @@ class AttachmentsMixin(JiraClient, AttachmentsOperationsProto):
                         attachment_info["resource_uri"] = resource_uri
                         attachment_info["cache_key"] = cache_key
                         attachment_info["mime_type"] = mime_type
-                        
+
                         logger.info(
                             f"Cached attachment {attachment.filename} with resource URI: {resource_uri}"
                         )
                     except Exception as cache_error:
-                        logger.warning(
-                            f"Failed to cache {attachment.filename}: {str(cache_error)}. "
-                            "Falling back to base64 encoding."
+                        message = (
+                            f"Failed to cache attachment content for {attachment.filename}: "
+                            f"{cache_error}"
                         )
-                        # Fallback to base64 if cache fails
-                        content_b64 = base64.b64encode(content_bytes).decode('utf-8')
-                        attachment_info["content"] = content_b64
-                        attachment_info["encoding"] = "base64"
-
-                # Save to disk if target_dir provided
-                if target_path:
-                    file_path = target_path / safe_filename
-                    with open(file_path, "wb") as f:
-                        f.write(content_bytes)
-                    attachment_info["path"] = str(file_path)
-                    logger.info(f"Saved attachment to {file_path}")
+                        logger.warning(message)
+                        if not file_path:
+                            failed.append(
+                                {
+                                    "filename": attachment.filename,
+                                    "error": message,
+                                }
+                            )
+                            continue
+                        attachment_info["resource_error"] = str(cache_error)
 
                 downloaded.append(attachment_info)
 
             except Exception as e:
                 logger.error(f"Failed to download {attachment.filename}: {str(e)}")
-                failed.append(
-                    {"filename": attachment.filename, "error": str(e)}
-                )
+                failed.append({"filename": attachment.filename, "error": str(e)})
 
         return {
             "success": True,
@@ -342,7 +378,9 @@ class AttachmentsMixin(JiraClient, AttachmentsOperationsProto):
                     "issue_key": issue_key,
                     "filename": filename,
                     "size": len(content),
-                    "id": attachment.get("id") if isinstance(attachment, dict) else None,
+                    "id": attachment.get("id")
+                    if isinstance(attachment, dict)
+                    else None,
                 }
             logger.error("Upload returned empty response for '%s'", filename)
             return {

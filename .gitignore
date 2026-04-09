@@ -75,3 +75,6 @@ playground/
 
 # Claude
 .claude/
+
+# vcode/
+.vscode/

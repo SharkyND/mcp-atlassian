@@ -17,13 +17,13 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
-from mcp_atlassian.jira.upload_staging import get_upload_staging
 from mcp_atlassian.bitbucket import BitbucketFetcher
 from mcp_atlassian.bitbucket.config import BitbucketConfig
 from mcp_atlassian.confluence import ConfluenceFetcher
 from mcp_atlassian.confluence.config import ConfluenceConfig
 from mcp_atlassian.jira import JiraFetcher
 from mcp_atlassian.jira.config import JiraConfig
+from mcp_atlassian.jira.upload_staging import get_upload_staging
 from mcp_atlassian.utils.environment import get_available_services
 from mcp_atlassian.utils.io import (
     get_cli_read_only_flag,
@@ -74,6 +74,17 @@ async def upload_endpoint(request: Request) -> JSONResponse:
         )
 
     staging = get_upload_staging()
+    if not staging.is_valid_session(session_id):
+        return JSONResponse(
+            {
+                "error": (
+                    "Invalid or expired upload session. "
+                    "Call construct_upload_endpoint to create a new session."
+                )
+            },
+            status_code=403,
+        )
+
     try:
         form = await request.form()
     except Exception as exc:
@@ -98,6 +109,8 @@ async def upload_endpoint(request: Request) -> JSONResponse:
         )
         try:
             file_id = staging.store(session_id, safe_name, content, mime_type)
+        except PermissionError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=403)
         except ValueError as exc:
             return JSONResponse({"error": str(exc)}, status_code=413)
         uri = staging.make_uri(session_id, file_id)
@@ -105,7 +118,9 @@ async def upload_endpoint(request: Request) -> JSONResponse:
 
     if not uploaded:
         return JSONResponse(
-            {"error": "No files found in request. Use multipart/form-data with file fields."},
+            {
+                "error": "No files found in request. Use multipart/form-data with file fields."
+            },
             status_code=400,
         )
 
@@ -625,7 +640,9 @@ class UserTokenMiddleware:
                 else None
             )
             upload_base_url_header_str = (
-                upload_base_url_header_str.strip() if upload_base_url_header_str else None
+                upload_base_url_header_str.strip()
+                if upload_base_url_header_str
+                else None
             )
             scope_copy["state"]["upload_base_url"] = upload_base_url_header_str
             if upload_base_url_header_str:
