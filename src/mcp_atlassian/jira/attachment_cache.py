@@ -2,6 +2,7 @@
 
 import hashlib
 import logging
+import secrets
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -30,6 +31,7 @@ class AttachmentCache:
         self._max_size_bytes = max_size_mb * 1024 * 1024
         self._current_size_bytes = 0
         self._remove_listeners: list[Callable[[str, str], None]] = []
+        self._download_tokens: dict[str, dict[str, Any]] = {}
 
     def add_remove_listener(self, listener: Callable[[str, str], None]) -> None:
         """Register a callback for when the last cached copy of a file is removed."""
@@ -49,6 +51,14 @@ class AttachmentCache:
         ]
         for key in expired_keys:
             self._remove(key)
+
+        expired_tokens = [
+            token
+            for token, value in self._download_tokens.items()
+            if now > value["expires_at"]
+        ]
+        for token in expired_tokens:
+            del self._download_tokens[token]
 
     def _evict_lru(self) -> None:
         """Remove least recently used entries to free space."""
@@ -79,6 +89,7 @@ class AttachmentCache:
                 for cached_item in self._cache.values()
             )
             if not has_remaining_copy:
+                self._revoke_download_tokens(issue_key, filename)
                 for listener in self._remove_listeners:
                     try:
                         listener(issue_key, filename)
@@ -89,6 +100,35 @@ class AttachmentCache:
                             filename,
                             exc,
                         )
+
+    def _get_latest_match(
+        self, issue_key: str, filename: str
+    ) -> tuple[str, dict[str, Any]] | None:
+        """Return the newest cached entry for an issue/filename pair."""
+        self._evict_expired()
+
+        matches = [
+            (key, item)
+            for key, item in self._cache.items()
+            if item["issue_key"] == issue_key and item["filename"] == filename
+        ]
+
+        if not matches:
+            logger.debug(f"Cache miss for issue={issue_key}, filename={filename}")
+            return None
+
+        matches.sort(key=lambda x: x[1]["created_at"], reverse=True)
+        return matches[0]
+
+    def _revoke_download_tokens(self, issue_key: str, filename: str) -> None:
+        """Remove outstanding download tokens for a cached attachment."""
+        matching_tokens = [
+            token
+            for token, value in self._download_tokens.items()
+            if value["issue_key"] == issue_key and value["filename"] == filename
+        ]
+        for token in matching_tokens:
+            del self._download_tokens[token]
 
     def store(
         self, issue_key: str, filename: str, content: bytes, mime_type: str
@@ -161,21 +201,12 @@ class AttachmentCache:
         Returns:
             Dictionary with 'content', 'mime_type', 'filename', 'issue_key' or None if not found
         """
-        self._evict_expired()
+        match = self._get_latest_match(issue_key, filename)
 
-        matches = [
-            (key, item)
-            for key, item in self._cache.items()
-            if item["issue_key"] == issue_key and item["filename"] == filename
-        ]
-
-        if not matches:
-            logger.debug(f"Cache miss for issue={issue_key}, filename={filename}")
+        if not match:
             return None
 
-        # Use the most recently created entry
-        matches.sort(key=lambda x: x[1]["created_at"], reverse=True)
-        key, item = matches[0]
+        key, item = match
         item["last_accessed"] = _utcnow()
 
         logger.debug(
@@ -186,6 +217,56 @@ class AttachmentCache:
             "mime_type": item["mime_type"],
             "filename": item["filename"],
             "issue_key": item["issue_key"],
+        }
+
+    def create_download_token(
+        self, issue_key: str, filename: str, ttl_minutes: int = 5
+    ) -> dict[str, Any]:
+        """Create a short-lived token for downloading a cached attachment over HTTP."""
+        match = self._get_latest_match(issue_key, filename)
+        if not match:
+            raise ValueError(
+                f"Attachment '{filename}' for issue '{issue_key}' is not cached. "
+                "Run jira_download_attachments with return_content=true first."
+            )
+
+        _, item = match
+        requested_expiry = _utcnow() + timedelta(minutes=ttl_minutes)
+        expires_at = min(requested_expiry, item["expires_at"])
+        token = secrets.token_urlsafe(24)
+
+        self._download_tokens[token] = {
+            "issue_key": issue_key,
+            "filename": filename,
+            "expires_at": expires_at,
+        }
+
+        return {
+            "token": token,
+            "expires_at": expires_at,
+            "mime_type": item["mime_type"],
+            "filename": item["filename"],
+            "issue_key": item["issue_key"],
+        }
+
+    def get_by_download_token(self, token: str) -> dict[str, Any] | None:
+        """Resolve a download token to the current cached attachment content."""
+        self._evict_expired()
+        token_data = self._download_tokens.get(token)
+        if not token_data:
+            logger.debug(f"Download token miss: {token}")
+            return None
+
+        attachment = self.get_by_issue_and_filename(
+            token_data["issue_key"], token_data["filename"]
+        )
+        if not attachment:
+            del self._download_tokens[token]
+            return None
+
+        return {
+            **attachment,
+            "expires_at": token_data["expires_at"],
         }
 
     def get(self, cache_key: str) -> dict[str, Any] | None:

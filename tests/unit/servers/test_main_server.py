@@ -7,7 +7,12 @@ import pytest
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from mcp_atlassian.servers.main import UserTokenMiddleware, main_mcp, upload_endpoint
+from mcp_atlassian.servers.main import (
+    UserTokenMiddleware,
+    download_endpoint,
+    main_mcp,
+    upload_endpoint,
+)
 
 
 @pytest.mark.anyio
@@ -108,6 +113,44 @@ async def test_upload_endpoint_rejects_invalid_session():
     assert response.status_code == 403
     assert b"Invalid or expired upload session" in response.body
     request.form.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_download_endpoint_rejects_invalid_token():
+    """Test the download endpoint rejects missing or expired download tokens."""
+    request = MagicMock(spec=Request)
+    request.path_params = {"token": "invalid-token"}
+
+    cache = MagicMock()
+    cache.get_by_download_token.return_value = None
+
+    with patch("mcp_atlassian.servers.main.get_attachment_cache", return_value=cache):
+        response = await download_endpoint(request)
+
+    assert response.status_code == 403
+    assert b"Invalid or expired download token" in response.body
+
+
+@pytest.mark.anyio
+async def test_download_endpoint_serves_cached_attachment():
+    """Test the download endpoint returns cached attachment bytes and headers."""
+    request = MagicMock(spec=Request)
+    request.path_params = {"token": "valid-token"}
+
+    cache = MagicMock()
+    cache.get_by_download_token.return_value = {
+        "filename": "report 1.pdf",
+        "mime_type": "application/pdf",
+        "content": b"pdf-bytes",
+    }
+
+    with patch("mcp_atlassian.servers.main.get_attachment_cache", return_value=cache):
+        response = await download_endpoint(request)
+
+    assert response.status_code == 200
+    assert response.body == b"pdf-bytes"
+    assert response.headers["content-type"] == "application/pdf"
+    assert "filename*=UTF-8''report%201.pdf" in response.headers["content-disposition"]
 
 
 class TestUserTokenMiddleware:

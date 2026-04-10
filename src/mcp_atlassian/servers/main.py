@@ -6,6 +6,7 @@ import os
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from typing import Any, Literal, Optional
+from urllib.parse import quote
 
 from cachetools import TTLCache
 from fastmcp import FastMCP, settings
@@ -22,6 +23,7 @@ from mcp_atlassian.bitbucket.config import BitbucketConfig
 from mcp_atlassian.confluence import ConfluenceFetcher
 from mcp_atlassian.confluence.config import ConfluenceConfig
 from mcp_atlassian.jira import JiraFetcher
+from mcp_atlassian.jira.attachment_cache import get_attachment_cache
 from mcp_atlassian.jira.config import JiraConfig
 from mcp_atlassian.jira.upload_staging import get_upload_staging
 from mcp_atlassian.utils.environment import get_available_services
@@ -131,6 +133,36 @@ async def upload_endpoint(request: Request) -> JSONResponse:
         [u["filename"] for u in uploaded],
     )
     return JSONResponse({"success": True, "uploaded": uploaded})
+
+
+async def download_endpoint(request: Request) -> Response:
+    """Serve a cached Jira attachment via a short-lived download token."""
+    token = request.path_params.get("token")
+    if not token:
+        return JSONResponse({"error": "Download token is required"}, status_code=400)
+
+    attachment = get_attachment_cache().get_by_download_token(token)
+    if not attachment:
+        return JSONResponse(
+            {
+                "error": (
+                    "Invalid or expired download token. "
+                    "Generate a new download URL and try again."
+                )
+            },
+            status_code=403,
+        )
+
+    encoded_name = quote(attachment["filename"], safe="")
+    headers = {
+        "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_name}",
+        "Cache-Control": "private, max-age=0, no-store",
+    }
+    return Response(
+        content=attachment["content"],
+        media_type=attachment["mime_type"],
+        headers=headers,
+    )
 
 
 async def metrics_endpoint(request: Request) -> Response:
@@ -511,6 +543,10 @@ class AtlassianMCP(FastMCP[MainAppContext]):
         app.router.routes.append(Route("/metrics", metrics_endpoint, methods=["GET"]))
         # Add file upload endpoint (used by construct_upload_endpoint / jira_upload_attachment flow)
         app.router.routes.append(Route("/upload", upload_endpoint, methods=["POST"]))
+        # Add short-lived attachment download endpoint (used by construct_download_endpoint)
+        app.router.routes.append(
+            Route("/download/{token}", download_endpoint, methods=["GET"])
+        )
 
         return app
 

@@ -26,6 +26,26 @@ jira_mcp = FastMCP(
 )
 
 
+def _get_external_base_url() -> str:
+    """Resolve the external base URL used for upload/download helper endpoints."""
+    import os
+
+    from fastmcp.server.dependencies import get_http_request
+
+    base_url: str | None = None
+    try:
+        http_request = get_http_request()
+        candidate = getattr(http_request.state, "upload_base_url", None)
+        if isinstance(candidate, str):
+            base_url = candidate.strip()
+    except Exception as exc:
+        logger.debug("Jira endpoint base URL unavailable from request state: %s", exc)
+
+    if not base_url:
+        base_url = os.environ.get("MCP_SERVER_BASE_URL", "http://localhost:8932")
+    return base_url.rstrip("/")
+
+
 @jira_mcp.tool(tags={"jira", "read"})
 async def get_user_profile(
     ctx: Context,
@@ -2050,28 +2070,11 @@ async def construct_upload_endpoint(ctx: Context) -> str:
     Returns:
         JSON string with upload_url, session_id, required_headers, and OS-specific usage example.
     """
-    import os
     import platform
-
-    from fastmcp.server.dependencies import get_http_request
 
     staging = get_upload_staging()
     session_id = staging.create_session()
-
-    # Priority: 1) X-MCP-Upload-Base-URL request header, 2) MCP_SERVER_BASE_URL env var, 3) default
-    base_url: str | None = None
-    try:
-        http_request = get_http_request()
-        base_url = getattr(http_request.state, "upload_base_url", None)
-    except Exception as exc:
-        logger.debug(
-            "construct_upload_endpoint: upload base URL header unavailable: %s",
-            exc,
-        )
-
-    if not base_url:
-        base_url = os.environ.get("MCP_SERVER_BASE_URL", "http://localhost:8932")
-    base_url = base_url.rstrip("/")
+    base_url = _get_external_base_url()
     upload_url = f"{base_url}/upload"
 
     is_windows = platform.system() == "Windows"
@@ -2113,6 +2116,77 @@ async def construct_upload_endpoint(ctx: Context) -> str:
                 "-F 'file=@\"C:\\My Docs\\file.pdf\"'  |  "
                 "Linux/macOS bash — path in single quotes inside double quotes: "
                 "-F \"file=@'/my docs/file.pdf'\""
+            ),
+        },
+        indent=2,
+        ensure_ascii=False,
+    )
+
+
+@jira_mcp.tool(tags={"jira", "utility"})
+async def construct_download_endpoint(
+    ctx: Context,
+    issue_key: Annotated[
+        str,
+        Field(
+            description="Jira issue key for the cached attachment (e.g., 'PROJ-123')"
+        ),
+    ],
+    filename: Annotated[
+        str,
+        Field(
+            description=(
+                "Attachment filename exactly as returned by jira_download_attachments "
+                "or list_cached_attachments."
+            )
+        ),
+    ],
+    ttl_minutes: Annotated[
+        int,
+        Field(
+            description="Lifetime for the generated download URL in minutes.",
+            default=5,
+            ge=1,
+            le=10,
+        ),
+    ] = 5,
+) -> str:
+    """Return a short-lived authenticated download URL for a cached Jira attachment.
+
+    This is intended for clients that need a regular HTTP URL instead of an MCP
+    resource URI. The attachment must already be present in the in-memory cache,
+    typically by running jira_download_attachments with return_content=true.
+
+    Args:
+        ctx: The FastMCP context.
+        issue_key: Jira issue key for the cached attachment.
+        filename: Cached attachment filename.
+        ttl_minutes: Download URL lifetime in minutes (max 10).
+
+    Returns:
+        JSON string with download_url, expires_at, and attachment metadata.
+    """
+    del ctx
+
+    cache = get_attachment_cache()
+    token_info = cache.create_download_token(
+        issue_key=issue_key,
+        filename=filename,
+        ttl_minutes=ttl_minutes,
+    )
+    base_url = _get_external_base_url()
+    download_url = f"{base_url}/download/{token_info['token']}"
+
+    return json.dumps(
+        {
+            "download_url": download_url,
+            "expires_at": token_info["expires_at"].isoformat(),
+            "issue_key": token_info["issue_key"],
+            "filename": token_info["filename"],
+            "mime_type": token_info["mime_type"],
+            "instructions": (
+                "Open the URL before it expires to download the cached attachment. "
+                "If the URL has expired, generate a new one."
             ),
         },
         indent=2,
