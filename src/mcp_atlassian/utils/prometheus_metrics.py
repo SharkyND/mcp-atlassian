@@ -178,7 +178,7 @@ class MCPAtlassianMetrics:
             self.http_requests.labels(
                 method=method,
                 endpoint=endpoint,
-                status_code=str(status_code),
+                status_code=str(int(status_code)),
                 pod=self.pod_name,
             ).inc()
 

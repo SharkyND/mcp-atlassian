@@ -895,7 +895,7 @@ class UserTokenMiddleware:
             try:
                 # Track response status for metrics
                 if message.get("type") == "http.response.start":
-                    response_status = message.get("status", 200)
+                    response_status = int(message.get("status", 200))
 
                 await send(message)
             except (ConnectionResetError, BrokenPipeError, OSError) as e:
