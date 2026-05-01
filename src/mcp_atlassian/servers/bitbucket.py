@@ -1224,7 +1224,7 @@ async def analyze_pr_review_status(
         ValueError: If the Bitbucket client is not configured or available.
     """
     # Keywords in a reply that signal the author considers the work done
-    _DONE_KEYWORDS = {
+    _done_keywords = {
         "done",
         "fixed",
         "addressed",
@@ -1241,7 +1241,7 @@ async def analyze_pr_review_status(
             # Cloud uses content.raw; Server uses text
             content = reply.get("content") or {}
             text = (content.get("raw") or reply.get("text") or "").lower()
-            if any(kw in text for kw in _DONE_KEYWORDS):
+            if any(kw in text for kw in _done_keywords):
                 return True
         return False
 
