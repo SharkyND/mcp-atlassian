@@ -1266,10 +1266,14 @@ async def analyze_pr_review_status(
         author_info = comment.get("author") or {}
         return {
             "id": comment.get("id"),
-            "author": author_info.get("display_name") or author_info.get("displayName") or author_info.get("name") or "unknown",
+            "author": author_info.get("display_name")
+            or author_info.get("displayName")
+            or author_info.get("name")
+            or "unknown",
             "text": text[:300],  # truncate for readability
             "created_on": comment.get("created_on") or comment.get("createdDate"),
-            "state": comment.get("state") or ("resolved" if comment.get("resolved") else "open"),
+            "state": comment.get("state")
+            or ("resolved" if comment.get("resolved") else "open"),
             "reply_count": len(comment.get("comments") or []),
         }
 
@@ -1285,7 +1289,10 @@ async def analyze_pr_review_status(
         for activity in activities:
             # Filter to comment activities only
             event = activity.get("action") or activity.get("event") or ""
-            has_comment = "comment" in activity or event.upper() in ("COMMENTED", "COMMENT")
+            has_comment = "comment" in activity or event.upper() in (
+                "COMMENTED",
+                "COMMENT",
+            )
             if not has_comment:
                 continue
 
@@ -1330,7 +1337,9 @@ async def analyze_pr_review_status(
             logger.exception("Unexpected error in bitbucket_analyze_pr_review_status:")
 
         error_result = {"success": False, "error": error_message}
-        logger.log(log_level, f"bitbucket_analyze_pr_review_status failed: {error_message}")
+        logger.log(
+            log_level, f"bitbucket_analyze_pr_review_status failed: {error_message}"
+        )
         return json.dumps(error_result, indent=2)
 
 
@@ -1398,5 +1407,7 @@ async def get_pull_request_diff(
             logger.exception("Unexpected error in bitbucket_get_pull_request_diff:")
 
         error_result = {"success": False, "error": error_message}
-        logger.log(log_level, f"bitbucket_get_pull_request_diff failed: {error_message}")
+        logger.log(
+            log_level, f"bitbucket_get_pull_request_diff failed: {error_message}"
+        )
         return json.dumps(error_result, indent=2)
