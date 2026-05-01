@@ -388,6 +388,44 @@ class PullRequestsMixin(BitbucketClient):
             msg = f"Error adding inline PR comment: {str(e)}"
             raise Exception(msg) from e
 
+    def get_pull_request_diff(
+        self, workspace: str, repository: str, pull_request_id: int
+    ) -> str:
+        """Get the unified diff for a pull request showing all code changes.
+
+        Args:
+            workspace: Workspace name (Cloud) or project key (Server/DC)
+            repository: Repository name
+            pull_request_id: Pull request ID
+
+        Returns:
+            Unified diff string (or structured JSON for Server/DC) showing code changes
+
+        Raises:
+            MCPAtlassianAuthenticationError: If authentication fails with the Bitbucket API (401/403)
+        """
+        try:
+            return super().get_pull_request_diff(workspace, repository, pull_request_id)
+        except HTTPError as http_err:
+            if http_err.response is not None and http_err.response.status_code in [
+                401,
+                403,
+            ]:
+                error_msg = (
+                    f"Authentication failed for Bitbucket API ({http_err.response.status_code}). "
+                    "Token may be expired or invalid. Please verify credentials."
+                )
+                logger.error(error_msg)
+                raise MCPAtlassianAuthenticationError(error_msg) from http_err
+            else:
+                logger.error(f"HTTP error during API call: {http_err}", exc_info=False)
+                raise http_err
+        except Exception as e:
+            error_msg = f"Error getting diff for PR {pull_request_id} in {workspace}/{repository}: {str(e)}"
+            logger.error(error_msg)
+            msg = f"Error getting PR diff: {str(e)}"
+            raise Exception(msg) from e
+
     def add_pull_request_blocker_comment(
         self,
         workspace: str,
