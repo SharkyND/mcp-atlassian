@@ -542,3 +542,110 @@ class TestPullRequestsMixin:
                 "workspace", "repo", 1, "Blocker!", severity="BLOCKER"
             )
         assert "Error blocker adding PR comment" in str(exc_info.value)
+
+    def test_add_pull_request_inline_comment_success_cloud(self, pullrequests_mixin):
+        """Test successful addition of an inline comment on Cloud."""
+        expected_response = {"id": 789, "content": {"raw": "Looks good!"}}
+        pullrequests_mixin.bitbucket.post.return_value = expected_response
+
+        with patch.object(
+            type(pullrequests_mixin.config),
+            "is_cloud",
+            new_callable=lambda: property(lambda self: True),
+        ):
+            result = pullrequests_mixin.add_pull_request_inline_comment(
+                "workspace", "repo", 1, "Looks good!", "src/main.py", 42
+            )
+
+        assert result == expected_response
+        pullrequests_mixin.bitbucket.post.assert_called_once_with(
+            "repositories/workspace/repo/pullrequests/1/comments",
+            data={
+                "content": {"raw": "Looks good!"},
+                "inline": {"to": 42, "path": "src/main.py"},
+            },
+        )
+
+    def test_add_pull_request_inline_comment_success_server(self, pullrequests_mixin):
+        """Test successful addition of an inline comment on Server/DC."""
+        expected_response = {"id": 101, "text": "Needs fix"}
+        pullrequests_mixin.bitbucket.post.return_value = expected_response
+
+        with patch.object(
+            type(pullrequests_mixin.config),
+            "is_cloud",
+            new_callable=lambda: property(lambda self: False),
+        ):
+            result = pullrequests_mixin.add_pull_request_inline_comment(
+                "PROJECT", "repo", 2, "Needs fix", "src/utils.py", 10, line_type="ADDED"
+            )
+
+        assert result == expected_response
+        pullrequests_mixin.bitbucket.post.assert_called_once_with(
+            "projects/PROJECT/repos/repo/pull-requests/2/comments",
+            data={
+                "text": "Needs fix",
+                "anchor": {
+                    "line": 10,
+                    "lineType": "ADDED",
+                    "fileType": "TO",
+                    "path": "src/utils.py",
+                },
+            },
+        )
+
+    def test_add_pull_request_inline_comment_invalid_line_type_defaults(
+        self, pullrequests_mixin
+    ):
+        """Test that an invalid line_type defaults to 'ADDED' for Server/DC."""
+        pullrequests_mixin.bitbucket.post.return_value = {"id": 1}
+
+        with patch.object(
+            type(pullrequests_mixin.config),
+            "is_cloud",
+            new_callable=lambda: property(lambda self: False),
+        ):
+            pullrequests_mixin.add_pull_request_inline_comment(
+                "PROJECT", "repo", 1, "comment", "file.py", 5, line_type="INVALID"
+            )
+
+        call_data = pullrequests_mixin.bitbucket.post.call_args[1]["data"]
+        assert call_data["anchor"]["lineType"] == "ADDED"
+
+    def test_add_pull_request_inline_comment_authentication_error(
+        self, pullrequests_mixin
+    ):
+        """Test authentication error in add_pull_request_inline_comment."""
+        mock_response = Mock()
+        mock_response.status_code = 401
+        http_error = HTTPError(response=mock_response)
+        pullrequests_mixin.bitbucket.post.side_effect = http_error
+
+        with pytest.raises(MCPAtlassianAuthenticationError):
+            pullrequests_mixin.add_pull_request_inline_comment(
+                "workspace", "repo", 1, "comment", "file.py", 1
+            )
+
+    def test_add_pull_request_inline_comment_http_error_other(self, pullrequests_mixin):
+        """Test other HTTP error in add_pull_request_inline_comment."""
+        mock_response = Mock()
+        mock_response.status_code = 500
+        http_error = HTTPError(response=mock_response)
+        pullrequests_mixin.bitbucket.post.side_effect = http_error
+
+        with pytest.raises(HTTPError):
+            pullrequests_mixin.add_pull_request_inline_comment(
+                "workspace", "repo", 1, "comment", "file.py", 1
+            )
+
+    def test_add_pull_request_inline_comment_general_exception(
+        self, pullrequests_mixin
+    ):
+        """Test general exception in add_pull_request_inline_comment."""
+        pullrequests_mixin.bitbucket.post.side_effect = Exception("API error")
+
+        with pytest.raises(Exception) as exc_info:
+            pullrequests_mixin.add_pull_request_inline_comment(
+                "workspace", "repo", 1, "comment", "file.py", 1
+            )
+        assert "Error adding inline PR comment" in str(exc_info.value)

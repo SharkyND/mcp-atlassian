@@ -1035,6 +1035,7 @@ A per-product header always takes precedence over the global header for that pro
 - `create_branch`: Create a new branch in a repository
 - `add_pull_request_blocker_comment`: Add a blocking comment to a pull request
 - `add_pull_request_comment`: Add a regular comment to a pull request
+- `add_pull_request_inline_comment`: Add an inline comment on a specific line of a file in a pull request
 
 #### Xray Tools
 
@@ -1083,7 +1084,7 @@ A per-product header always takes precedence over the global header for that pro
 |           | `jira_update_issue`           | `confluence_update_page`       | `create_branch`                    | `update_test_step`                |
 |           | `jira_delete_issue`           | `confluence_delete_page`       | `add_pull_request_blocker_comment` | `delete_test_step`                |
 |           | `jira_batch_create_issues`    | `confluence_add_label`         | `add_pull_request_comment`         | `update_precondition`             |
-|           | `jira_add_comment`            | `confluence_add_comment`       |                                    | `delete_test_from_precondition`   |
+|           | `jira_add_comment`            | `confluence_add_comment`       | `add_pull_request_inline_comment`  | `delete_test_from_precondition`   |
 |           | `jira_transition_issue`       |                                |                                    | `update_test_set`                 |
 |           | `jira_add_worklog`            |                                |                                    | `delete_test_from_test_set`       |
 |           | `jira_link_to_epic`           |                                |                                    | `update_test_plan`                |

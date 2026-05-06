@@ -1078,3 +1078,336 @@ async def add_pull_request_comment(
             log_level, f"bitbucket_add_pull_request_comment failed: {error_message}"
         )
         return json.dumps(error_result, indent=2)
+
+
+@bitbucket_mcp.tool(tags={"bitbucket", "write"})
+@check_write_access
+async def add_pull_request_inline_comment(
+    ctx: Context,
+    workspace: Annotated[
+        str,
+        Field(description="Workspace name (Cloud) or project key (Server/DC)"),
+    ],
+    repository: Annotated[
+        str,
+        Field(description="Repository name"),
+    ],
+    pull_request_id: Annotated[
+        int,
+        Field(description="Pull request ID"),
+    ],
+    comment: Annotated[
+        str,
+        Field(description="Comment text"),
+    ],
+    file_path: Annotated[
+        str,
+        Field(description="Path to the file being commented on (e.g. 'src/main.py')"),
+    ],
+    line: Annotated[
+        int,
+        Field(description="Line number in the file to attach the comment to", ge=1),
+    ],
+    line_type: Annotated[
+        Literal["ADDED", "REMOVED", "CONTEXT"],
+        Field(
+            description=(
+                "Type of the line being commented on. Only used for Bitbucket Server/DC. "
+                "'ADDED' for new lines, 'REMOVED' for deleted lines, 'CONTEXT' for unchanged lines."
+            ),
+            default="ADDED",
+        ),
+    ] = "ADDED",
+) -> str:
+    """
+    Add an inline comment on a specific line of a file in a pull request.
+
+    Args:
+        workspace: Workspace name or project key.
+        repository: Repository name.
+        pull_request_id: Pull request ID.
+        comment: Comment text.
+        file_path: Path to the file to comment on.
+        line: Line number to attach the comment to.
+        line_type: Line type for Server/DC ('ADDED', 'REMOVED', or 'CONTEXT').
+
+    Returns:
+        JSON string containing the created comment details.
+
+    Raises:
+        ValueError: If the Bitbucket client is not configured or available.
+    """
+    try:
+        bitbucket = await get_bitbucket_fetcher(ctx)
+
+        result = bitbucket.add_pull_request_inline_comment(
+            workspace, repository, pull_request_id, comment, file_path, line, line_type
+        )
+
+        return json.dumps(
+            {
+                "success": True,
+                "comment": result,
+                "pull_request_id": pull_request_id,
+                "file_path": file_path,
+                "line": line,
+            },
+            indent=2,
+        )
+    except Exception as e:
+        log_level = logging.ERROR
+        if isinstance(e, MCPAtlassianAuthenticationError):
+            error_message = f"Authentication/Permission Error: {str(e)}"
+        elif isinstance(e, OSError | HTTPError):
+            error_message = f"Network or API Error: {str(e)}"
+        elif isinstance(e, ValueError):
+            error_message = f"Configuration Error: {str(e)}"
+        else:
+            error_message = f"An unexpected error occurred while adding inline comment to PR {pull_request_id} in {workspace}/{repository}."
+            logger.exception(
+                "Unexpected error in bitbucket_add_pull_request_inline_comment:"
+            )
+
+        error_result = {
+            "success": False,
+            "error": error_message,
+        }
+        logger.log(
+            log_level,
+            f"bitbucket_add_pull_request_inline_comment failed: {error_message}",
+        )
+        return json.dumps(error_result, indent=2)
+
+
+@bitbucket_mcp.tool(tags={"bitbucket", "read"})
+async def analyze_pr_review_status(
+    ctx: Context,
+    workspace: Annotated[
+        str,
+        Field(description="Workspace name (Cloud) or project key (Server/DC)"),
+    ],
+    repository: Annotated[
+        str,
+        Field(description="Repository name"),
+    ],
+    pull_request_id: Annotated[
+        int,
+        Field(description="Pull request ID to analyze"),
+    ],
+) -> str:
+    """
+    Analyze a pull request's comment threads to determine which review feedback
+    has been addressed and which is still pending.
+
+    For each comment thread the tool inspects:
+    - Whether the comment is explicitly resolved/marked done (Server/DC ``state`` field,
+      Cloud ``resolved`` flag).
+    - Replies in the thread — if a reply contains completion keywords
+      ("done", "fixed", "addressed", "resolved", "updated", "completed") it is
+      considered addressed even when no formal resolve action was taken.
+
+    Returns a structured summary with:
+    - ``total_comments``: number of top-level review comments found
+    - ``addressed``: list of comments considered done (resolved or positively replied)
+    - ``pending``: list of comments that still need attention
+    - ``overall_status``: "ALL_ADDRESSED" | "PARTIALLY_ADDRESSED" | "NONE_ADDRESSED"
+
+    Args:
+        workspace: Workspace name or project key.
+        repository: Repository name.
+        pull_request_id: Pull request ID.
+
+    Returns:
+        JSON string with the review status analysis.
+
+    Raises:
+        ValueError: If the Bitbucket client is not configured or available.
+    """
+    # Keywords in a reply that signal the author considers the work done
+    _done_keywords = {
+        "done",
+        "fixed",
+        "addressed",
+        "resolved",
+        "updated",
+        "completed",
+        "applied",
+        "changed",
+    }
+
+    def _reply_indicates_done(replies: list[dict]) -> bool:
+        for reply in replies:
+            text = ""
+            # Cloud uses content.raw; Server uses text
+            content = reply.get("content") or {}
+            text = (content.get("raw") or reply.get("text") or "").lower()
+            if any(kw in text for kw in _done_keywords):
+                return True
+        return False
+
+    def _is_comment_addressed(activity: dict) -> bool:
+        """Return True if an activity's comment is considered addressed."""
+        comment = activity.get("comment") or activity
+        # Explicit resolve: Server/DC sets state="RESOLVED"; Cloud sets resolved=True
+        if comment.get("state") == "RESOLVED":
+            return True
+        if comment.get("resolved") is True:
+            return True
+        # Check replies
+        replies = comment.get("comments") or []  # Server nests as 'comments'
+        if replies:
+            return _reply_indicates_done(replies)
+        return False
+
+    def _summarise_comment(activity: dict) -> dict:
+        comment = activity.get("comment") or activity
+        content = comment.get("content") or {}
+        text = content.get("raw") or comment.get("text") or "(no text)"
+        author_info = comment.get("author") or {}
+        return {
+            "id": comment.get("id"),
+            "author": author_info.get("display_name")
+            or author_info.get("displayName")
+            or author_info.get("name")
+            or "unknown",
+            "text": text[:300],  # truncate for readability
+            "created_on": comment.get("created_on") or comment.get("createdDate"),
+            "state": comment.get("state")
+            or ("resolved" if comment.get("resolved") else "open"),
+            "reply_count": len(comment.get("comments") or []),
+        }
+
+    try:
+        bitbucket = await get_bitbucket_fetcher(ctx)
+        activities = bitbucket.get_pull_request_activities(
+            workspace, repository, pull_request_id
+        )
+
+        addressed = []
+        pending = []
+
+        for activity in activities:
+            # Filter to comment activities only
+            event = activity.get("action") or activity.get("event") or ""
+            has_comment = "comment" in activity or event.upper() in (
+                "COMMENTED",
+                "COMMENT",
+            )
+            if not has_comment:
+                continue
+
+            summary = _summarise_comment(activity)
+            if _is_comment_addressed(activity):
+                addressed.append(summary)
+            else:
+                pending.append(summary)
+
+        total = len(addressed) + len(pending)
+        if total == 0:
+            overall_status = "NO_COMMENTS"
+        elif len(pending) == 0:
+            overall_status = "ALL_ADDRESSED"
+        elif len(addressed) == 0:
+            overall_status = "NONE_ADDRESSED"
+        else:
+            overall_status = "PARTIALLY_ADDRESSED"
+
+        result = {
+            "pull_request_id": pull_request_id,
+            "workspace": workspace,
+            "repository": repository,
+            "total_comments": total,
+            "addressed_count": len(addressed),
+            "pending_count": len(pending),
+            "overall_status": overall_status,
+            "addressed": addressed,
+            "pending": pending,
+        }
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        log_level = logging.ERROR
+        if isinstance(e, MCPAtlassianAuthenticationError):
+            error_message = f"Authentication/Permission Error: {str(e)}"
+        elif isinstance(e, OSError | HTTPError):
+            error_message = f"Network or API Error: {str(e)}"
+        elif isinstance(e, ValueError):
+            error_message = f"Configuration Error: {str(e)}"
+        else:
+            error_message = f"An unexpected error occurred while analyzing review status for PR {pull_request_id} in {workspace}/{repository}."
+            logger.exception("Unexpected error in bitbucket_analyze_pr_review_status:")
+
+        error_result = {"success": False, "error": error_message}
+        logger.log(
+            log_level, f"bitbucket_analyze_pr_review_status failed: {error_message}"
+        )
+        return json.dumps(error_result, indent=2)
+
+
+@bitbucket_mcp.tool(tags={"bitbucket", "read"})
+async def get_pull_request_diff(
+    ctx: Context,
+    workspace: Annotated[
+        str,
+        Field(description="Workspace name (Cloud) or project key (Server/DC)"),
+    ],
+    repository: Annotated[
+        str,
+        Field(description="Repository name"),
+    ],
+    pull_request_id: Annotated[
+        int,
+        Field(description="Pull request ID"),
+    ],
+) -> str:
+    """
+    Get the full code diff (all changed files and lines) for a pull request.
+
+    Returns the unified diff of all changes included in the PR so you can
+    review exactly what new code was added, modified, or removed.
+
+    For Bitbucket Cloud the response is a raw unified diff string.
+    For Bitbucket Server/DC the response is structured JSON containing per-file
+    diff hunks.
+
+    Args:
+        workspace: Workspace name or project key.
+        repository: Repository name.
+        pull_request_id: Pull request ID.
+
+    Returns:
+        JSON string wrapping the diff content and metadata.
+
+    Raises:
+        ValueError: If the Bitbucket client is not configured or available.
+    """
+    try:
+        bitbucket = await get_bitbucket_fetcher(ctx)
+        diff_content = bitbucket.get_pull_request_diff(
+            workspace, repository, pull_request_id
+        )
+        return json.dumps(
+            {
+                "pull_request_id": pull_request_id,
+                "workspace": workspace,
+                "repository": repository,
+                "diff": diff_content,
+            },
+            indent=2,
+        )
+    except Exception as e:
+        log_level = logging.ERROR
+        if isinstance(e, MCPAtlassianAuthenticationError):
+            error_message = f"Authentication/Permission Error: {str(e)}"
+        elif isinstance(e, OSError | HTTPError):
+            error_message = f"Network or API Error: {str(e)}"
+        elif isinstance(e, ValueError):
+            error_message = f"Configuration Error: {str(e)}"
+        else:
+            error_message = f"An unexpected error occurred while fetching diff for PR {pull_request_id} in {workspace}/{repository}."
+            logger.exception("Unexpected error in bitbucket_get_pull_request_diff:")
+
+        error_result = {"success": False, "error": error_message}
+        logger.log(
+            log_level, f"bitbucket_get_pull_request_diff failed: {error_message}"
+        )
+        return json.dumps(error_result, indent=2)
