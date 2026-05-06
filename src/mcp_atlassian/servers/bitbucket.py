@@ -1078,3 +1078,85 @@ async def add_pull_request_comment(
             log_level, f"bitbucket_add_pull_request_comment failed: {error_message}"
         )
         return json.dumps(error_result, indent=2)
+
+
+@bitbucket_mcp.tool(tags={"bitbucket", "write"})
+@check_write_access
+async def reply_to_pull_request_comment(
+    ctx: Context,
+    workspace: Annotated[
+        str,
+        Field(description="Workspace name (Cloud) or project key (Server/DC)"),
+    ],
+    repository: Annotated[
+        str,
+        Field(description="Repository name"),
+    ],
+    pull_request_id: Annotated[
+        int,
+        Field(description="Pull request ID"),
+    ],
+    parent_comment_id: Annotated[
+        int,
+        Field(description="ID of the parent comment to reply to"),
+    ],
+    comment: Annotated[
+        str,
+        Field(description="Reply text"),
+    ],
+) -> str:
+    """
+    Reply to an existing comment on a pull request.
+
+    Args:
+        workspace: Workspace name or project key.
+        repository: Repository name.
+        pull_request_id: Pull request ID.
+        parent_comment_id: ID of the parent comment to reply to.
+        comment: Reply text.
+
+    Returns:
+        JSON string containing the created reply details.
+
+    Raises:
+        ValueError: If the Bitbucket client is not configured or available.
+    """
+    try:
+        bitbucket = await get_bitbucket_fetcher(ctx)
+
+        result = bitbucket.reply_to_pull_request_comment(
+            workspace, repository, pull_request_id, parent_comment_id, comment
+        )
+
+        return json.dumps(
+            {
+                "success": True,
+                "reply": result,
+                "pull_request_id": pull_request_id,
+                "parent_comment_id": parent_comment_id,
+            },
+            indent=2,
+        )
+    except Exception as e:
+        log_level = logging.ERROR
+        if isinstance(e, MCPAtlassianAuthenticationError):
+            error_message = f"Authentication/Permission Error: {str(e)}"
+        elif isinstance(e, OSError | HTTPError):
+            error_message = f"Network or API Error: {str(e)}"
+        elif isinstance(e, ValueError):
+            error_message = f"Configuration Error: {str(e)}"
+        else:
+            error_message = f"An unexpected error occurred while replying to comment {parent_comment_id} on PR {pull_request_id} in {workspace}/{repository}."
+            logger.exception(
+                "Unexpected error in bitbucket_reply_to_pull_request_comment:"
+            )
+
+        error_result = {
+            "success": False,
+            "error": error_message,
+        }
+        logger.log(
+            log_level,
+            f"bitbucket_reply_to_pull_request_comment failed: {error_message}",
+        )
+        return json.dumps(error_result, indent=2)
