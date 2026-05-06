@@ -1144,14 +1144,38 @@ async def add_pull_request_inline_comment(
             workspace, repository, pull_request_id, comment, file_path, line, line_type
         )
 
+        inline_info = result.get("inline") if isinstance(result, dict) else None
+        anchor_info = result.get("anchor") if isinstance(result, dict) else None
+        resolved_path = None
+        resolved_line = None
+
+        if isinstance(inline_info, dict):
+            resolved_path = inline_info.get("path")
+            resolved_line = inline_info.get("to") or inline_info.get("from")
+        elif isinstance(anchor_info, dict):
+            resolved_path = anchor_info.get("path")
+            resolved_line = anchor_info.get("line")
+
+        response_payload = {
+            "success": True,
+            "comment": result,
+            "pull_request_id": pull_request_id,
+            "requested_file_path": file_path,
+            "requested_line": line,
+            "anchored": resolved_line is not None,
+            "file_path": resolved_path,
+            "line": resolved_line,
+        }
+
+        if resolved_line is None:
+            response_payload["warning"] = (
+                "Bitbucket accepted the comment but did not return a line anchor. "
+                "This usually means the supplied path/line did not match the PR diff "
+                "or the API created a general PR comment instead."
+            )
+
         return json.dumps(
-            {
-                "success": True,
-                "comment": result,
-                "pull_request_id": pull_request_id,
-                "file_path": file_path,
-                "line": line,
-            },
+            response_payload,
             indent=2,
         )
     except Exception as e:
