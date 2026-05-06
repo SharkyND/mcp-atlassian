@@ -359,32 +359,15 @@ class PullRequestsMixin(BitbucketClient):
                 if line_type not in valid_line_types:
                     line_type = "ADDED"
 
-                pull_request = self.bitbucket.get_pull_request(
-                    workspace, repository, pull_request_id
-                )
-                from_ref = pull_request.get("fromRef") or {}
-                to_ref = pull_request.get("toRef") or {}
-                from_hash = from_ref.get("latestCommit")
-                to_hash = to_ref.get("latestCommit")
-
-                if not from_hash or not to_hash:
-                    error_msg = (
-                        "Unable to determine pull request diff hashes required for "
-                        "an inline Server/DC comment anchor."
-                    )
-                    raise ValueError(error_msg)
-
                 file_type = "FROM" if line_type == "REMOVED" else "TO"
                 body = {
                     "text": comment,
                     "anchor": {
-                        "diffType": "COMMIT",
+                        "diffType": "EFFECTIVE",
                         "line": line,
                         "lineType": line_type,
                         "fileType": file_type,
-                        "fromHash": from_hash,
                         "path": file_path,
-                        "toHash": to_hash,
                     },
                 }
             return self.bitbucket.post(endpoint, data=body)
