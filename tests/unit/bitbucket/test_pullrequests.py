@@ -570,6 +570,10 @@ class TestPullRequestsMixin:
         """Test successful addition of an inline comment on Server/DC."""
         expected_response = {"id": 101, "text": "Needs fix"}
         pullrequests_mixin.bitbucket.post.return_value = expected_response
+        pullrequests_mixin.bitbucket.get_pull_request.return_value = {
+            "fromRef": {"latestCommit": "from-sha"},
+            "toRef": {"latestCommit": "to-sha"},
+        }
 
         with patch.object(
             type(pullrequests_mixin.config),
@@ -586,10 +590,13 @@ class TestPullRequestsMixin:
             data={
                 "text": "Needs fix",
                 "anchor": {
+                    "diffType": "COMMIT",
                     "line": 10,
                     "lineType": "ADDED",
                     "fileType": "TO",
+                    "fromHash": "from-sha",
                     "path": "src/utils.py",
+                    "toHash": "to-sha",
                 },
             },
         )
@@ -599,6 +606,10 @@ class TestPullRequestsMixin:
     ):
         """Test that an invalid line_type defaults to 'ADDED' for Server/DC."""
         pullrequests_mixin.bitbucket.post.return_value = {"id": 1}
+        pullrequests_mixin.bitbucket.get_pull_request.return_value = {
+            "fromRef": {"latestCommit": "from-sha"},
+            "toRef": {"latestCommit": "to-sha"},
+        }
 
         with patch.object(
             type(pullrequests_mixin.config),
@@ -611,6 +622,50 @@ class TestPullRequestsMixin:
 
         call_data = pullrequests_mixin.bitbucket.post.call_args[1]["data"]
         assert call_data["anchor"]["lineType"] == "ADDED"
+        assert call_data["anchor"]["fileType"] == "TO"
+
+    def test_add_pull_request_inline_comment_removed_line_uses_from_file(
+        self, pullrequests_mixin
+    ):
+        """Test removed-line comments anchor to the source side of the diff."""
+        pullrequests_mixin.bitbucket.post.return_value = {"id": 1}
+        pullrequests_mixin.bitbucket.get_pull_request.return_value = {
+            "fromRef": {"latestCommit": "from-sha"},
+            "toRef": {"latestCommit": "to-sha"},
+        }
+
+        with patch.object(
+            type(pullrequests_mixin.config),
+            "is_cloud",
+            new_callable=lambda: property(lambda self: False),
+        ):
+            pullrequests_mixin.add_pull_request_inline_comment(
+                "PROJECT", "repo", 1, "comment", "file.py", 5, line_type="REMOVED"
+            )
+
+        call_data = pullrequests_mixin.bitbucket.post.call_args[1]["data"]
+        assert call_data["anchor"]["fileType"] == "FROM"
+
+    def test_add_pull_request_inline_comment_server_requires_diff_hashes(
+        self, pullrequests_mixin
+    ):
+        """Test Server/DC inline comments fail fast when diff hashes are unavailable."""
+        pullrequests_mixin.bitbucket.get_pull_request.return_value = {
+            "fromRef": {},
+            "toRef": {},
+        }
+
+        with patch.object(
+            type(pullrequests_mixin.config),
+            "is_cloud",
+            new_callable=lambda: property(lambda self: False),
+        ):
+            with pytest.raises(Exception) as exc_info:
+                pullrequests_mixin.add_pull_request_inline_comment(
+                    "PROJECT", "repo", 1, "comment", "file.py", 5
+                )
+
+        assert "Error adding inline PR comment" in str(exc_info.value)
 
     def test_add_pull_request_inline_comment_authentication_error(
         self, pullrequests_mixin
