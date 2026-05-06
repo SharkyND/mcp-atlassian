@@ -363,3 +363,66 @@ class PullRequestsMixin(BitbucketClient):
             logger.error(error_msg)
             msg = f"Error blocker adding PR comment: {str(e)}"
             raise Exception(msg) from e
+
+    def reply_to_pull_request_comment(
+        self,
+        workspace: str,
+        repository: str,
+        pull_request_id: int,
+        parent_comment_id: int,
+        comment: str,
+    ) -> dict[str, Any]:
+        """
+        Reply to an existing comment on a pull request.
+
+        Args:
+            workspace: Workspace name (Cloud) or project key (Server/DC)
+            repository: Repository name
+            pull_request_id: Pull request ID
+            parent_comment_id: ID of the parent comment to reply to
+            comment: Reply text content
+
+        Returns:
+            Created reply comment data
+
+        Raises:
+            MCPAtlassianAuthenticationError: If authentication fails with the Bitbucket API (401/403)
+        """
+        try:
+            # Bitbucket reply uses direct API POST, not the library's add_comment method
+            # Build the endpoint
+            if self.config.is_cloud:
+                endpoint = f"repositories/{workspace}/{repository}/pullrequests/{pull_request_id}/comments"
+                comment_payload = {
+                    "content": {"raw": comment},
+                    "parent": {"id": parent_comment_id},
+                }
+            else:
+                # Server/DC format
+                endpoint = f"rest/api/1.0/projects/{workspace}/repos/{repository}/pull-requests/{pull_request_id}/comments"
+                comment_payload = {
+                    "text": comment,
+                    "parent": {"id": parent_comment_id},
+                }
+
+            # Use the bitbucket client's post method directly
+            return self.bitbucket.post(endpoint, data=comment_payload)
+        except HTTPError as http_err:
+            if http_err.response is not None and http_err.response.status_code in [
+                401,
+                403,
+            ]:
+                error_msg = (
+                    f"Authentication failed for Bitbucket API ({http_err.response.status_code}). "
+                    "Token may be expired or invalid. Please verify credentials."
+                )
+                logger.error(error_msg)
+                raise MCPAtlassianAuthenticationError(error_msg) from http_err
+            else:
+                logger.error(f"HTTP error during API call: {http_err}", exc_info=False)
+                raise http_err
+        except Exception as e:
+            error_msg = f"Error replying to comment {parent_comment_id} on PR {pull_request_id} in {workspace}/{repository}: {str(e)}"
+            logger.error(error_msg)
+            msg = f"Error replying to PR comment: {str(e)}"
+            raise Exception(msg) from e

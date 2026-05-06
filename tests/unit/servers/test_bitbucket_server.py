@@ -259,6 +259,32 @@ success_cases.extend(
                 "pull_request_id": 5,
             },
         },
+        {
+            "func": "reply_to_pull_request_comment",
+            "method": "reply_to_pull_request_comment",
+            "return_value": {
+                "id": 789,
+                "content": {"raw": "Thanks for the feedback!"},
+                "parent": {"id": 123},
+            },
+            "kwargs": {
+                "workspace": "ws",
+                "repository": "rep",
+                "pull_request_id": 42,
+                "parent_comment_id": 123,
+                "comment": "Thanks for the feedback!",
+            },
+            "expected": {
+                "success": True,
+                "reply": {
+                    "id": 789,
+                    "content": {"raw": "Thanks for the feedback!"},
+                    "parent": {"id": 123},
+                },
+                "pull_request_id": 42,
+                "parent_comment_id": 123,
+            },
+        },
     ]
 )
 
@@ -397,3 +423,76 @@ async def test_get_pull_request_unexpected_error(
     parsed = json.loads(result)
 
     assert parsed["error"].startswith("An unexpected error occurred")
+
+
+async def test_reply_to_pull_request_comment_read_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test that reply_to_pull_request_comment fails in read-only mode."""
+    ctx = make_ctx(read_only=True)
+
+    async def fake_fetcher(_ctx):  # noqa: ANN001
+        raise AssertionError("Fetcher should not be called when read-only")
+
+    monkeypatch.setattr(bitbucket_server, "get_bitbucket_fetcher", fake_fetcher)
+
+    with pytest.raises(ValueError) as exc:
+        await tool_fn("reply_to_pull_request_comment")(
+            ctx,
+            workspace="ws",
+            repository="rep",
+            pull_request_id=42,
+            parent_comment_id=123,
+            comment="Reply",
+        )
+
+    assert "read-only" in str(exc.value)
+
+
+async def test_reply_to_pull_request_comment_auth_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test authentication error handling in reply_to_pull_request_comment."""
+
+    async def fake_fetcher(_ctx):  # noqa: ANN001
+        raise MCPAtlassianAuthenticationError("Invalid token")
+
+    monkeypatch.setattr(bitbucket_server, "get_bitbucket_fetcher", fake_fetcher)
+
+    result = await tool_fn("reply_to_pull_request_comment")(
+        make_ctx(),
+        workspace="ws",
+        repository="rep",
+        pull_request_id=42,
+        parent_comment_id=123,
+        comment="Reply",
+    )
+    parsed = json.loads(result)
+
+    assert parsed["success"] is False
+    assert parsed["error"].startswith("Authentication/Permission Error")
+
+
+async def test_reply_to_pull_request_comment_unexpected_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test unexpected error handling in reply_to_pull_request_comment."""
+
+    async def fake_fetcher(_ctx):  # noqa: ANN001
+        raise RuntimeError("Something went wrong")
+
+    monkeypatch.setattr(bitbucket_server, "get_bitbucket_fetcher", fake_fetcher)
+
+    result = await tool_fn("reply_to_pull_request_comment")(
+        make_ctx(),
+        workspace="ws",
+        repository="rep",
+        pull_request_id=42,
+        parent_comment_id=123,
+        comment="Reply",
+    )
+    parsed = json.loads(result)
+
+    assert parsed["success"] is False
+    assert "An unexpected error occurred" in parsed["error"]
+    assert "replying to comment 123" in parsed["error"]
