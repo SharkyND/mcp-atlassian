@@ -68,6 +68,27 @@ The following table lists the configurable parameters and their default values.
 | `ingress.hosts` | Ingress hosts configuration | `[{host: "mcp-atlassian.local", paths: [{path: "/", pathType: "Prefix"}]}]` |
 | `ingress.tls` | Ingress TLS configuration | `[]` |
 
+### Gateway API Configuration
+
+| Parameter | Description | Default |
+|-----------|-------------|--------|
+| `gatewayApi.enabled` | Enable Gateway API HTTPRoute | `false` |
+| `gatewayApi.gatewayName` | Name of the Gateway to attach to | `""` |
+| `gatewayApi.gatewayNamespace` | Namespace of the Gateway (if different) | `""` |
+| `gatewayApi.sectionName` | Listener section name on the Gateway | `""` |
+| `gatewayApi.annotations` | HTTPRoute annotations | `{}` |
+| `gatewayApi.hostnames` | Hostnames to match | `[]` |
+| `gatewayApi.rules` | Routing rules | `[{matches: [{path: {type: PathPrefix, value: /}}]}]` |
+| `gatewayApi.filters` | Filters to apply to all rules | `[]` |
+| `gatewayApi.timeouts.request` | Request timeout | `""` |
+| `gatewayApi.timeouts.backendRequest` | Backend request timeout | `""` |
+| `gatewayApi.sessionPersistence.enabled` | Enable session persistence on HTTPRoute rules | `false` |
+| `gatewayApi.sessionPersistence.type` | Session persistence type: `Header` or `Cookie` | `Header` |
+| `gatewayApi.sessionPersistence.sessionName` | Session name (reflected in cookie/header) | `mcp-session` |
+| `gatewayApi.sessionPersistence.absoluteTimeout` | Absolute timeout for the session | `""` |
+| `gatewayApi.sessionPersistence.idleTimeout` | Idle timeout for the session | `""` |
+| `gatewayApi.sessionPersistence.cookieConfig` | Cookie config (Cookie type only), e.g. `{lifetimeType: Session}` | `{}` |
+
 ### High Availability Configuration
 
 | Parameter | Description | Default |
@@ -294,6 +315,24 @@ securityContext:
   capabilities:
     drop:
     - ALL
+```
+
+### Gateway API Deployment
+
+```yaml
+# Use Gateway API instead of Ingress
+# Requires a Gateway API controller and Gateway resource
+gatewayApi:
+  enabled: true
+  gatewayName: my-gateway
+  gatewayNamespace: gateway-system
+  hostnames:
+    - mcp-atlassian.yourdomain.com
+  # Enable sticky sessions
+  sessionPersistence:
+    enabled: true
+    type: Header
+    sessionName: mcp-session
 
 resources:
   limits:

@@ -79,6 +79,58 @@ ingress:
   #    hosts:
   #      - mcp-atlassian.local
 
+# Gateway API configuration (replacement for Ingress)
+# Requires a Gateway API controller (e.g., Envoy Gateway, Istio, Cilium) and
+# a Gateway resource to be deployed in the cluster.
+gatewayApi:
+  enabled: false
+  # Name of the Gateway resource to attach to
+  gatewayName: ""
+  # Namespace of the Gateway resource (if different from release namespace)
+  gatewayNamespace: ""
+  # Listener section name on the Gateway (optional)
+  sectionName: ""
+  # Annotations to add to the HTTPRoute
+  annotations: {}
+  # Hostnames to match (optional, defaults to all hostnames on the listener)
+  hostnames: []
+  #  - mcp-atlassian.yourdomain.com
+
+  # Routing rules (required)
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+
+  # Filters to apply to all rules (optional)
+  # filters:
+  #   - type: RequestHeaderModifier
+  #     requestHeaderModifier:
+  #       set:
+  #         - name: X-Custom-Header
+  #           value: custom-value
+
+  # Timeouts for backend requests (optional)
+  # timeouts:
+  #   request: "60s"
+  #   backendRequest: "60s"
+
+  # Session persistence (sticky sessions) on HTTPRoute rules
+  sessionPersistence:
+    enabled: false
+    # Type: "Header" or "Cookie"
+    type: Header
+    # Session name (reflected in cookie/header name)
+    sessionName: mcp-session
+    # Absolute timeout for the session
+    # absoluteTimeout: "10m"
+    # Idle timeout for the session
+    # idleTimeout: "5m"
+    # Cookie settings (only used when type: Cookie)
+    # cookieConfig:
+    #   lifetimeType: Session
+
 resources: {}
   # We usually recommend not to specify default resources and to leave this as a conscious
   # choice for the user. This also increases chances charts run on environments with little
