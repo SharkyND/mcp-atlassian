@@ -28,8 +28,16 @@ from mcp_atlassian.jira.config import JiraConfig
 from mcp_atlassian.jira.upload_staging import get_upload_staging
 from mcp_atlassian.utils.environment import get_available_services
 from mcp_atlassian.utils.io import (
+    get_cli_bitbucket_read_only_flag,
+    get_cli_confluence_read_only_flag,
+    get_cli_jira_read_only_flag,
     get_cli_read_only_flag,
+    get_env_bitbucket_read_only_flag,
+    get_env_confluence_read_only_flag,
+    get_env_jira_read_only_flag,
     get_env_read_only_flag,
+    parse_extended_bool,
+    resolve_product_read_only_mode,
     resolve_read_only_mode,
 )
 from mcp_atlassian.utils.logging import mask_sensitive
@@ -191,6 +199,29 @@ async def main_lifespan(app: FastMCP[MainAppContext]) -> AsyncIterator[dict]:
     read_only = resolve_read_only_mode(cli_read_only, env_read_only, None)
     enabled_tools = get_enabled_tools()
 
+    # Resolve per-product read_only flags (no header at startup time)
+    jira_read_only = resolve_product_read_only_mode(
+        product_cli=get_cli_jira_read_only_flag(),
+        product_env=get_env_jira_read_only_flag(),
+        global_cli=cli_read_only,
+        global_env=env_read_only,
+        header_read_only=None,
+    )
+    confluence_read_only = resolve_product_read_only_mode(
+        product_cli=get_cli_confluence_read_only_flag(),
+        product_env=get_env_confluence_read_only_flag(),
+        global_cli=cli_read_only,
+        global_env=env_read_only,
+        header_read_only=None,
+    )
+    bitbucket_read_only = resolve_product_read_only_mode(
+        product_cli=get_cli_bitbucket_read_only_flag(),
+        product_env=get_env_bitbucket_read_only_flag(),
+        global_cli=cli_read_only,
+        global_env=env_read_only,
+        header_read_only=None,
+    )
+
     loaded_jira_config: JiraConfig | None = None
     loaded_confluence_config: ConfluenceConfig | None = None
     loaded_bitbucket_config: BitbucketConfig | None = None
@@ -270,10 +301,17 @@ async def main_lifespan(app: FastMCP[MainAppContext]) -> AsyncIterator[dict]:
         cli_read_only=cli_read_only,
         env_read_only=env_read_only,
         enabled_tools=enabled_tools,
+        jira_read_only=jira_read_only,
+        confluence_read_only=confluence_read_only,
+        bitbucket_read_only=bitbucket_read_only,
     )
     logger.info(
-        "Read-only mode resolved: %s (cli=%s, env=%s)",
+        "Read-only mode resolved: global=%s, jira=%s, confluence=%s, bitbucket=%s "
+        "(cli=%s, env=%s)",
         "ENABLED" if read_only else "DISABLED",
+        "ENABLED" if jira_read_only else "DISABLED",
+        "ENABLED" if confluence_read_only else "DISABLED",
+        "ENABLED" if bitbucket_read_only else "DISABLED",
         cli_read_only,
         env_read_only,
     )
@@ -342,6 +380,9 @@ class AtlassianMCP(FastMCP[MainAppContext]):
             env_read_only = get_env_read_only_flag()
 
         header_read_only = None
+        header_jira_read_only = None
+        header_confluence_read_only = None
+        header_bitbucket_read_only = None
         enable_xray_header = None
         header_based_services = {
             "jira": False,
@@ -353,6 +394,9 @@ class AtlassianMCP(FastMCP[MainAppContext]):
             request_state = req_context.request.state
             service_headers = getattr(request_state, "atlassian_service_headers", {})
             header_read_only = getattr(request_state, "read_only_mode_header", None)
+            header_jira_read_only = getattr(request_state, "jira_read_only_mode_header", None)
+            header_confluence_read_only = getattr(request_state, "confluence_read_only_mode_header", None)
+            header_bitbucket_read_only = getattr(request_state, "bitbucket_read_only_mode_header", None)
             enable_xray_header = getattr(request_state, "enable_xray_header", None)
 
             if service_headers:
@@ -375,15 +419,42 @@ class AtlassianMCP(FastMCP[MainAppContext]):
         ):
             effective_read_only = bool(base_read_only)
 
+        # Resolve per-product effective read_only.
+        # Priority (highest first):
+        #   product-specific header > global header > product-specific startup value > effective_read_only
+        def _product_read_only(
+            product_header: str | None,
+            context_attr: str,
+        ) -> bool:
+            product_hdr_bool = parse_extended_bool(product_header)
+            if product_hdr_bool is not None:
+                return product_hdr_bool
+            global_hdr_bool = parse_extended_bool(header_read_only)
+            if global_hdr_bool is not None:
+                return global_hdr_bool
+            stored = getattr(app_lifespan_state, context_attr, None) if app_lifespan_state else None
+            return bool(stored) if stored is not None else effective_read_only
+
+        effective_jira_read_only = _product_read_only(header_jira_read_only, "jira_read_only")
+        effective_confluence_read_only = _product_read_only(header_confluence_read_only, "confluence_read_only")
+        effective_bitbucket_read_only = _product_read_only(header_bitbucket_read_only, "bitbucket_read_only")
+
         logger.debug(
             "_main_mcp_list_tools: base_read_only=%s, cli_read_only=%s, "
-            "env_read_only=%s, header_read_only=%s, effective_read_only=%s, "
-            "enabled_tools_filter=%s, header_services=%s",
+            "env_read_only=%s, header_read_only=%s (jira=%s, confluence=%s, bitbucket=%s), "
+            "effective_read_only=%s, jira_read_only=%s, confluence_read_only=%s, "
+            "bitbucket_read_only=%s, enabled_tools_filter=%s, header_services=%s",
             base_read_only,
             cli_read_only,
             env_read_only,
             header_read_only,
+            header_jira_read_only,
+            header_confluence_read_only,
+            header_bitbucket_read_only,
             effective_read_only,
+            effective_jira_read_only,
+            effective_confluence_read_only,
+            effective_bitbucket_read_only,
             enabled_tools_filter,
             header_based_services,
         )
@@ -405,12 +476,32 @@ class AtlassianMCP(FastMCP[MainAppContext]):
                 logger.debug(f"Excluding tool '{registered_name}' (not enabled)")
                 continue
 
-            if tool_obj and effective_read_only and "write" in tool_tags:
-                logger.debug(
-                    f"Excluding tool '{registered_name}' due to read-only mode "
-                    f"and 'write' tag"
-                )
-                continue
+            if tool_obj and "write" in tool_tags:
+                is_jira_write = "jira" in tool_tags
+                is_confluence_write = "confluence" in tool_tags
+                is_bitbucket_write = "bitbucket" in tool_tags
+                if is_jira_write and effective_jira_read_only:
+                    logger.debug(
+                        f"Excluding tool '{registered_name}' due to Jira read-only mode"
+                    )
+                    continue
+                if is_confluence_write and effective_confluence_read_only:
+                    logger.debug(
+                        f"Excluding tool '{registered_name}' due to Confluence read-only mode"
+                    )
+                    continue
+                if is_bitbucket_write and effective_bitbucket_read_only:
+                    logger.debug(
+                        f"Excluding tool '{registered_name}' due to Bitbucket read-only mode"
+                    )
+                    continue
+                # Fallback for write tools not tagged to a specific product (e.g. xray)
+                if not any([is_jira_write, is_confluence_write, is_bitbucket_write]) and effective_read_only:
+                    logger.debug(
+                        f"Excluding tool '{registered_name}' due to global read-only mode "
+                        f"and 'write' tag"
+                    )
+                    continue
 
             # Exclude Jira/Confluence tools if config is not fully authenticated
             is_jira_tool = "jira" in tool_tags
@@ -648,6 +739,28 @@ class UserTokenMiddleware:
                     "UserTokenMiddleware: X-Atlassian-Read-Only-Mode header: %s",
                     read_only_header_value,
                 )
+
+            # Per-product read-only headers
+            def _extract_header(key: bytes) -> str | None:
+                raw = headers.get(key)
+                val = raw.decode("latin-1").strip() if raw else None
+                return val if val else None
+
+            jira_ro_hdr = _extract_header(b"x-atlassian-jira-read-only-mode")
+            confluence_ro_hdr = _extract_header(b"x-atlassian-confluence-read-only-mode")
+            bitbucket_ro_hdr = _extract_header(b"x-atlassian-bitbucket-read-only-mode")
+            scope_copy["state"]["jira_read_only_mode_header"] = jira_ro_hdr
+            scope_copy["state"]["confluence_read_only_mode_header"] = confluence_ro_hdr
+            scope_copy["state"]["bitbucket_read_only_mode_header"] = bitbucket_ro_hdr
+            for hdr_name, hdr_val in (
+                ("X-Atlassian-Jira-Read-Only-Mode", jira_ro_hdr),
+                ("X-Atlassian-Confluence-Read-Only-Mode", confluence_ro_hdr),
+                ("X-Atlassian-Bitbucket-Read-Only-Mode", bitbucket_ro_hdr),
+            ):
+                if hdr_val:
+                    logger.debug(
+                        "UserTokenMiddleware: %s header: %s", hdr_name, hdr_val
+                    )
 
             # Extract X-Atlassian-Enable-Xray header
             enable_xray_header_bytes = headers.get(b"x-atlassian-enable-xray")

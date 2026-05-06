@@ -27,3 +27,10 @@ class MainAppContext:
     cli_read_only: bool | None = None
     env_read_only: bool | None = None
     enabled_tools: list[str] | None = None
+
+    # Per-product read_only overrides. When set, these take precedence over
+    # the global read_only flag for the corresponding product. When None the
+    # global flag applies.
+    jira_read_only: bool | None = None
+    confluence_read_only: bool | None = None
+    bitbucket_read_only: bool | None = None
