@@ -74,9 +74,15 @@ def get_available_services(
         confluence_token = headers.get("X-Atlassian-Confluence-Personal-Token")
         confluence_url_header = headers.get("X-Atlassian-Confluence-Url")
 
-        if confluence_token and confluence_url_header:
+        if confluence_url_header:
             confluence_is_setup = True
-            logger.info("Using Confluence authentication from header personal token")
+            if confluence_token:
+                logger.info("Using Confluence authentication from header personal token")
+            else:
+                logger.info(
+                    "Confluence URL provided without personal token - tools will be "
+                    "listed but API calls require a valid token"
+                )
 
     # Jira service detection
     jira_url = os.getenv("JIRA_URL")
@@ -134,9 +140,15 @@ def get_available_services(
         jira_token = headers.get("X-Atlassian-Jira-Personal-Token")
         jira_url_header = headers.get("X-Atlassian-Jira-Url")
 
-        if jira_token and jira_url_header:
+        if jira_url_header:
             jira_is_setup = True
-            logger.info("Using Jira authentication from header personal token")
+            if jira_token:
+                logger.info("Using Jira authentication from header personal token")
+            else:
+                logger.info(
+                    "Jira URL provided without personal token - tools will be "
+                    "listed but API calls require a valid token"
+                )
 
     # Bitbucket service detection
     bitbucket_url = os.getenv("BITBUCKET_URL")
@@ -196,9 +208,15 @@ def get_available_services(
         bitbucket_token = headers.get("X-Atlassian-Bitbucket-Personal-Token")
         bitbucket_url_header = headers.get("X-Atlassian-Bitbucket-Url")
 
-        if bitbucket_token and bitbucket_url_header:
+        if bitbucket_url_header:
             bitbucket_is_setup = True
-            logger.info("Using Bitbucket authentication from header personal token")
+            if bitbucket_token:
+                logger.info("Using Bitbucket authentication from header personal token")
+            else:
+                logger.info(
+                    "Bitbucket URL provided without personal token - tools will be "
+                    "listed but API calls require a valid token"
+                )
 
     # Xray for Jira reuses Jira URL and credentials (Server/Data Center only)
     xray_is_setup = False
