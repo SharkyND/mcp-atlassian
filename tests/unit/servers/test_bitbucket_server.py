@@ -259,6 +259,38 @@ success_cases.extend(
                 "pull_request_id": 5,
             },
         },
+        {
+            "func": "add_pull_request_inline_comment",
+            "method": "add_pull_request_inline_comment",
+            "return_value": {
+                "id": 99,
+                "text": "inline",
+                "inline": {"path": "src/main.py", "to": 42},
+            },
+            "kwargs": {
+                "workspace": "ws",
+                "repository": "rep",
+                "pull_request_id": 7,
+                "comment": "inline note",
+                "file_path": "src/main.py",
+                "line": 42,
+                "line_type": "ADDED",
+            },
+            "expected": {
+                "success": True,
+                "comment": {
+                    "id": 99,
+                    "text": "inline",
+                    "inline": {"path": "src/main.py", "to": 42},
+                },
+                "pull_request_id": 7,
+                "requested_file_path": "src/main.py",
+                "requested_line": 42,
+                "anchored": True,
+                "file_path": "src/main.py",
+                "line": 42,
+            },
+        },
     ]
 )
 

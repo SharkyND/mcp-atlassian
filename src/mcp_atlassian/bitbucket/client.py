@@ -1,5 +1,6 @@
 """Base client module for Bitbucket API interactions."""
 
+import json
 import logging
 from typing import Any
 
@@ -162,5 +163,40 @@ class BitbucketClient:
         except Exception as e:
             logger.error(
                 f"Failed to get pull request comments for {workspace}/{repository}/PR-{pull_request_id}: {e}"
+            )
+            raise
+
+    def get_pull_request_diff(
+        self, workspace: str, repository: str, pull_request_id: int
+    ) -> str:
+        """Get the unified diff for a pull request.
+
+        Args:
+            workspace: Workspace name (Cloud) or project key (Server/DC)
+            repository: Repository name
+            pull_request_id: Pull request ID
+
+        Returns:
+            Unified diff string showing code changes in the PR
+        """
+        try:
+            if self.config.is_cloud:
+                endpoint = f"repositories/{workspace}/{repository}/pullrequests/{pull_request_id}/diff"
+            else:
+                endpoint = f"projects/{workspace}/repos/{repository}/pull-requests/{pull_request_id}/diff"
+
+            response = self.bitbucket.get(endpoint)
+
+            # Cloud returns raw diff text; Server may return a dict with diffs
+            if isinstance(response, str):
+                return response
+            elif isinstance(response, dict):
+                # Server/DC returns structured diff — serialize back to a readable form
+                return json.dumps(response, indent=2)
+            else:
+                return str(response)
+        except Exception as e:
+            logger.error(
+                f"Failed to get diff for PR {pull_request_id} in {workspace}/{repository}: {e}"
             )
             raise
