@@ -5,7 +5,9 @@ from unittest.mock import MagicMock, mock_open, patch
 import pytest
 
 from mcp_atlassian.jira import JiraFetcher
+from mcp_atlassian.jira.attachment_cache import AttachmentCache
 from mcp_atlassian.jira.attachments import AttachmentsMixin
+from mcp_atlassian.jira.upload_staging import UploadStagingStore
 
 # Test scenarios for AttachmentsMixin
 #
@@ -443,6 +445,135 @@ class TestAttachmentsMixin:
             assert len(result["failed"]) == 1
             assert result["failed"][0]["filename"] == "test1.txt"
             assert "No URL available" in result["failed"][0]["error"]
+
+    def test_download_issue_attachments_cache_failure_reports_error(
+        self, attachments_mixin: AttachmentsMixin
+    ):
+        """Test cache failures return an error instead of embedding base64 content."""
+        mock_issue = {
+            "fields": {
+                "attachment": [
+                    {
+                        "filename": "test1.txt",
+                        "content": "https://test.url/attachment1",
+                        "size": 100,
+                    }
+                ]
+            }
+        }
+        attachments_mixin.jira.issue.return_value = mock_issue
+
+        mock_attachment = MagicMock()
+        mock_attachment.filename = "test1.txt"
+        mock_attachment.url = "https://test.url/attachment1"
+        mock_attachment.size = 100
+        mock_attachment.content_type = "text/plain"
+
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.iter_content.return_value = [b"test content"]
+        attachments_mixin.jira._session.get.return_value = mock_response
+
+        cache = MagicMock()
+        cache.store.side_effect = ValueError("cache full")
+
+        with (
+            patch(
+                "mcp_atlassian.models.jira.JiraAttachment.from_api_response",
+                return_value=mock_attachment,
+            ),
+            patch(
+                "mcp_atlassian.jira.attachments.get_attachment_cache",
+                return_value=cache,
+            ),
+        ):
+            result = attachments_mixin.download_issue_attachments(
+                "TEST-123", return_content=True
+            )
+
+        assert result["downloaded"] == []
+        assert len(result["failed"]) == 1
+        assert "Failed to cache attachment content" in result["failed"][0]["error"]
+        assert "content" not in result["failed"][0]
+
+
+class TestUploadStagingStore:
+    """Tests for the upload staging session validation flow."""
+
+    @pytest.fixture
+    def attachments_mixin(self, jira_fetcher: JiraFetcher) -> AttachmentsMixin:
+        """Mirror the shared AttachmentsMixin fixture for tests in this class."""
+        attachments_mixin = jira_fetcher
+        attachments_mixin.jira = MagicMock()
+        attachments_mixin.jira._session = MagicMock()
+        return attachments_mixin
+
+    def test_store_requires_issued_session(self):
+        """Test staging rejects arbitrary caller-provided session ids."""
+        store = UploadStagingStore(ttl_minutes=30, max_size_mb=1)
+
+        with pytest.raises(PermissionError, match="invalid or expired"):
+            store.store("unknown-session", "test.txt", b"data", "text/plain")
+
+    def test_store_accepts_server_issued_session(self):
+        """Test staging accepts sessions created by create_session."""
+        store = UploadStagingStore(ttl_minutes=30, max_size_mb=1)
+        session_id = store.create_session()
+
+        file_id = store.store(session_id, "test.txt", b"data", "text/plain")
+
+        assert store.get(session_id, file_id) is not None
+
+
+class TestAttachmentCacheDownloadTokens:
+    """Tests for short-lived attachment download tokens."""
+
+    @pytest.fixture
+    def attachments_mixin(self, jira_fetcher: JiraFetcher) -> AttachmentsMixin:
+        """Mirror the shared AttachmentsMixin fixture for tests in this class."""
+        attachments_mixin = jira_fetcher
+        attachments_mixin.jira = MagicMock()
+        attachments_mixin.jira._session = MagicMock()
+        return attachments_mixin
+
+    def test_create_download_token_requires_cached_attachment(self):
+        """Test a download URL cannot be created for an uncached attachment."""
+        cache = AttachmentCache(ttl_minutes=10, max_size_mb=1)
+
+        with pytest.raises(ValueError, match="is not cached"):
+            cache.create_download_token("PROJ-1", "missing.txt")
+
+    def test_download_token_resolves_cached_attachment(self):
+        """Test a valid download token resolves to the cached attachment content."""
+        cache = AttachmentCache(ttl_minutes=10, max_size_mb=1)
+        cache.store(
+            issue_key="PROJ-1",
+            filename="report.pdf",
+            content=b"pdf-bytes",
+            mime_type="application/pdf",
+        )
+
+        token_info = cache.create_download_token("PROJ-1", "report.pdf", ttl_minutes=5)
+        attachment = cache.get_by_download_token(token_info["token"])
+
+        assert attachment is not None
+        assert attachment["content"] == b"pdf-bytes"
+        assert attachment["mime_type"] == "application/pdf"
+
+    def test_clear_revokes_download_tokens(self):
+        """Test clearing the cache invalidates outstanding download tokens."""
+        cache = AttachmentCache(ttl_minutes=10, max_size_mb=1)
+        cache.store(
+            issue_key="PROJ-1",
+            filename="report.pdf",
+            content=b"pdf-bytes",
+            mime_type="application/pdf",
+        )
+        token_info = cache.create_download_token("PROJ-1", "report.pdf", ttl_minutes=5)
+
+        cache.clear()
+
+        assert cache.get_by_download_token(token_info["token"]) is None
 
     # Tests for upload_attachment method
 

@@ -208,6 +208,7 @@ There are three main approaches to configure the Docker container:
 > - `MCP_VERBOSE`: Set to "true" for more detailed logging
 > - `MCP_LOGGING_STDOUT`: Set to "true" to log to stdout instead of stderr
 > - `ENABLED_TOOLS`: Comma-separated list of tool names to enable (e.g., "confluence_search,jira_get_issue")
+> - `MCP_SERVER_BASE_URL`: Base URL used when generating temporary upload/download helper URLs (defaults to `http://localhost:8932`)
 >
 > **Header-Based Authentication** (no environment variables needed):
 > - `X-Atlassian-Jira-Personal-Token`: Jira PAT/API token (passed as HTTP header), used for XRay as well
@@ -218,6 +219,7 @@ There are three main approaches to configure the Docker container:
 > - `X-Atlassian-Bitbucket-Personal-Token`: Bitbucket PAT token (passed as HTTP header)
 > - `X-Atlassian-Read-Only-Mode`: Per-request read-only mode (passed as HTTP header)
 > - `X-Atlassian-Enable-Xray`: Enable/disable Xray for Jira tools (disabled by default)
+> - `X-MCP-Upload-Base-URL`: Per-request override for generated upload/download helper URLs
 >
 > See the [.env.example](https://github.com/SharkyND/mcp-atlassian/blob/main/.env.example) file for all available options.
 
@@ -943,6 +945,64 @@ export READ_ONLY_MODE=true         # macOS/Linux
 
 Use the header to temporarily override server defaults for a single client request without restarting.
 
+## Jira Attachment Helpers
+
+The Jira attachment flow supports server-local downloads, MCP resource access, short-lived HTTP download URLs, and staged uploads from a local client.
+
+### Download Attachments To A Server-Local Directory
+
+Use `jira_download_attachments` with `target_dir` when the files should be written to the machine running the MCP server.
+
+```json
+{
+  "issue_key": "PROJ-123",
+  "target_dir": "/tmp/downloads"
+}
+```
+
+This writes files locally on the server host. It does not create a browser-download URL for a remote client.
+
+### Cache Attachments As MCP Resources
+
+Use `jira_download_attachments` without `target_dir` to cache attachments in memory and expose them as MCP resources.
+
+```json
+{
+  "issue_key": "PROJ-123"
+}
+```
+
+The response includes resource URIs such as `jira://attachments/PROJ-123/report.pdf`, which MCP-aware clients can open directly. Cached attachments expire automatically after 10 minutes.
+
+### Generate A Short-Lived HTTP Download URL
+
+If a client needs a regular HTTP download link instead of an MCP resource URI, first cache the attachment with `jira_download_attachments`, then call `construct_download_endpoint`.
+
+```json
+{
+  "issue_key": "PROJ-123",
+  "filename": "report.pdf",
+  "ttl_minutes": 5
+}
+```
+
+The response includes a temporary URL like `http://localhost:8932/download/<token>`. Important constraints:
+
+- The attachment must already be cached in memory.
+- The generated URL expires automatically.
+- The URL lifetime cannot exceed the cache lifetime.
+- The base URL comes from `X-MCP-Upload-Base-URL` when provided on the request, otherwise `MCP_SERVER_BASE_URL`, otherwise `http://localhost:8932`.
+
+### Upload Local Files To Jira
+
+Client-side upload uses a staged upload flow:
+
+1. Call `construct_upload_endpoint` to get `upload_url` and `session_id`.
+2. `POST` the file bytes to `/upload` with the `Mcp-Session-Id` header.
+3. Pass the returned `upload://...` URIs to `jira_upload_attachment`.
+
+Upload sessions are short-lived and validated server-side before files are accepted.
+
 ## Tools
 
 ### Key Tools
@@ -955,6 +1015,11 @@ Use the header to temporarily override server defaults for a single client reque
 - `jira_update_issue`: Update an existing issue
 - `jira_transition_issue`: Transition an issue to a new status
 - `jira_add_comment`: Add a comment to an issue
+- `jira_download_attachments`: Download attachments locally or cache them as MCP resources
+- `list_cached_attachments`: List cached Jira attachments and their resource URIs
+- `construct_download_endpoint`: Create a short-lived HTTP download URL for a cached attachment
+- `construct_upload_endpoint`: Create a short-lived upload session and upload URL
+- `jira_upload_attachment`: Upload staged local files to a Jira issue
 
 #### Confluence Tools
 
@@ -1014,9 +1079,10 @@ Use the header to temporarily override server defaults for a single client reque
 |           | `jira_batch_get_changelogs`*  |                                |                                    | `get_tests_with_test_set`         |
 |           | `jira_get_user_profile`       |                                |                                    | `get_tests_with_test_plan`        |
 |           | `jira_download_attachments`   |                                |                                    | `get_test_executions_with_test_plan` |
+|           | `list_cached_attachments`     |                                |                                    | `get_tests_with_test_execution`   |
+|           | `construct_download_endpoint` |                                |                                    | `get_test_run`                    |
+|           | `construct_upload_endpoint`   |                                |                                    | `get_test_run_assignee`           |
 |           | `jira_get_project_versions`   |                                |                                    | `get_tests_with_test_execution`   |
-|           |                               |                                |                                    | `get_test_run`                    |
-|           |                               |                                |                                    | `get_test_run_assignee`           |
 |           |                               |                                |                                    | `get_test_run_iteration`          |
 |           |                               |                                |                                    | `get_test_run_status`             |
 |           |                               |                                |                                    | `get_test_run_defects`            |
@@ -1033,6 +1099,7 @@ Use the header to temporarily override server defaults for a single client reque
 |           | `jira_transition_issue`       |                                |                                    | `update_test_set`                 |
 |           | `jira_add_worklog`            |                                |                                    | `delete_test_from_test_set`       |
 |           | `jira_link_to_epic`           |                                |                                    | `update_test_plan`                |
+|           | `jira_upload_attachment`      |                                |                                    | `delete_test_from_test_plan`      |
 |           | `jira_create_sprint`          |                                |                                    | `delete_test_from_test_plan`      |
 |           | `jira_update_sprint`          |                                |                                    | `update_test_plan_test_executions` |
 |           | `jira_create_issue_link`      |                                |                                    | `delete_test_execution_from_test_plan` |
