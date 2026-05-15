@@ -160,12 +160,16 @@ For **Xray for Jira authentication**:
       "X-Atlassian-Confluence-Url": "https://your-confluence-instance.com",
       "X-Atlassian-Bitbucket-Personal-Token": "your_bitbucket_pat_or_app_password",
       "X-Atlassian-Bitbucket-Url": "https://your-bitbucket-instance.com",
-      "X-Atlassian-Read-Only-Mode": "true"
+      "X-Atlassian-Read-Only-Mode": "true",
+      "X-Atlassian-Jira-Read-Only-Mode": "false"
     },
     "type": "http"
   }
 }
 ```
+
+> [!TIP]
+> Per-product headers override the global `X-Atlassian-Read-Only-Mode` header for that product. In the example above the global flag enables read-only for Confluence and Bitbucket, while Jira remains in read/write mode.
 
 > [!TIP]
 > **Multi-Cloud OAuth Support**: If you're building a multi-tenant application where users provide their own OAuth tokens, see the [Multi-Cloud OAuth Support](#multi-cloud-oauth-support) section for minimal configuration setup.
@@ -204,11 +208,13 @@ There are three main approaches to configure the Docker container:
 >
 > - `CONFLUENCE_SPACES_FILTER`: Filter by space keys (e.g., "DEV,TEAM,DOC")
 > - `JIRA_PROJECTS_FILTER`: Filter by project keys (e.g., "PROJ,DEV,SUPPORT")
-> - `READ_ONLY_MODE`: Set to "true" to disable write operations
+> - `READ_ONLY_MODE`: Set to `true` to disable write operations for **all** products
+> - `JIRA_READ_ONLY_MODE`: Set to `true` to disable write operations for Jira only
+> - `CONFLUENCE_READ_ONLY_MODE`: Set to `true` to disable write operations for Confluence only
+> - `BITBUCKET_READ_ONLY_MODE`: Set to `true` to disable write operations for Bitbucket only
 > - `MCP_VERBOSE`: Set to "true" for more detailed logging
 > - `MCP_LOGGING_STDOUT`: Set to "true" to log to stdout instead of stderr
 > - `ENABLED_TOOLS`: Comma-separated list of tool names to enable (e.g., "confluence_search,jira_get_issue")
-> - `MCP_SERVER_BASE_URL`: Base URL used when generating temporary upload/download helper URLs (defaults to `http://localhost:8932`)
 >
 > **Header-Based Authentication** (no environment variables needed):
 > - `X-Atlassian-Jira-Personal-Token`: Jira PAT/API token (passed as HTTP header), used for XRay as well
@@ -217,9 +223,11 @@ There are three main approaches to configure the Docker container:
 > - `X-Atlassian-Confluence-Url`: Confluence instance URL (passed as HTTP header)
 > - `X-Atlassian-Bitbucket-Url`: Bitbucket URL (passed as HTTP header)
 > - `X-Atlassian-Bitbucket-Personal-Token`: Bitbucket PAT token (passed as HTTP header)
-> - `X-Atlassian-Read-Only-Mode`: Per-request read-only mode (passed as HTTP header)
+> - `X-Atlassian-Read-Only-Mode`: Global per-request read-only mode — applies to all products (passed as HTTP header)
+> - `X-Atlassian-Jira-Read-Only-Mode`: Per-request read-only mode for Jira only (passed as HTTP header)
+> - `X-Atlassian-Confluence-Read-Only-Mode`: Per-request read-only mode for Confluence only (passed as HTTP header)
+> - `X-Atlassian-Bitbucket-Read-Only-Mode`: Per-request read-only mode for Bitbucket only (passed as HTTP header)
 > - `X-Atlassian-Enable-Xray`: Enable/disable Xray for Jira tools (disabled by default)
-> - `X-MCP-Upload-Base-URL`: Per-request override for generated upload/download helper URLs
 >
 > See the [.env.example](https://github.com/SharkyND/mcp-atlassian/blob/main/.env.example) file for all available options.
 
@@ -445,6 +453,7 @@ Configure your MCP client to send authentication headers with each request:
     "url": "http://localhost:8000/mcp",
     "headers": {
       "X-Atlassian-Read-Only-Mode": "true",
+      "X-Atlassian-Jira-Read-Only-Mode": "false",
       "X-Atlassian-Jira-Personal-Token": "your_jira_pat_or_api_token",
       "X-Atlassian-Jira-Url": "https://your-jira-instance.com",
       "X-Atlassian-Confluence-Personal-Token": "your_confluence_pat_or_api_token",
@@ -454,6 +463,9 @@ Configure your MCP client to send authentication headers with each request:
   }
 }
 ```
+
+> [!NOTE]
+> In the example above, `X-Atlassian-Read-Only-Mode: true` sets the global default (Confluence and Bitbucket become read-only), but `X-Atlassian-Jira-Read-Only-Mode: false` overrides that for Jira, keeping it in read/write mode.
 
 **Optional Docker Configuration with Read-Only Mode:**
 
@@ -913,95 +925,77 @@ Returns 400 error if missing when enabled.
 
 ## Read-Only Mode
 
-Read-only mode removes all tools tagged with `write` from tool discovery and blocks direct calls to write handlers. Unless configured, the server runs in read/write mode. The effective state is recalculated on every request using this priority:
+Read-only mode removes all tools tagged with `write` from tool discovery and blocks direct calls to write handlers. Unless configured, the server runs in read/write mode.
 
-1. **HTTP header** `X-Atlassian-Read-Only-Mode` &mdash; highest precedence per request. Truthy strings (`true`, `1`, `yes`, `on`) enable read-only; falsy strings (`false`, `0`, `no`, `off`) force read/write even if other controls enabled.
-2. **Environment variable** `READ_ONLY_MODE` &mdash; process-wide default when the header is absent.
-3. **CLI flag** `--read-only` &mdash; fallback applied only when header and env variable are not provided.
+Read-only mode can be controlled **globally** (all products) or **per-product** (Jira, Confluence, Bitbucket independently). The effective state is recalculated on every request using this priority (highest first):
 
-When enabled, write operations are hidden in `tools/list`, and the `@check_write_access` decorator raises `ValueError` if a client tries to invoke one directly.
+| Priority | Scope | Mechanism |
+|---|---|---|
+| 1 | Per-product | HTTP header `X-Atlassian-<Product>-Read-Only-Mode` |
+| 2 | Global | HTTP header `X-Atlassian-Read-Only-Mode` |
+| 3 | Per-product | Environment variable `<PRODUCT>_READ_ONLY_MODE` |
+| 4 | Global | Environment variable `READ_ONLY_MODE` |
+| 5 | Per-product | CLI flag `--<product>-read-only` |
+| 6 | Global | CLI flag `--read-only` |
 
-### Enabling examples
+Truthy values: `true`, `1`, `yes`, `on`. Falsy values: `false`, `0`, `no`, `off`. A falsy value at a higher priority overrides a truthy value at a lower priority.
+
+When enabled for a product, its write tools are hidden in `tools/list`, and the `@check_write_access` decorator raises `ValueError` if a client tries to invoke one directly.
+
+### CLI flags
 
 ```bash
-# CLI flag
+# All products read-only
 uv run mcp-atlassian --transport streamable-http --port 8889 --read-only
+
+# Per-product: only Jira is read-only
+uv run mcp-atlassian --transport streamable-http --port 8889 --jira-read-only
+
+# Combined: Jira and Confluence read-only, Bitbucket stays read/write
+uv run mcp-atlassian --transport streamable-http --port 8889 --jira-read-only --confluence-read-only
 ```
 
+### Environment variables
+
 ```bash
-# Environment variable
-set READ_ONLY_MODE=true            # Windows CMD
-$Env:READ_ONLY_MODE = "true"       # PowerShell
-export READ_ONLY_MODE=true         # macOS/Linux
+# Global — all products
+set READ_ONLY_MODE=true               # Windows CMD
+$Env:READ_ONLY_MODE = "true"          # PowerShell
+export READ_ONLY_MODE=true            # macOS/Linux
+
+# Per-product overrides
+$Env:JIRA_READ_ONLY_MODE = "true"      # Jira only
+$Env:CONFLUENCE_READ_ONLY_MODE = "true" # Confluence only
+$Env:BITBUCKET_READ_ONLY_MODE = "true" # Bitbucket only
+
+# Example: global read-only, but Jira stays read/write
+$Env:READ_ONLY_MODE = "true"
+$Env:JIRA_READ_ONLY_MODE = "false"
 ```
+
+### HTTP headers (per-request)
+
+Headers let you override the server defaults on a per-request basis without restarting.
 
 ```json
 {
   "headers": {
-    "X-Atlassian-Read-Only-Mode": "false"
+    "X-Atlassian-Read-Only-Mode": "true",
+    "X-Atlassian-Jira-Read-Only-Mode": "false",
+    "X-Atlassian-Confluence-Read-Only-Mode": "true",
+    "X-Atlassian-Bitbucket-Read-Only-Mode": "false"
   }
 }
 ```
 
-Use the header to temporarily override server defaults for a single client request without restarting.
+| Header | Scope |
+|---|---|
+| `X-Atlassian-Read-Only-Mode` | All products (global fallback) |
+| `X-Atlassian-Jira-Read-Only-Mode` | Jira only |
+| `X-Atlassian-Confluence-Read-Only-Mode` | Confluence only |
+| `X-Atlassian-Bitbucket-Read-Only-Mode` | Bitbucket only |
 
-## Jira Attachment Helpers
-
-The Jira attachment flow supports server-local downloads, MCP resource access, short-lived HTTP download URLs, and staged uploads from a local client.
-
-### Download Attachments To A Server-Local Directory
-
-Use `jira_download_attachments` with `target_dir` when the files should be written to the machine running the MCP server.
-
-```json
-{
-  "issue_key": "PROJ-123",
-  "target_dir": "/tmp/downloads"
-}
-```
-
-This writes files locally on the server host. It does not create a browser-download URL for a remote client.
-
-### Cache Attachments As MCP Resources
-
-Use `jira_download_attachments` without `target_dir` to cache attachments in memory and expose them as MCP resources.
-
-```json
-{
-  "issue_key": "PROJ-123"
-}
-```
-
-The response includes resource URIs such as `jira://attachments/PROJ-123/report.pdf`, which MCP-aware clients can open directly. Cached attachments expire automatically after 10 minutes.
-
-### Generate A Short-Lived HTTP Download URL
-
-If a client needs a regular HTTP download link instead of an MCP resource URI, first cache the attachment with `jira_download_attachments`, then call `construct_download_endpoint`.
-
-```json
-{
-  "issue_key": "PROJ-123",
-  "filename": "report.pdf",
-  "ttl_minutes": 5
-}
-```
-
-The response includes a temporary URL like `http://localhost:8932/download/<token>`. Important constraints:
-
-- The attachment must already be cached in memory.
-- The generated URL expires automatically.
-- The URL lifetime cannot exceed the cache lifetime.
-- The base URL comes from `X-MCP-Upload-Base-URL` when provided on the request, otherwise `MCP_SERVER_BASE_URL`, otherwise `http://localhost:8932`.
-
-### Upload Local Files To Jira
-
-Client-side upload uses a staged upload flow:
-
-1. Call `construct_upload_endpoint` to get `upload_url` and `session_id`.
-2. `POST` the file bytes to `/upload` with the `Mcp-Session-Id` header.
-3. Pass the returned `upload://...` URIs to `jira_upload_attachment`.
-
-Upload sessions are short-lived and validated server-side before files are accepted.
+A per-product header always takes precedence over the global header for that product. In the example above, the global flag enables read-only for all products, but the Jira and Bitbucket headers override it back to read/write.
 
 ## Tools
 
@@ -1015,11 +1009,6 @@ Upload sessions are short-lived and validated server-side before files are accep
 - `jira_update_issue`: Update an existing issue
 - `jira_transition_issue`: Transition an issue to a new status
 - `jira_add_comment`: Add a comment to an issue
-- `jira_download_attachments`: Download attachments locally or cache them as MCP resources
-- `list_cached_attachments`: List cached Jira attachments and their resource URIs
-- `construct_download_endpoint`: Create a short-lived HTTP download URL for a cached attachment
-- `construct_upload_endpoint`: Create a short-lived upload session and upload URL
-- `jira_upload_attachment`: Upload staged local files to a Jira issue
 
 #### Confluence Tools
 
@@ -1046,6 +1035,7 @@ Upload sessions are short-lived and validated server-side before files are accep
 - `create_branch`: Create a new branch in a repository
 - `add_pull_request_blocker_comment`: Add a blocking comment to a pull request
 - `add_pull_request_comment`: Add a regular comment to a pull request
+- `add_pull_request_inline_comment`: Add an inline comment on a specific line of a file in a pull request
 
 #### Xray Tools
 
@@ -1079,10 +1069,9 @@ Upload sessions are short-lived and validated server-side before files are accep
 |           | `jira_batch_get_changelogs`*  |                                |                                    | `get_tests_with_test_set`         |
 |           | `jira_get_user_profile`       |                                |                                    | `get_tests_with_test_plan`        |
 |           | `jira_download_attachments`   |                                |                                    | `get_test_executions_with_test_plan` |
-|           | `list_cached_attachments`     |                                |                                    | `get_tests_with_test_execution`   |
-|           | `construct_download_endpoint` |                                |                                    | `get_test_run`                    |
-|           | `construct_upload_endpoint`   |                                |                                    | `get_test_run_assignee`           |
 |           | `jira_get_project_versions`   |                                |                                    | `get_tests_with_test_execution`   |
+|           |                               |                                |                                    | `get_test_run`                    |
+|           |                               |                                |                                    | `get_test_run_assignee`           |
 |           |                               |                                |                                    | `get_test_run_iteration`          |
 |           |                               |                                |                                    | `get_test_run_status`             |
 |           |                               |                                |                                    | `get_test_run_defects`            |
@@ -1095,11 +1084,10 @@ Upload sessions are short-lived and validated server-side before files are accep
 |           | `jira_update_issue`           | `confluence_update_page`       | `create_branch`                    | `update_test_step`                |
 |           | `jira_delete_issue`           | `confluence_delete_page`       | `add_pull_request_blocker_comment` | `delete_test_step`                |
 |           | `jira_batch_create_issues`    | `confluence_add_label`         | `add_pull_request_comment`         | `update_precondition`             |
-|           | `jira_add_comment`            | `confluence_add_comment`       |                                    | `delete_test_from_precondition`   |
+|           | `jira_add_comment`            | `confluence_add_comment`       | `add_pull_request_inline_comment`  | `delete_test_from_precondition`   |
 |           | `jira_transition_issue`       |                                |                                    | `update_test_set`                 |
 |           | `jira_add_worklog`            |                                |                                    | `delete_test_from_test_set`       |
 |           | `jira_link_to_epic`           |                                |                                    | `update_test_plan`                |
-|           | `jira_upload_attachment`      |                                |                                    | `delete_test_from_test_plan`      |
 |           | `jira_create_sprint`          |                                |                                    | `delete_test_from_test_plan`      |
 |           | `jira_update_sprint`          |                                |                                    | `update_test_plan_test_executions` |
 |           | `jira_create_issue_link`      |                                |                                    | `delete_test_execution_from_test_plan` |
