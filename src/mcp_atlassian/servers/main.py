@@ -671,6 +671,7 @@ token_validation_cache: TTLCache[
         BitbucketFetcher | None,
         XrayFetcher | None,
     ],
+    float,
 ] = TTLCache(maxsize=100, ttl=300)
 
 

@@ -77,7 +77,9 @@ def get_available_services(
         if confluence_url_header:
             confluence_is_setup = True
             if confluence_token:
-                logger.info("Using Confluence authentication from header personal token")
+                logger.info(
+                    "Using Confluence authentication from header personal token"
+                )
             else:
                 logger.info(
                     "Confluence URL provided without personal token - tools will be "
