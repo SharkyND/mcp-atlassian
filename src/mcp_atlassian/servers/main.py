@@ -394,9 +394,15 @@ class AtlassianMCP(FastMCP[MainAppContext]):
             request_state = req_context.request.state
             service_headers = getattr(request_state, "atlassian_service_headers", {})
             header_read_only = getattr(request_state, "read_only_mode_header", None)
-            header_jira_read_only = getattr(request_state, "jira_read_only_mode_header", None)
-            header_confluence_read_only = getattr(request_state, "confluence_read_only_mode_header", None)
-            header_bitbucket_read_only = getattr(request_state, "bitbucket_read_only_mode_header", None)
+            header_jira_read_only = getattr(
+                request_state, "jira_read_only_mode_header", None
+            )
+            header_confluence_read_only = getattr(
+                request_state, "confluence_read_only_mode_header", None
+            )
+            header_bitbucket_read_only = getattr(
+                request_state, "bitbucket_read_only_mode_header", None
+            )
             enable_xray_header = getattr(request_state, "enable_xray_header", None)
 
             if service_headers:
@@ -432,12 +438,22 @@ class AtlassianMCP(FastMCP[MainAppContext]):
             global_hdr_bool = parse_extended_bool(header_read_only)
             if global_hdr_bool is not None:
                 return global_hdr_bool
-            stored = getattr(app_lifespan_state, context_attr, None) if app_lifespan_state else None
+            stored = (
+                getattr(app_lifespan_state, context_attr, None)
+                if app_lifespan_state
+                else None
+            )
             return bool(stored) if stored is not None else effective_read_only
 
-        effective_jira_read_only = _product_read_only(header_jira_read_only, "jira_read_only")
-        effective_confluence_read_only = _product_read_only(header_confluence_read_only, "confluence_read_only")
-        effective_bitbucket_read_only = _product_read_only(header_bitbucket_read_only, "bitbucket_read_only")
+        effective_jira_read_only = _product_read_only(
+            header_jira_read_only, "jira_read_only"
+        )
+        effective_confluence_read_only = _product_read_only(
+            header_confluence_read_only, "confluence_read_only"
+        )
+        effective_bitbucket_read_only = _product_read_only(
+            header_bitbucket_read_only, "bitbucket_read_only"
+        )
 
         logger.debug(
             "_main_mcp_list_tools: base_read_only=%s, cli_read_only=%s, "
@@ -496,7 +512,10 @@ class AtlassianMCP(FastMCP[MainAppContext]):
                     )
                     continue
                 # Fallback for write tools not tagged to a specific product (e.g. xray)
-                if not any([is_jira_write, is_confluence_write, is_bitbucket_write]) and effective_read_only:
+                if (
+                    not any([is_jira_write, is_confluence_write, is_bitbucket_write])
+                    and effective_read_only
+                ):
                     logger.debug(
                         f"Excluding tool '{registered_name}' due to global read-only mode "
                         f"and 'write' tag"
@@ -747,7 +766,9 @@ class UserTokenMiddleware:
                 return val if val else None
 
             jira_ro_hdr = _extract_header(b"x-atlassian-jira-read-only-mode")
-            confluence_ro_hdr = _extract_header(b"x-atlassian-confluence-read-only-mode")
+            confluence_ro_hdr = _extract_header(
+                b"x-atlassian-confluence-read-only-mode"
+            )
             bitbucket_ro_hdr = _extract_header(b"x-atlassian-bitbucket-read-only-mode")
             scope_copy["state"]["jira_read_only_mode_header"] = jira_ro_hdr
             scope_copy["state"]["confluence_read_only_mode_header"] = confluence_ro_hdr

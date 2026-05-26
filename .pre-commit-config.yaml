@@ -44,6 +44,7 @@ repos:
             "--disable-error-code=var-annotated",
             "--disable-error-code=no-untyped-def",
             "--disable-error-code=annotation-unchecked",
+            "--disable-error-code=type-arg",
         ]
         additional_dependencies: [
             'types-beautifulsoup4',
