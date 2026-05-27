@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 from typing import Annotated, Literal
 
 from fastmcp import Context, FastMCP
@@ -1247,8 +1248,11 @@ async def analyze_pr_review_status(
     Raises:
         ValueError: If the Bitbucket client is not configured or available.
     """
-    # Keywords in a reply that signal the author considers the work done
-    _done_keywords = {
+    # Keywords in a reply that signal the author considers the work done.
+    # We use word-boundary regex to avoid false positives from substrings
+    # (e.g. "not fixed yet" matching "fixed", or "undone" matching "done").
+
+    _done_keywords = [
         "done",
         "fixed",
         "addressed",
@@ -1257,15 +1261,32 @@ async def analyze_pr_review_status(
         "completed",
         "applied",
         "changed",
-    }
+    ]
+    # Match keywords only at word boundaries
+    _done_pattern = re.compile(
+        r"\b(" + "|".join(_done_keywords) + r")\b",
+        re.IGNORECASE,
+    )
+    # Negation patterns that invalidate a keyword match
+    _negation_pattern = re.compile(
+        r"\b(not|no|never|hasn't|haven't|hasn't been|not yet|un)\s*"
+        r"(" + "|".join(_done_keywords) + r")\b",
+        re.IGNORECASE,
+    )
 
     def _reply_indicates_done(replies: list[dict]) -> bool:
         for reply in replies:
-            text = ""
             # Cloud uses content.raw; Server uses text
             content = reply.get("content") or {}
-            text = (content.get("raw") or reply.get("text") or "").lower()
-            if any(kw in text for kw in _done_keywords):
+            text = (content.get("raw") or reply.get("text") or "").strip()
+            if not text:
+                continue
+            # Reject if the reply is clearly a negation
+            lower_text = text.lower()
+            if lower_text.startswith(("not ", "no,", "no ", "hasn't", "haven't")):
+                continue
+            # Check for positive keyword match without negation
+            if _done_pattern.search(text) and not _negation_pattern.search(text):
                 return True
         return False
 

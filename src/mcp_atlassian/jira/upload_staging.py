@@ -20,8 +20,22 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-_TTL_MINUTES = int(os.environ.get("UPLOAD_STAGING_TTL_MINUTES", "30"))
-_MAX_SIZE_MB = int(os.environ.get("UPLOAD_STAGING_MAX_SIZE_MB", "200"))
+def _safe_int_env(name: str, default: int) -> int:
+    """Parse an integer environment variable with a safe fallback."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except (ValueError, TypeError):
+        logger.warning(
+            "Invalid value for %s=%r, falling back to default %d", name, raw, default
+        )
+        return default
+
+
+_TTL_MINUTES = _safe_int_env("UPLOAD_STAGING_TTL_MINUTES", 30)
+_MAX_SIZE_MB = _safe_int_env("UPLOAD_STAGING_MAX_SIZE_MB", 200)
 _URI_PREFIX = "upload://sessions/"
 
 
