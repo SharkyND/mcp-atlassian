@@ -182,11 +182,11 @@ class AttachmentsMixin(JiraClient, AttachmentsOperationsProto):
                 # Use 100 MB as the default cap (matches AttachmentCache default).
                 from .attachment_cache import AttachmentCache
 
-                _DEFAULT_MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024
+                default_max_download_bytes = 100 * 1024 * 1024
                 if isinstance(cache, AttachmentCache):
                     max_download_bytes = cache._max_size_bytes
                 else:
-                    max_download_bytes = _DEFAULT_MAX_DOWNLOAD_BYTES
+                    max_download_bytes = default_max_download_bytes
                 content_buffer = bytearray() if should_return_content else None
                 file_handle = open(file_path, "wb") if file_path else None
                 try:
