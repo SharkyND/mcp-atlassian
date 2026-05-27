@@ -178,19 +178,57 @@ class AttachmentsMixin(JiraClient, AttachmentsOperationsProto):
                 response = self.jira._session.get(attachment.url, stream=True)
                 response.raise_for_status()
 
+                # Enforce a per-file size limit to prevent memory exhaustion.
+                # Use 100 MB as the default cap (matches AttachmentCache default).
+                from .attachment_cache import AttachmentCache
+
+                _DEFAULT_MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024
+                if isinstance(cache, AttachmentCache):
+                    max_download_bytes = cache._max_size_bytes
+                else:
+                    max_download_bytes = _DEFAULT_MAX_DOWNLOAD_BYTES
                 content_buffer = bytearray() if should_return_content else None
                 file_handle = open(file_path, "wb") if file_path else None
                 try:
+                    bytes_read = 0
                     for chunk in response.iter_content(chunk_size=8192):
                         if not chunk:
                             continue
+                        bytes_read += len(chunk)
+                        if bytes_read > max_download_bytes:
+                            logger.error(
+                                f"Attachment '{attachment.filename}' exceeds "
+                                f"maximum size ({max_download_bytes} bytes), "
+                                f"aborting download"
+                            )
+                            failed.append(
+                                {
+                                    "filename": attachment.filename,
+                                    "error": (
+                                        f"File exceeds maximum allowed size "
+                                        f"({max_download_bytes} bytes)"
+                                    ),
+                                }
+                            )
+                            break
                         if file_handle:
                             file_handle.write(chunk)
                         if content_buffer is not None:
                             content_buffer.extend(chunk)
+                    else:
+                        # Loop completed without break — download succeeded
+                        bytes_read = -1  # sentinel: success
                 finally:
                     if file_handle:
                         file_handle.close()
+                    response.close()
+
+                # If download was aborted due to size, skip to next attachment
+                if bytes_read != -1:
+                    # Clean up partial file if it was written
+                    if file_path and file_path.exists():
+                        file_path.unlink(missing_ok=True)
+                    continue
 
                 if file_path:
                     attachment_info["path"] = str(file_path)
