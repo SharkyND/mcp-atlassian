@@ -102,6 +102,7 @@ async def upload_endpoint(request: Request) -> JSONResponse:
         return JSONResponse({"error": "Invalid multipart form data"}, status_code=400)
 
     uploaded = []
+    max_file_bytes = staging._max_size_bytes
     for _field_name, file_field in form.multi_items():
         if not hasattr(file_field, "filename") or not file_field.filename:
             continue
@@ -110,7 +111,28 @@ async def upload_endpoint(request: Request) -> JSONResponse:
         if not safe_name:
             continue
         try:
-            content: bytes = await file_field.read()
+            # Stream-read in chunks and enforce size limit early to prevent
+            # memory exhaustion from oversized uploads.
+            chunks: list[bytes] = []
+            total_read = 0
+            chunk_size = 64 * 1024  # 64 KB
+            while True:
+                chunk = await file_field.read(chunk_size)
+                if not chunk:
+                    break
+                total_read += len(chunk)
+                if total_read > max_file_bytes:
+                    return JSONResponse(
+                        {
+                            "error": (
+                                f"File '{safe_name}' exceeds maximum allowed size "
+                                f"({max_file_bytes} bytes). Upload rejected."
+                            )
+                        },
+                        status_code=413,
+                    )
+                chunks.append(chunk)
+            content: bytes = b"".join(chunks)
         except Exception as exc:
             logger.error("Failed to read uploaded file '%s': %s", safe_name, exc)
             continue
