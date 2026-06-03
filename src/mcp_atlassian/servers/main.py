@@ -6,6 +6,7 @@ import os
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from typing import Any, Literal, Optional
+from urllib.parse import quote
 
 from cachetools import TTLCache
 from fastmcp import FastMCP, settings
@@ -22,11 +23,21 @@ from mcp_atlassian.bitbucket.config import BitbucketConfig
 from mcp_atlassian.confluence import ConfluenceFetcher
 from mcp_atlassian.confluence.config import ConfluenceConfig
 from mcp_atlassian.jira import JiraFetcher
+from mcp_atlassian.jira.attachment_cache import get_attachment_cache
 from mcp_atlassian.jira.config import JiraConfig
+from mcp_atlassian.jira.upload_staging import get_upload_staging
 from mcp_atlassian.utils.environment import get_available_services
 from mcp_atlassian.utils.io import (
+    get_cli_bitbucket_read_only_flag,
+    get_cli_confluence_read_only_flag,
+    get_cli_jira_read_only_flag,
     get_cli_read_only_flag,
+    get_env_bitbucket_read_only_flag,
+    get_env_confluence_read_only_flag,
+    get_env_jira_read_only_flag,
     get_env_read_only_flag,
+    parse_extended_bool,
+    resolve_product_read_only_mode,
     resolve_read_only_mode,
 )
 from mcp_atlassian.utils.logging import mask_sensitive
@@ -51,6 +62,137 @@ logger.info(f"Metrics collection initialized for pod: {pod_name}")
 
 async def health_check() -> JSONResponse:
     return JSONResponse({"status": "ok"})
+
+
+async def upload_endpoint(request: Request) -> JSONResponse:
+    """Receive multipart file uploads and stage them for Jira attachment.
+
+    Expects:
+      - Header:  Mcp-Session-Id: <session_id>  (from construct_upload_endpoint)
+      - Body:    multipart/form-data with one or more file fields
+
+    Returns JSON:
+      {"uploaded": [{"filename": "...", "uri": "upload://sessions/…", "size": …}]}
+    """
+    from pathlib import Path
+
+    session_id = request.headers.get("mcp-session-id")
+    if not session_id:
+        return JSONResponse(
+            {"error": "Mcp-Session-Id header is required"},
+            status_code=400,
+        )
+
+    staging = get_upload_staging()
+    if not staging.is_valid_session(session_id):
+        return JSONResponse(
+            {
+                "error": (
+                    "Invalid or expired upload session. "
+                    "Call construct_upload_endpoint to create a new session."
+                )
+            },
+            status_code=403,
+        )
+
+    try:
+        form = await request.form()
+    except Exception as exc:
+        logger.error("Failed to parse upload form: %s", exc)
+        return JSONResponse({"error": "Invalid multipart form data"}, status_code=400)
+
+    uploaded = []
+    max_file_bytes = staging._max_size_bytes
+    for _field_name, file_field in form.multi_items():
+        if not hasattr(file_field, "filename") or not file_field.filename:
+            continue
+        # Prevent path traversal: keep only the basename
+        safe_name = Path(file_field.filename).name
+        if not safe_name:
+            continue
+        try:
+            # Stream-read in chunks and enforce size limit early to prevent
+            # memory exhaustion from oversized uploads.
+            chunks: list[bytes] = []
+            total_read = 0
+            chunk_size = 64 * 1024  # 64 KB
+            while True:
+                chunk = await file_field.read(chunk_size)
+                if not chunk:
+                    break
+                total_read += len(chunk)
+                if total_read > max_file_bytes:
+                    return JSONResponse(
+                        {
+                            "error": (
+                                f"File '{safe_name}' exceeds maximum allowed size "
+                                f"({max_file_bytes} bytes). Upload rejected."
+                            )
+                        },
+                        status_code=413,
+                    )
+                chunks.append(chunk)
+            content: bytes = b"".join(chunks)
+        except Exception as exc:
+            logger.error("Failed to read uploaded file '%s': %s", safe_name, exc)
+            continue
+        mime_type: str = (
+            getattr(file_field, "content_type", None) or "application/octet-stream"
+        )
+        try:
+            file_id = staging.store(session_id, safe_name, content, mime_type)
+        except PermissionError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=403)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=413)
+        uri = staging.make_uri(session_id, file_id)
+        uploaded.append({"filename": safe_name, "uri": uri, "size": len(content)})
+
+    if not uploaded:
+        return JSONResponse(
+            {
+                "error": "No files found in request. Use multipart/form-data with file fields."
+            },
+            status_code=400,
+        )
+
+    logger.info(
+        "Staged %d file(s) for session %s: %s",
+        len(uploaded),
+        session_id,
+        [u["filename"] for u in uploaded],
+    )
+    return JSONResponse({"success": True, "uploaded": uploaded})
+
+
+async def download_endpoint(request: Request) -> Response:
+    """Serve a cached Jira attachment via a short-lived download token."""
+    token = request.path_params.get("token")
+    if not token:
+        return JSONResponse({"error": "Download token is required"}, status_code=400)
+
+    attachment = get_attachment_cache().get_by_download_token(token)
+    if not attachment:
+        return JSONResponse(
+            {
+                "error": (
+                    "Invalid or expired download token. "
+                    "Generate a new download URL and try again."
+                )
+            },
+            status_code=403,
+        )
+
+    encoded_name = quote(attachment["filename"], safe="")
+    headers = {
+        "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_name}",
+        "Cache-Control": "private, max-age=0, no-store",
+    }
+    return Response(
+        content=attachment["content"],
+        media_type=attachment["mime_type"],
+        headers=headers,
+    )
 
 
 async def metrics_endpoint(request: Request) -> Response:
@@ -78,6 +220,29 @@ async def main_lifespan(app: FastMCP[MainAppContext]) -> AsyncIterator[dict]:
     env_read_only = get_env_read_only_flag()
     read_only = resolve_read_only_mode(cli_read_only, env_read_only, None)
     enabled_tools = get_enabled_tools()
+
+    # Resolve per-product read_only flags (no header at startup time)
+    jira_read_only = resolve_product_read_only_mode(
+        product_cli=get_cli_jira_read_only_flag(),
+        product_env=get_env_jira_read_only_flag(),
+        global_cli=cli_read_only,
+        global_env=env_read_only,
+        header_read_only=None,
+    )
+    confluence_read_only = resolve_product_read_only_mode(
+        product_cli=get_cli_confluence_read_only_flag(),
+        product_env=get_env_confluence_read_only_flag(),
+        global_cli=cli_read_only,
+        global_env=env_read_only,
+        header_read_only=None,
+    )
+    bitbucket_read_only = resolve_product_read_only_mode(
+        product_cli=get_cli_bitbucket_read_only_flag(),
+        product_env=get_env_bitbucket_read_only_flag(),
+        global_cli=cli_read_only,
+        global_env=env_read_only,
+        header_read_only=None,
+    )
 
     loaded_jira_config: JiraConfig | None = None
     loaded_confluence_config: ConfluenceConfig | None = None
@@ -158,10 +323,17 @@ async def main_lifespan(app: FastMCP[MainAppContext]) -> AsyncIterator[dict]:
         cli_read_only=cli_read_only,
         env_read_only=env_read_only,
         enabled_tools=enabled_tools,
+        jira_read_only=jira_read_only,
+        confluence_read_only=confluence_read_only,
+        bitbucket_read_only=bitbucket_read_only,
     )
     logger.info(
-        "Read-only mode resolved: %s (cli=%s, env=%s)",
+        "Read-only mode resolved: global=%s, jira=%s, confluence=%s, bitbucket=%s "
+        "(cli=%s, env=%s)",
         "ENABLED" if read_only else "DISABLED",
+        "ENABLED" if jira_read_only else "DISABLED",
+        "ENABLED" if confluence_read_only else "DISABLED",
+        "ENABLED" if bitbucket_read_only else "DISABLED",
         cli_read_only,
         env_read_only,
     )
@@ -230,6 +402,9 @@ class AtlassianMCP(FastMCP[MainAppContext]):
             env_read_only = get_env_read_only_flag()
 
         header_read_only = None
+        header_jira_read_only = None
+        header_confluence_read_only = None
+        header_bitbucket_read_only = None
         enable_xray_header = None
         header_based_services = {
             "jira": False,
@@ -241,6 +416,15 @@ class AtlassianMCP(FastMCP[MainAppContext]):
             request_state = req_context.request.state
             service_headers = getattr(request_state, "atlassian_service_headers", {})
             header_read_only = getattr(request_state, "read_only_mode_header", None)
+            header_jira_read_only = getattr(
+                request_state, "jira_read_only_mode_header", None
+            )
+            header_confluence_read_only = getattr(
+                request_state, "confluence_read_only_mode_header", None
+            )
+            header_bitbucket_read_only = getattr(
+                request_state, "bitbucket_read_only_mode_header", None
+            )
             enable_xray_header = getattr(request_state, "enable_xray_header", None)
 
             if service_headers:
@@ -263,15 +447,52 @@ class AtlassianMCP(FastMCP[MainAppContext]):
         ):
             effective_read_only = bool(base_read_only)
 
+        # Resolve per-product effective read_only.
+        # Priority (highest first):
+        #   product-specific header > global header > product-specific startup value > effective_read_only
+        def _product_read_only(
+            product_header: str | None,
+            context_attr: str,
+        ) -> bool:
+            product_hdr_bool = parse_extended_bool(product_header)
+            if product_hdr_bool is not None:
+                return product_hdr_bool
+            global_hdr_bool = parse_extended_bool(header_read_only)
+            if global_hdr_bool is not None:
+                return global_hdr_bool
+            stored = (
+                getattr(app_lifespan_state, context_attr, None)
+                if app_lifespan_state
+                else None
+            )
+            return bool(stored) if stored is not None else effective_read_only
+
+        effective_jira_read_only = _product_read_only(
+            header_jira_read_only, "jira_read_only"
+        )
+        effective_confluence_read_only = _product_read_only(
+            header_confluence_read_only, "confluence_read_only"
+        )
+        effective_bitbucket_read_only = _product_read_only(
+            header_bitbucket_read_only, "bitbucket_read_only"
+        )
+
         logger.debug(
             "_main_mcp_list_tools: base_read_only=%s, cli_read_only=%s, "
-            "env_read_only=%s, header_read_only=%s, effective_read_only=%s, "
-            "enabled_tools_filter=%s, header_services=%s",
+            "env_read_only=%s, header_read_only=%s (jira=%s, confluence=%s, bitbucket=%s), "
+            "effective_read_only=%s, jira_read_only=%s, confluence_read_only=%s, "
+            "bitbucket_read_only=%s, enabled_tools_filter=%s, header_services=%s",
             base_read_only,
             cli_read_only,
             env_read_only,
             header_read_only,
+            header_jira_read_only,
+            header_confluence_read_only,
+            header_bitbucket_read_only,
             effective_read_only,
+            effective_jira_read_only,
+            effective_confluence_read_only,
+            effective_bitbucket_read_only,
             enabled_tools_filter,
             header_based_services,
         )
@@ -293,12 +514,35 @@ class AtlassianMCP(FastMCP[MainAppContext]):
                 logger.debug(f"Excluding tool '{registered_name}' (not enabled)")
                 continue
 
-            if tool_obj and effective_read_only and "write" in tool_tags:
-                logger.debug(
-                    f"Excluding tool '{registered_name}' due to read-only mode "
-                    f"and 'write' tag"
-                )
-                continue
+            if tool_obj and "write" in tool_tags:
+                is_jira_write = "jira" in tool_tags
+                is_confluence_write = "confluence" in tool_tags
+                is_bitbucket_write = "bitbucket" in tool_tags
+                if is_jira_write and effective_jira_read_only:
+                    logger.debug(
+                        f"Excluding tool '{registered_name}' due to Jira read-only mode"
+                    )
+                    continue
+                if is_confluence_write and effective_confluence_read_only:
+                    logger.debug(
+                        f"Excluding tool '{registered_name}' due to Confluence read-only mode"
+                    )
+                    continue
+                if is_bitbucket_write and effective_bitbucket_read_only:
+                    logger.debug(
+                        f"Excluding tool '{registered_name}' due to Bitbucket read-only mode"
+                    )
+                    continue
+                # Fallback for write tools not tagged to a specific product (e.g. xray)
+                if (
+                    not any([is_jira_write, is_confluence_write, is_bitbucket_write])
+                    and effective_read_only
+                ):
+                    logger.debug(
+                        f"Excluding tool '{registered_name}' due to global read-only mode "
+                        f"and 'write' tag"
+                    )
+                    continue
 
             # Exclude Jira/Confluence tools if config is not fully authenticated
             is_jira_tool = "jira" in tool_tags
@@ -429,6 +673,12 @@ class AtlassianMCP(FastMCP[MainAppContext]):
 
         # Add metrics endpoint
         app.router.routes.append(Route("/metrics", metrics_endpoint, methods=["GET"]))
+        # Add file upload endpoint (used by construct_upload_endpoint / jira_upload_attachment flow)
+        app.router.routes.append(Route("/upload", upload_endpoint, methods=["POST"]))
+        # Add short-lived attachment download endpoint (used by construct_download_endpoint)
+        app.router.routes.append(
+            Route("/download/{token}", download_endpoint, methods=["GET"])
+        )
 
         return app
 
@@ -531,6 +781,30 @@ class UserTokenMiddleware:
                     read_only_header_value,
                 )
 
+            # Per-product read-only headers
+            def _extract_header(key: bytes) -> str | None:
+                raw = headers.get(key)
+                val = raw.decode("latin-1").strip() if raw else None
+                return val if val else None
+
+            jira_ro_hdr = _extract_header(b"x-atlassian-jira-read-only-mode")
+            confluence_ro_hdr = _extract_header(
+                b"x-atlassian-confluence-read-only-mode"
+            )
+            bitbucket_ro_hdr = _extract_header(b"x-atlassian-bitbucket-read-only-mode")
+            scope_copy["state"]["jira_read_only_mode_header"] = jira_ro_hdr
+            scope_copy["state"]["confluence_read_only_mode_header"] = confluence_ro_hdr
+            scope_copy["state"]["bitbucket_read_only_mode_header"] = bitbucket_ro_hdr
+            for hdr_name, hdr_val in (
+                ("X-Atlassian-Jira-Read-Only-Mode", jira_ro_hdr),
+                ("X-Atlassian-Confluence-Read-Only-Mode", confluence_ro_hdr),
+                ("X-Atlassian-Bitbucket-Read-Only-Mode", bitbucket_ro_hdr),
+            ):
+                if hdr_val:
+                    logger.debug(
+                        "UserTokenMiddleware: %s header: %s", hdr_name, hdr_val
+                    )
+
             # Extract X-Atlassian-Enable-Xray header
             enable_xray_header_bytes = headers.get(b"x-atlassian-enable-xray")
             enable_xray_header_value = (
@@ -548,6 +822,25 @@ class UserTokenMiddleware:
                 logger.debug(
                     "UserTokenMiddleware: X-Atlassian-Enable-Xray header: %s",
                     enable_xray_header_value,
+                )
+
+            # Extract X-MCP-Upload-Base-URL header for the file upload endpoint
+            upload_base_url_header = headers.get(b"x-mcp-upload-base-url")
+            upload_base_url_header_str = (
+                upload_base_url_header.decode("latin-1")
+                if upload_base_url_header
+                else None
+            )
+            upload_base_url_header_str = (
+                upload_base_url_header_str.strip()
+                if upload_base_url_header_str
+                else None
+            )
+            scope_copy["state"]["upload_base_url"] = upload_base_url_header_str
+            if upload_base_url_header_str:
+                logger.debug(
+                    "UserTokenMiddleware: X-MCP-Upload-Base-URL header: %s",
+                    upload_base_url_header_str,
                 )
 
             # Extract User-Agent header for tracking and make it lowercase

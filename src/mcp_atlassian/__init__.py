@@ -110,7 +110,22 @@ logger = setup_logging(logging_level, logging_stream)
 @click.option(
     "--read-only",
     is_flag=True,
-    help="Run in read-only mode (disables all write operations)",
+    help="Run in read-only mode (disables all write operations for all products)",
+)
+@click.option(
+    "--jira-read-only",
+    is_flag=True,
+    help="Run Jira in read-only mode (disables Jira write operations)",
+)
+@click.option(
+    "--confluence-read-only",
+    is_flag=True,
+    help="Run Confluence in read-only mode (disables Confluence write operations)",
+)
+@click.option(
+    "--bitbucket-read-only",
+    is_flag=True,
+    help="Run Bitbucket in read-only mode (disables Bitbucket write operations)",
 )
 @click.option(
     "--enabled-tools",
@@ -162,6 +177,9 @@ def main(
     jira_ssl_verify: bool,
     jira_projects_filter: str | None,
     read_only: bool,
+    jira_read_only: bool,
+    confluence_read_only: bool,
+    bitbucket_read_only: bool,
     enabled_tools: str | None,
     oauth_client_id: str | None,
     oauth_client_secret: str | None,
@@ -267,6 +285,14 @@ def main(
     cli_read_only_value = str(read_only).lower()
     os.environ["CLI_READ_ONLY_MODE"] = cli_read_only_value
 
+    # Per-product CLI read_only flags
+    if jira_read_only:
+        os.environ["CLI_JIRA_READ_ONLY_MODE"] = "true"
+    if confluence_read_only:
+        os.environ["CLI_CONFLUENCE_READ_ONLY_MODE"] = "true"
+    if bitbucket_read_only:
+        os.environ["CLI_BITBUCKET_READ_ONLY_MODE"] = "true"
+
     # Set env vars for downstream config
     if click_ctx and was_option_provided(click_ctx, "enabled_tools"):
         os.environ["ENABLED_TOOLS"] = enabled_tools
@@ -301,6 +327,15 @@ def main(
     if click_ctx and was_option_provided(click_ctx, "read_only"):
         if os.getenv("READ_ONLY_MODE") is None:
             os.environ["READ_ONLY_MODE"] = cli_read_only_value
+    if click_ctx and was_option_provided(click_ctx, "jira_read_only"):
+        if os.getenv("JIRA_READ_ONLY_MODE") is None:
+            os.environ["JIRA_READ_ONLY_MODE"] = str(jira_read_only).lower()
+    if click_ctx and was_option_provided(click_ctx, "confluence_read_only"):
+        if os.getenv("CONFLUENCE_READ_ONLY_MODE") is None:
+            os.environ["CONFLUENCE_READ_ONLY_MODE"] = str(confluence_read_only).lower()
+    if click_ctx and was_option_provided(click_ctx, "bitbucket_read_only"):
+        if os.getenv("BITBUCKET_READ_ONLY_MODE") is None:
+            os.environ["BITBUCKET_READ_ONLY_MODE"] = str(bitbucket_read_only).lower()
     if click_ctx and was_option_provided(click_ctx, "confluence_ssl_verify"):
         os.environ["CONFLUENCE_SSL_VERIFY"] = str(confluence_ssl_verify).lower()
     if click_ctx and was_option_provided(click_ctx, "confluence_spaces_filter"):
