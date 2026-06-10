@@ -1,5 +1,7 @@
 """Tests for the Jira attachments module."""
 
+import os
+import tempfile
 from unittest.mock import MagicMock, mock_open, patch
 
 import pytest
@@ -62,6 +64,8 @@ class TestAttachmentsMixin:
 
     def test_download_attachment_success(self, attachments_mixin: AttachmentsMixin):
         """Test successful attachment download."""
+        test_file = os.path.join(tempfile.gettempdir(), "test_file.txt")
+
         # Mock the response
         mock_response = MagicMock()
         mock_response.iter_content.return_value = [b"test content"]
@@ -80,7 +84,7 @@ class TestAttachmentsMixin:
 
             # Call the method
             result = attachments_mixin.download_attachment(
-                "https://test.url/attachment", "/tmp/test_file.txt"
+                "https://test.url/attachment", test_file
             )
 
             # Assertions
@@ -88,7 +92,7 @@ class TestAttachmentsMixin:
             attachments_mixin.jira._session.get.assert_called_once_with(
                 "https://test.url/attachment", stream=True
             )
-            mock_file.assert_called_once_with("/tmp/test_file.txt", "wb")
+            mock_file.assert_called_once_with(test_file, "wb")
             mock_file().write.assert_called_once_with(b"test content")
             mock_makedirs.assert_called_once()
 
