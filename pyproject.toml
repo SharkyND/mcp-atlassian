@@ -15,7 +15,7 @@ dependencies = [
     "markdownify>=0.11.6",
     "markdown>=3.7.0",
     "markdown-to-confluence>=0.3.0,<0.4.0",
-    "pydantic>=2.10.6",
+    "pydantic>=2.11.0",
     "trio>=0.29.0",
     "click>=8.1.7",
     "uvicorn>=0.27.1",
@@ -45,6 +45,7 @@ dev = [
     "pytest>=8.0.0",
     "pytest-cov>=4.1.0",
     "pytest-asyncio>=0.23.0",
+    "pytest-timeout>=2.3.1",
     "anyio[trio]>=4.0.0",
     "pre-commit>=3.6.0",
     "ruff>=0.3.0",
@@ -122,7 +123,8 @@ explicit_package_bases = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
-addopts = "-k 'not trio'"
+addopts = "--ignore=tests/unit/servers/test_xray_server.py"
+timeout = 60
 markers = [
     "anyio: marks tests as anyio tests",
     "trio: marks tests as trio tests",

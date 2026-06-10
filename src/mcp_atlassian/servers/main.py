@@ -412,6 +412,7 @@ class AtlassianMCP(FastMCP[MainAppContext]):
             "bitbucket": False,
             "xray": False,
         }
+        service_headers: dict = {}
         if hasattr(req_context, "request") and hasattr(req_context.request, "state"):
             request_state = req_context.request.state
             service_headers = getattr(request_state, "atlassian_service_headers", {})
@@ -432,6 +433,11 @@ class AtlassianMCP(FastMCP[MainAppContext]):
                 logger.debug(
                     f"Header-based service availability: {header_based_services}"
                 )
+
+        # When no service-identifying headers are present, list all tools so clients
+        # can discover the full tool catalogue without needing to provide URLs upfront.
+        # Auth will still be enforced at call time.
+        has_service_headers = bool(service_headers)
 
         effective_read_only = resolve_read_only_mode(
             cli_read_only=cli_read_only,
@@ -552,14 +558,20 @@ class AtlassianMCP(FastMCP[MainAppContext]):
             service_configured_and_available = True
             if app_lifespan_state:
                 jira_available = (
-                    app_lifespan_state.full_jira_config is not None
-                ) or header_based_services.get("jira", False)
+                    (app_lifespan_state.full_jira_config is not None)
+                    or header_based_services.get("jira", False)
+                    or (not has_service_headers)
+                )
                 confluence_available = (
-                    app_lifespan_state.full_confluence_config is not None
-                ) or header_based_services.get("confluence", False)
+                    (app_lifespan_state.full_confluence_config is not None)
+                    or header_based_services.get("confluence", False)
+                    or (not has_service_headers)
+                )
                 bitbucket_available = (
-                    app_lifespan_state.full_bitbucket_config is not None
-                ) or header_based_services.get("bitbucket", False)
+                    (app_lifespan_state.full_bitbucket_config is not None)
+                    or header_based_services.get("bitbucket", False)
+                    or (not has_service_headers)
+                )
                 xray_available = (
                     app_lifespan_state.full_xray_config is not None
                 ) or header_based_services.get("xray", False)
@@ -604,9 +616,20 @@ class AtlassianMCP(FastMCP[MainAppContext]):
             elif (
                 is_jira_tool or is_confluence_tool or is_bitbucket_tool or is_xray_tool
             ):
-                jira_available = header_based_services.get("jira", False)
-                confluence_available = header_based_services.get("confluence", False)
-                bitbucket_available = header_based_services.get("bitbucket", False)
+                jira_available = (
+                    header_based_services.get("jira", False) or not has_service_headers
+                )
+
+                confluence_available = (
+                    header_based_services.get("confluence", False)
+                    or not has_service_headers
+                )
+
+                bitbucket_available = (
+                    header_based_services.get("bitbucket", False)
+                    or not has_service_headers
+                )
+
                 xray_available = header_based_services.get("xray", False)
 
                 if is_jira_tool and not jira_available:
@@ -626,6 +649,7 @@ class AtlassianMCP(FastMCP[MainAppContext]):
                         f"Excluding Bitbucket tool '{registered_name}' as no Bitbucket authentication available."
                     )
                     service_configured_and_available = False
+
                 if is_xray_tool and not xray_available:
                     logger.debug(
                         f"Excluding Xray tool '{registered_name}' as no Xray authentication available."
