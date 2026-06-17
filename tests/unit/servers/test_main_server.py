@@ -97,6 +97,40 @@ async def test_streamable_http_app_health_check_endpoint():
         assert response.json() == {"status": "ok"}
 
 
+@pytest.mark.parametrize("mcp_endpoint", ["/mcp", "/mcp/"])
+def test_streamable_http_app_serves_both_slash_variants(mcp_endpoint):
+    """Both `/mcp` and `/mcp/` must be served directly without a 307 redirect.
+
+    A trailing-slash redirect can drop the original scheme (HTTPS -> HTTP)
+    behind a TLS-terminating proxy, breaking MCP clients, so the server
+    registers an explicit alias route for the trailing-slash path.
+    """
+    from starlette.testclient import TestClient
+
+    app = main_mcp.http_app(path="/mcp", transport="streamable-http")
+    init_request = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {},
+            "clientInfo": {"name": "test-client", "version": "1.0"},
+        },
+    }
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/event-stream",
+    }
+    # TestClient runs the app lifespan (starts the streamable-http session
+    # manager) and does NOT follow redirects, so a 307 would surface here.
+    with TestClient(app) as client:
+        response = client.post(mcp_endpoint, json=init_request, headers=headers)
+
+    assert response.status_code == 200
+    assert "mcp-session-id" in response.headers
+
+
 @pytest.mark.anyio
 async def test_upload_endpoint_rejects_invalid_session():
     """Test the upload endpoint rejects session ids that were not issued by the server."""

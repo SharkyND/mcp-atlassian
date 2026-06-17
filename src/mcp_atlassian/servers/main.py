@@ -704,6 +704,29 @@ class AtlassianMCP(FastMCP[MainAppContext]):
             Route("/download/{token}", download_endpoint, methods=["GET"])
         )
 
+        # Serve both `/mcp` and `/mcp/` directly. FastMCP registers the
+        # streamable-http handler at a single path (e.g. `/mcp`); without this,
+        # requests to the trailing-slash variant trigger Starlette's
+        # `redirect_slashes`, issuing a 307 that can drop the original scheme
+        # (HTTPS -> HTTP) behind a TLS-terminating proxy and break clients.
+        # Register an explicit alias route for the trailing-slash path that
+        # points at the same ASGI handler so both paths are served identically.
+        mcp_path = (path or settings.streamable_http_path).rstrip("/")
+        if mcp_path:
+            alias_path = f"{mcp_path}/"
+            for route in list(app.router.routes):
+                if isinstance(route, Route) and route.path == mcp_path:
+                    app.router.routes.append(
+                        Route(
+                            alias_path,
+                            route.endpoint,
+                            methods=route.methods,
+                            name=f"{route.name}_slash" if route.name else None,
+                            include_in_schema=False,
+                        )
+                    )
+                    break
+
         return app
 
 
