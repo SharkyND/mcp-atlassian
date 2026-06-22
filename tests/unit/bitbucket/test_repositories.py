@@ -411,4 +411,117 @@ class TestRepositoriesMixin:
                 assert hasattr(mixin, "get_file_content")
                 assert hasattr(mixin, "get_directory_content")
                 assert hasattr(mixin, "get_repositories")
+                assert hasattr(mixin, "create_repository")
                 assert hasattr(mixin, "config")  # From parent class
+
+
+class TestCreateRepository:
+    """Test cases for RepositoriesMixin.create_repository method."""
+
+    @pytest.fixture
+    def config(self):
+        return BitbucketConfig(
+            url="https://api.bitbucket.org/2.0",
+            auth_type="basic",
+            username="test@example.com",
+            app_password="app_password",
+        )
+
+    @pytest.fixture
+    def repositories_mixin(self, config):
+        with patch("mcp_atlassian.bitbucket.client.Bitbucket"):
+            with patch("mcp_atlassian.bitbucket.client.configure_ssl_verification"):
+                mixin = RepositoriesMixin(config)
+                mixin.bitbucket = MagicMock()
+                return mixin
+
+    @pytest.fixture
+    def sample_created_repo_data(self):
+        return {
+            "slug": "new-repo",
+            "name": "new-repo",
+            "description": "",
+            "state": "AVAILABLE",
+            "forkable": False,
+            "public": False,
+            "project": {"key": "TEST"},
+            "links": {},
+        }
+
+    def test_create_repository_success(
+        self, repositories_mixin, sample_created_repo_data
+    ):
+        """Test successful repository creation."""
+        repositories_mixin.bitbucket.create_repo.return_value = sample_created_repo_data
+
+        with patch.object(
+            BitbucketRepository, "from_api_response", return_value=MagicMock(spec=BitbucketRepository)
+        ) as mock_from_api:
+            result = repositories_mixin.create_repository("TEST", "new-repo")
+
+            assert isinstance(result, MagicMock)
+            repositories_mixin.bitbucket.create_repo.assert_called_once_with(
+                "TEST", "new-repo", forkable=False, is_private=True
+            )
+            mock_from_api.assert_called_once_with(sample_created_repo_data)
+
+    def test_create_repository_custom_flags(
+        self, repositories_mixin, sample_created_repo_data
+    ):
+        """Test repository creation with custom is_private and forkable flags."""
+        repositories_mixin.bitbucket.create_repo.return_value = sample_created_repo_data
+
+        with patch.object(BitbucketRepository, "from_api_response", return_value=MagicMock(spec=BitbucketRepository)):
+            repositories_mixin.create_repository(
+                "TEST", "public-repo", is_private=False, forkable=True
+            )
+
+            repositories_mixin.bitbucket.create_repo.assert_called_once_with(
+                "TEST", "public-repo", forkable=True, is_private=False
+            )
+
+    def test_create_repository_http_401_error(self, repositories_mixin):
+        """Test handling of 401 HTTP error in create_repository."""
+        mock_response = MagicMock()
+        mock_response.status_code = 401
+        http_error = HTTPError()
+        http_error.response = mock_response
+        repositories_mixin.bitbucket.create_repo.side_effect = http_error
+
+        with pytest.raises(
+            MCPAtlassianAuthenticationError,
+            match="Authentication failed for Bitbucket API \\(401\\)",
+        ):
+            repositories_mixin.create_repository("TEST", "new-repo")
+
+    def test_create_repository_http_403_error(self, repositories_mixin):
+        """Test handling of 403 HTTP error in create_repository."""
+        mock_response = MagicMock()
+        mock_response.status_code = 403
+        http_error = HTTPError()
+        http_error.response = mock_response
+        repositories_mixin.bitbucket.create_repo.side_effect = http_error
+
+        with pytest.raises(
+            MCPAtlassianAuthenticationError,
+            match="Authentication failed for Bitbucket API \\(403\\)",
+        ):
+            repositories_mixin.create_repository("TEST", "new-repo")
+
+    def test_create_repository_http_409_conflict(self, repositories_mixin):
+        """Test handling of 409 conflict (repo already exists) in create_repository."""
+        mock_response = MagicMock()
+        mock_response.status_code = 409
+        http_error = HTTPError()
+        http_error.response = mock_response
+        repositories_mixin.bitbucket.create_repo.side_effect = http_error
+
+        with pytest.raises(HTTPError):
+            repositories_mixin.create_repository("TEST", "existing-repo")
+
+    def test_create_repository_general_exception(self, repositories_mixin):
+        """Test handling of general exceptions in create_repository."""
+        repositories_mixin.bitbucket.create_repo.side_effect = Exception("Network error")
+
+        with pytest.raises(Exception, match="Error creating repository: Network error"):
+            repositories_mixin.create_repository("TEST", "new-repo")
