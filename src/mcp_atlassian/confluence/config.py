@@ -67,8 +67,14 @@ class ConfluenceConfig:
         return self.ssl_verify
 
     @classmethod
-    def from_env(cls) -> "ConfluenceConfig":
+    def from_env(
+        cls, url: str | None = None, personal_token: str | None = None
+    ) -> "ConfluenceConfig":
         """Create configuration from environment variables.
+
+        Args:
+            url: An optional override for the url.
+            personal_token: An optional orverride for the personal_token.
 
         Returns:
             ConfluenceConfig with values from environment variables
@@ -76,7 +82,7 @@ class ConfluenceConfig:
         Raises:
             ValueError: If any required environment variable is missing
         """
-        url = os.getenv("CONFLUENCE_URL")
+        url = url or os.getenv("CONFLUENCE_URL")
         if not url and not os.getenv("ATLASSIAN_OAUTH_ENABLE"):
             error_msg = "Missing required CONFLUENCE_URL environment variable"
             raise ValueError(error_msg)
@@ -84,7 +90,7 @@ class ConfluenceConfig:
         # Determine authentication type based on available environment variables
         username = os.getenv("CONFLUENCE_USERNAME")
         api_token = os.getenv("CONFLUENCE_API_TOKEN")
-        personal_token = os.getenv("CONFLUENCE_PERSONAL_TOKEN")
+        personal_token = personal_token or os.getenv("CONFLUENCE_PERSONAL_TOKEN")
 
         # Check for OAuth configuration
         oauth_config = get_oauth_config_from_env()
