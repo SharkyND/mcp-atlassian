@@ -1,5 +1,6 @@
 """Tests for the main MCP server implementation."""
 
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -129,6 +130,59 @@ def test_streamable_http_app_serves_both_slash_variants(mcp_endpoint):
 
     assert response.status_code == 200
     assert "mcp-session-id" in response.headers
+
+
+def test_streamable_http_tools_list_honors_header_filters():
+    """The live tools/list route must honor request-scoped read-only and Xray headers."""
+    from starlette.testclient import TestClient
+
+    app = main_mcp.http_app(path="/mcp", transport="streamable-http")
+    init_request = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {},
+            "clientInfo": {"name": "test-client", "version": "1.0"},
+        },
+    }
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/event-stream",
+        "X-Atlassian-Bitbucket-Personal-Token": "dummy",
+        "X-Atlassian-Bitbucket-Url": "https://example.bitbucket.local",
+        "X-Atlassian-Bitbucket-Read-Only-Mode": "true",
+        "X-Atlassian-Confluence-Personal-Token": "dummy",
+        "X-Atlassian-Confluence-Url": "https://example.confluence.local",
+        "X-Atlassian-Enable-Xray": "false",
+        "X-Atlassian-Jira-Personal-Token": "dummy",
+        "X-Atlassian-Jira-Url": "https://example.jira.local",
+        "X-Atlassian-Read-Only-Mode": "false",
+        "X-Atlassian-Username": "tester",
+    }
+
+    with TestClient(app) as client:
+        init_response = client.post("/mcp", json=init_request, headers=headers)
+        assert init_response.status_code == 200
+
+        session_headers = dict(headers)
+        session_headers["mcp-session-id"] = init_response.headers["mcp-session-id"]
+        tools_response = client.post(
+            "/mcp",
+            json={"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
+            headers=session_headers,
+        )
+
+    assert tools_response.status_code == 200
+    data_line = next(
+        line for line in tools_response.text.splitlines() if line.startswith("data: ")
+    )
+    tool_names = {tool["name"] for tool in json.loads(data_line[6:])["result"]["tools"]}
+
+    assert "jira_create_issue" in tool_names
+    assert "bitbucket_create_branch" not in tool_names
+    assert not any(name.startswith("xray_") for name in tool_names)
 
 
 @pytest.mark.anyio
