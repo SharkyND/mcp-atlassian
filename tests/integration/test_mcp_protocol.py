@@ -389,7 +389,11 @@ class TestMCPProtocolIntegration:
             assert len(tools) == 0
 
     async def test_middleware_oauth_token_processing(self):
-        """Test UserTokenMiddleware OAuth token extraction and processing."""
+        """Test UserTokenMiddleware Bearer token extraction and processing.
+
+        Note: Bearer tokens are now treated as PAT auth type for compatibility
+        with both JWT tokens and traditional PAT tokens.
+        """
         # Create middleware instance
         app = MagicMock()
         mcp_server = MagicMock()
@@ -410,7 +414,8 @@ class TestMCPProtocolIntegration:
             # Verify request state was set
             assert hasattr(req.state, "user_atlassian_token")
             assert req.state.user_atlassian_token == "test-oauth-token-12345"
-            assert req.state.user_atlassian_auth_type == "oauth"
+            # Bearer tokens are now treated as PAT for compatibility
+            assert req.state.user_atlassian_auth_type == "pat"
             assert req.state.user_atlassian_email is None
             return JSONResponse({"status": "ok"})
 

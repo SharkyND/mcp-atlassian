@@ -1166,16 +1166,28 @@ class UserTokenMiddleware:
                     )
                     return
 
+                # Detect if it's a JWT token (3 base64 parts separated by dots)
+                token_parts = token.split(".")
+                is_jwt = len(token_parts) == 3 and all(
+                    len(part) > 0 for part in token_parts
+                )
+                token_format = "jwt" if is_jwt else "bearer"
+
                 logger.debug(
                     f"UserTokenMiddleware.__call__: Bearer token extracted "
-                    f"(masked): ...{mask_sensitive(token, 8)}"
+                    f"(format: {token_format}, masked): ...{mask_sensitive(token, 8)}"
                 )
                 scope_copy["state"]["user_atlassian_token"] = token
-                scope_copy["state"]["user_atlassian_auth_type"] = "oauth"
+                # Treat Bearer tokens as PAT auth type for compatibility with
+                # both JWT tokens and traditional PAT tokens
+                scope_copy["state"]["user_atlassian_auth_type"] = "pat"
+                # Store the actual token format for logging purposes
+                scope_copy["state"]["user_atlassian_auth_format"] = token_format
                 scope_copy["state"]["user_atlassian_email"] = None
                 logger.debug(
                     f"UserTokenMiddleware.__call__: Set scope state (pre-validation): "
-                    f"auth_type='oauth', token_present={bool(token)}"
+                    f"auth_type='pat', token_format='{token_format}', "
+                    f"token_present={bool(token)}"
                 )
             elif auth_header_str and auth_header_str.startswith("Token "):
                 token = auth_header_str.split(" ", 1)[1].strip()
@@ -1192,6 +1204,7 @@ class UserTokenMiddleware:
                 )
                 scope_copy["state"]["user_atlassian_token"] = token
                 scope_copy["state"]["user_atlassian_auth_type"] = "pat"
+                scope_copy["state"]["user_atlassian_auth_format"] = "pat"
                 scope_copy["state"]["user_atlassian_email"] = None
                 logger.debug(
                     "UserTokenMiddleware.__call__: Set scope state for PAT auth."

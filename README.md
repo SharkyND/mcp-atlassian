@@ -837,6 +837,9 @@ Here's a complete example of setting up multi-user authentication with streamabl
 - **Cloud (OAuth 2.0):** Use this if your organization is on Atlassian Cloud and you have an OAuth access token for each user.
 - **Server/Data Center (PAT):** Use this if you are on Atlassian Server or Data Center and each user has a Personal Access Token (PAT).
 
+> [!TIP]
+> Both `Bearer <token>` and `Token <token>` authorization formats are supported and work interchangeably. Choose the format that best fits your infrastructure - both will authenticate successfully with PAT or JWT tokens.
+
 **Cloud (OAuth 2.0) Example:**
 ```json
 {

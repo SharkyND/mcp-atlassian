@@ -474,3 +474,105 @@ class TestUserTokenMiddleware:
 
         # Should proceed normally with Bitbucket username present
         middleware.app.assert_called_once()
+
+    @pytest.mark.anyio
+    async def test_jwt_token_format_detection(self, middleware, monkeypatch):
+        """Test that JWT tokens are correctly detected and set as jwt format."""
+        monkeypatch.delenv("REQUIRE_USERNAME", raising=False)
+
+        # Use a valid JWT-like token (3 base64 parts separated by dots)
+        jwt_token = (
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
+            "eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIn0."
+            "Gfx6VO9tcxwk6xqx9yYzSfebfeakZp5JYIgP_edcw_A"
+        )
+
+        scope = {
+            "type": "http",
+            "path": "/mcp",
+            "method": "POST",
+            "headers": [
+                (b"authorization", f"Bearer {jwt_token}".encode()),
+            ],
+            "state": {},
+        }
+
+        async def mock_receive():
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        async def mock_send(message):
+            pass
+
+        middleware.app = AsyncMock()
+        await middleware(scope, mock_receive, mock_send)
+
+        # Verify JWT was detected and token_format is set to 'jwt'
+        assert scope["state"]["user_atlassian_auth_format"] == "jwt"
+        assert scope["state"]["user_atlassian_auth_type"] == "pat"
+        assert scope["state"]["user_atlassian_token"] == jwt_token
+        middleware.app.assert_called_once()
+
+    @pytest.mark.anyio
+    async def test_bearer_non_jwt_token_format_detection(self, middleware, monkeypatch):
+        """Test that non-JWT Bearer tokens are set as bearer format."""
+        monkeypatch.delenv("REQUIRE_USERNAME", raising=False)
+
+        # Use a simple token that is NOT a JWT
+        simple_token = "simple-bearer-token"
+
+        scope = {
+            "type": "http",
+            "path": "/mcp",
+            "method": "POST",
+            "headers": [
+                (b"authorization", f"Bearer {simple_token}".encode()),
+            ],
+            "state": {},
+        }
+
+        async def mock_receive():
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        async def mock_send(message):
+            pass
+
+        middleware.app = AsyncMock()
+        await middleware(scope, mock_receive, mock_send)
+
+        # Verify non-JWT Bearer token is detected as 'bearer' format
+        assert scope["state"]["user_atlassian_auth_format"] == "bearer"
+        assert scope["state"]["user_atlassian_auth_type"] == "pat"
+        assert scope["state"]["user_atlassian_token"] == simple_token
+        middleware.app.assert_called_once()
+
+    @pytest.mark.anyio
+    async def test_pat_token_format_detection(self, middleware, monkeypatch):
+        """Test that Token (PAT) scheme tokens are set as pat format."""
+        monkeypatch.delenv("REQUIRE_USERNAME", raising=False)
+
+        pat_token = "my-personal-access-token"
+
+        scope = {
+            "type": "http",
+            "path": "/mcp",
+            "method": "POST",
+            "headers": [
+                (b"authorization", f"Token {pat_token}".encode()),
+            ],
+            "state": {},
+        }
+
+        async def mock_receive():
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        async def mock_send(message):
+            pass
+
+        middleware.app = AsyncMock()
+        await middleware(scope, mock_receive, mock_send)
+
+        # Verify PAT token is detected as 'pat' format
+        assert scope["state"]["user_atlassian_auth_format"] == "pat"
+        assert scope["state"]["user_atlassian_auth_type"] == "pat"
+        assert scope["state"]["user_atlassian_token"] == pat_token
+        middleware.app.assert_called_once()
