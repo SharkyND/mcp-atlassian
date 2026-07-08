@@ -212,3 +212,50 @@ class RepositoriesMixin(BitbucketClient):
             logger.error(error_msg)
             msg = f"Error getting repos: {str(e)}"
             raise Exception(msg) from e
+
+    def create_repository(
+        self,
+        workspace: str,
+        repo_slug: str,
+        is_private: bool = True,
+        forkable: bool = False,
+    ) -> BitbucketRepository:
+        """
+        Create a new repository in a workspace/project.
+
+        Args:
+            workspace: Workspace name (Cloud) or project key (Server/DC)
+            repo_slug: Repository name/slug to create
+            is_private: Whether the repository should be private (default: True)
+            forkable: Whether the repository can be forked (default: False)
+
+        Returns:
+            BitbucketRepository object for the created repository
+
+        Raises:
+            MCPAtlassianAuthenticationError: If authentication fails with the Bitbucket API (401/403)
+        """
+        try:
+            repo_data = self.bitbucket.create_repo(
+                workspace, repo_slug, forkable=forkable, is_private=is_private
+            )
+            return BitbucketRepository.from_api_response(repo_data)
+        except HTTPError as http_err:
+            if http_err.response is not None and http_err.response.status_code in [
+                401,
+                403,
+            ]:
+                error_msg = (
+                    f"Authentication failed for Bitbucket API ({http_err.response.status_code}). "
+                    "Token may be expired or invalid. Please verify credentials."
+                )
+                logger.error(error_msg)
+                raise MCPAtlassianAuthenticationError(error_msg) from http_err
+            else:
+                logger.error(f"HTTP error during API call: {http_err}", exc_info=False)
+                raise http_err
+        except Exception as e:
+            error_msg = f"Error creating repository {repo_slug} in {workspace}: {str(e)}"
+            logger.error(error_msg)
+            msg = f"Error creating repository: {str(e)}"
+            raise Exception(msg) from e
