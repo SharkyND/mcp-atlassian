@@ -13,7 +13,7 @@ class TestDefaultReadJiraFields:
         """Test that DEFAULT_READ_JIRA_FIELDS is a set of strings."""
         assert isinstance(DEFAULT_READ_JIRA_FIELDS, set)
         assert all(isinstance(field, str) for field in DEFAULT_READ_JIRA_FIELDS)
-        assert len(DEFAULT_READ_JIRA_FIELDS) == 10
+        assert len(DEFAULT_READ_JIRA_FIELDS) == 12
 
     def test_contains_expected_jira_fields(self):
         """Test that DEFAULT_READ_JIRA_FIELDS contains the correct Jira fields."""
@@ -28,6 +28,8 @@ class TestDefaultReadJiraFields:
             "created",
             "updated",
             "issuetype",
+            "fixVersions",
+            "versions",
         }
         assert DEFAULT_READ_JIRA_FIELDS == expected_fields
 
@@ -37,10 +39,12 @@ class TestDefaultReadJiraFields:
         assert essential_fields.issubset(DEFAULT_READ_JIRA_FIELDS)
 
     def test_field_format_validity(self):
-        """Test that field names are valid for API usage."""
+        """Test that field names are valid for Jira API usage."""
         for field in DEFAULT_READ_JIRA_FIELDS:
-            # Fields should be non-empty, lowercase, no spaces
-            assert field and field.islower()
+            # Fields should be non-empty strings with no spaces
+            assert field and isinstance(field, str)
             assert " " not in field
             assert not field.startswith("_")
             assert not field.endswith("_")
+            # Field names are alphanumeric (camelCase allowed, e.g. fixVersions)
+            assert field.replace("_", "").isalnum()

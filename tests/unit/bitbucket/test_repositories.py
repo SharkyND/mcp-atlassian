@@ -455,7 +455,9 @@ class TestCreateRepository:
         repositories_mixin.bitbucket.create_repo.return_value = sample_created_repo_data
 
         with patch.object(
-            BitbucketRepository, "from_api_response", return_value=MagicMock(spec=BitbucketRepository)
+            BitbucketRepository,
+            "from_api_response",
+            return_value=MagicMock(spec=BitbucketRepository),
         ) as mock_from_api:
             result = repositories_mixin.create_repository("TEST", "new-repo")
 
@@ -471,7 +473,11 @@ class TestCreateRepository:
         """Test repository creation with custom is_private and forkable flags."""
         repositories_mixin.bitbucket.create_repo.return_value = sample_created_repo_data
 
-        with patch.object(BitbucketRepository, "from_api_response", return_value=MagicMock(spec=BitbucketRepository)):
+        with patch.object(
+            BitbucketRepository,
+            "from_api_response",
+            return_value=MagicMock(spec=BitbucketRepository),
+        ):
             repositories_mixin.create_repository(
                 "TEST", "public-repo", is_private=False, forkable=True
             )
@@ -521,7 +527,9 @@ class TestCreateRepository:
 
     def test_create_repository_general_exception(self, repositories_mixin):
         """Test handling of general exceptions in create_repository."""
-        repositories_mixin.bitbucket.create_repo.side_effect = Exception("Network error")
+        repositories_mixin.bitbucket.create_repo.side_effect = Exception(
+            "Network error"
+        )
 
         with pytest.raises(Exception, match="Error creating repository: Network error"):
             repositories_mixin.create_repository("TEST", "new-repo")

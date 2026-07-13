@@ -39,8 +39,8 @@ def setup_logging(
 
     # Configure specific loggers
     loggers = [
-        "mcp-atlassian",      # legacy hyphen alias
-        "mcp_atlassian",      # package root — covers all mcp_atlassian.* child loggers
+        "mcp-atlassian",  # legacy hyphen alias
+        "mcp_atlassian",  # package root — covers all mcp_atlassian.* child loggers
         "mcp.server",
         "mcp.server.lowlevel.server",
         "mcp-jira",

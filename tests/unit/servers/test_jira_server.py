@@ -5,7 +5,7 @@ import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 from fastmcp import FastMCP
@@ -562,7 +562,7 @@ async def test_get_issue(jira_client, mock_jira_fetcher):
         "jira_get_issue",
         {
             "issue_key": "TEST-123",
-            "fields": "summary,description,status",
+            # extra_fields omitted — tool uses DEFAULT_READ_JIRA_FIELDS
         },
     )
     assert hasattr(response, "content")
@@ -576,12 +576,17 @@ async def test_get_issue(jira_client, mock_jira_fetcher):
     assert content["summary"] == "Test Issue Summary"
     mock_jira_fetcher.get_issue.assert_called_once_with(
         issue_key="TEST-123",
-        fields=["summary", "description", "status"],
+        fields=ANY,  # comma-joined DEFAULT_READ_JIRA_FIELDS string
         expand=None,
         comment_limit=10,
         properties=None,
         update_history=True,
     )
+    # Verify the fields string contains expected default fields
+    actual_fields = mock_jira_fetcher.get_issue.call_args.kwargs["fields"]
+    assert isinstance(actual_fields, str)
+    for field in ("summary", "status", "assignee", "description", "priority"):
+        assert field in actual_fields
 
 
 @pytest.mark.anyio
@@ -591,7 +596,7 @@ async def test_search(jira_client, mock_jira_fetcher):
         "jira_search",
         {
             "jql": "project = TEST",
-            "fields": "summary,status",
+            # extra_fields omitted — tool uses DEFAULT_READ_JIRA_FIELDS
             "limit": 10,
             "start_at": 0,
         },
@@ -613,12 +618,17 @@ async def test_search(jira_client, mock_jira_fetcher):
     assert content["max_results"] == 10
     mock_jira_fetcher.search_issues.assert_called_once_with(
         jql="project = TEST",
-        fields=["summary", "status"],
+        fields=ANY,  # comma-joined DEFAULT_READ_JIRA_FIELDS string
         limit=10,
         start=0,
         projects_filter=None,
         expand=None,
     )
+    # Verify the fields string contains expected default fields
+    actual_fields = mock_jira_fetcher.search_issues.call_args.kwargs["fields"]
+    assert isinstance(actual_fields, str)
+    for field in ("summary", "status", "assignee", "description", "priority"):
+        assert field in actual_fields
 
 
 @pytest.mark.anyio
@@ -807,19 +817,23 @@ async def test_get_agile_boards_tool(jira_client, mock_jira_fetcher):
 
 @pytest.mark.anyio
 async def test_get_board_issues_tool(jira_client, mock_jira_fetcher):
-    """Test jira_get_board_issues converts field list."""
+    """Test jira_get_board_issues with default field selection."""
     response = await jira_client.call_tool(
         "jira_get_board_issues",
-        {"board_id": "1", "jql": "project = PROJ", "fields": "summary,status"},
+        {"board_id": "1", "jql": "project = PROJ"},
     )
     mock_jira_fetcher.get_board_issues.assert_called_once_with(
         board_id="1",
         jql="project = PROJ",
-        fields=["summary", "status"],
+        fields=ANY,  # comma-joined DEFAULT_READ_JIRA_FIELDS string
         start=0,
         limit=10,
         expand="version",
     )
+    actual_fields = mock_jira_fetcher.get_board_issues.call_args.kwargs["fields"]
+    assert isinstance(actual_fields, str)
+    assert "summary" in actual_fields
+    assert "status" in actual_fields
     data = json.loads(response.content[0].text)
     assert data["issues"][0]["key"] == "BOARD-1"
 
@@ -840,11 +854,15 @@ async def test_get_sprint_issues_tool(jira_client, mock_jira_fetcher):
     """Test jira_get_sprint_issues returns issues."""
     response = await jira_client.call_tool(
         "jira_get_sprint_issues",
-        {"sprint_id": "7", "fields": "summary,status", "limit": 3},
+        {"sprint_id": "7", "limit": 3},
     )
     mock_jira_fetcher.get_sprint_issues.assert_called_once_with(
-        sprint_id="7", fields=["summary", "status"], start=0, limit=3
+        sprint_id="7", fields=ANY, start=0, limit=3
     )
+    actual_fields = mock_jira_fetcher.get_sprint_issues.call_args.kwargs["fields"]
+    assert isinstance(actual_fields, str)
+    assert "summary" in actual_fields
+    assert "status" in actual_fields
     payload = json.loads(response.content[0].text)
     assert payload["issues"][0]["key"] == "SPR-1"
 
@@ -1101,9 +1119,8 @@ async def test_get_issue_with_user_specific_fetcher_in_state(
         "user_specific_token"
     )
 
-    # Define the specific fields we expect for this test case
-    test_fields_str = "summary,status,issuetype"
-    expected_fields_list = ["summary", "status", "issuetype"]
+    # Define the specific extra field we request on top of defaults
+    test_extra_fields_str = "issuetype"
 
     # Import the real get_jira_fetcher to test its interaction with request.state
     from mcp_atlassian.servers.dependencies import (
@@ -1124,18 +1141,22 @@ async def test_get_issue_with_user_specific_fetcher_in_state(
         direct_caller = DirectJiraToolCaller(mock_jira_fetcher)
         response = await direct_caller.call_tool(
             "jira_get_issue",
-            {"issue_key": "USER-STATE-1", "fields": test_fields_str},
+            {"issue_key": "USER-STATE-1", "extra_fields": test_extra_fields_str},
         )
 
     mock_get_http.assert_called()
     mock_jira_fetcher.get_issue.assert_called_with(
         issue_key="USER-STATE-1",
-        fields=expected_fields_list,
+        fields=ANY,  # comma-joined DEFAULT_READ_JIRA_FIELDS merged with extra
         expand=None,
         comment_limit=10,
         properties=None,
         update_history=True,
     )
+    actual_fields = mock_jira_fetcher.get_issue.call_args.kwargs["fields"]
+    assert isinstance(actual_fields, str)
+    assert "issuetype" in actual_fields
+    assert "summary" in actual_fields
     result_data = json.loads(response.content[0].text)
     assert result_data["key"] == "USER-STATE-1"
 

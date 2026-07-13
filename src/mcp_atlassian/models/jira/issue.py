@@ -499,7 +499,11 @@ class JiraIssue(ApiModel, TimestampMixin):
 
         # Helper method to check if a field should be included
         def should_include_field(field_name: str) -> bool:
-            requested_fields_lower = [f.lower() for f in self.requested_fields] if isinstance(self.requested_fields, list) else []
+            requested_fields_lower = (
+                [f.lower() for f in self.requested_fields]
+                if isinstance(self.requested_fields, list)
+                else []
+            )
             return (
                 self.requested_fields == "*all"
                 or not isinstance(self.requested_fields, list)

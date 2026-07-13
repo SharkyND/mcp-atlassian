@@ -133,7 +133,7 @@ class PullRequestsMixin(BitbucketClient):
             gen = self.bitbucket.get_pull_requests_commits(
                 workspace, repository, pull_request_id
             )
-            return [c for _, c in zip(range(limit), gen)]
+            return [c for _, c in zip(range(limit), gen, strict=False)]
         except HTTPError as http_err:
             if http_err.response is not None and http_err.response.status_code in [
                 401,

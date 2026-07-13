@@ -255,7 +255,9 @@ class RepositoriesMixin(BitbucketClient):
                 logger.error(f"HTTP error during API call: {http_err}", exc_info=False)
                 raise http_err
         except Exception as e:
-            error_msg = f"Error creating repository {repo_slug} in {workspace}: {str(e)}"
+            error_msg = (
+                f"Error creating repository {repo_slug} in {workspace}: {str(e)}"
+            )
             logger.error(error_msg)
             msg = f"Error creating repository: {str(e)}"
             raise Exception(msg) from e

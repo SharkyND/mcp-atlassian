@@ -1544,7 +1544,12 @@ async def get_pull_request_commits(
     ],
     limit: Annotated[
         int,
-        Field(description="Maximum number of commits to return (default: 25)", default=25, ge=1, le=100),
+        Field(
+            description="Maximum number of commits to return (default: 25)",
+            default=25,
+            ge=1,
+            le=100,
+        ),
     ] = 25,
 ) -> str:
     """
@@ -1592,7 +1597,9 @@ async def get_pull_request_commits(
             error_message = f"An unexpected error occurred while fetching commits for PR {pull_request_id} in {workspace}/{repository}."
             logger.exception("Unexpected error in bitbucket_get_pull_request_commits:")
         error_result = {"success": False, "error": error_message}
-        logger.log(log_level, f"bitbucket_get_pull_request_commits failed: {error_message}")
+        logger.log(
+            log_level, f"bitbucket_get_pull_request_commits failed: {error_message}"
+        )
         return json.dumps(error_result, indent=2)
 
 
@@ -1609,11 +1616,18 @@ async def get_commit_builds(
     ],
     commit_id: Annotated[
         str,
-        Field(description="Full commit hash (e.g., 'b602bc8ce4201b91808bd9e12ba6f9ed0ffdd64c')"),
+        Field(
+            description="Full commit hash (e.g., 'b602bc8ce4201b91808bd9e12ba6f9ed0ffdd64c')"
+        ),
     ],
     limit: Annotated[
         int,
-        Field(description="Maximum number of builds to return (default: 25)", default=25, ge=1, le=100),
+        Field(
+            description="Maximum number of builds to return (default: 25)",
+            default=25,
+            ge=1,
+            le=100,
+        ),
     ] = 25,
 ) -> str:
     """

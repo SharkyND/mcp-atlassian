@@ -278,7 +278,8 @@ async def search(
     else:
         requested = {f.strip() for f in extra_fields.split(",") if f.strip()}
         fields_list = ",".join(DEFAULT_READ_JIRA_FIELDS | requested)
-    logger.info("Executing JQL search: jql=%s, fields=%s, limit=%d, start_at=%d, expand=%s, projects_filter=%s",
+    logger.info(
+        "Executing JQL search: jql=%s, fields=%s, limit=%d, start_at=%d, expand=%s, projects_filter=%s",
         jql,
         fields_list,
         limit,
