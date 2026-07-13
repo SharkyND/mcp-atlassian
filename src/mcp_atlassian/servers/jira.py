@@ -108,17 +108,21 @@ async def get_user_profile(
 async def get_issue(
     ctx: Context,
     issue_key: Annotated[str, Field(description="Jira issue key (e.g., 'PROJ-123')")],
-    fields: Annotated[
-        str,
+    extra_fields: Annotated[
+        str | None,
         Field(
             description=(
-                "(Optional) Comma-separated list of fields to return (e.g., 'summary,status,customfield_10010'). "
-                "You may also provide a single field as a string (e.g., 'duedate'). "
-                "Use '*all' for all fields (including custom fields), or omit for essential fields only."
+                "LEAVE THIS EMPTY for all normal issue lookups. "
+                "The default already returns summary, status, assignee, reporter, labels, "
+                "priority, description, issuetype, fixVersions, versions, created, updated. "
+                "Only override in these two exact cases: "
+                "(1) user explicitly says 'show all fields' or 'include custom fields' → pass '*all'; "
+                "(2) user explicitly names a specific field not in the default set, e.g. 'show duedate' → pass 'duedate'. "
+                "DO NOT pass '*all' or any field list for general questions like 'tell me about PROJ-123'."
             ),
-            default=",".join(DEFAULT_READ_JIRA_FIELDS),
+            default=None,
         ),
-    ] = ",".join(DEFAULT_READ_JIRA_FIELDS),
+    ] = None,
     expand: Annotated[
         str | None,
         Field(
@@ -158,7 +162,7 @@ async def get_issue(
     Args:
         ctx: The FastMCP context.
         issue_key: Jira issue key.
-        fields: Comma-separated list of fields to return (e.g., 'summary,status,customfield_10010'), a single field as a string (e.g., 'duedate'), '*all' for all fields, or omitted for essentials.
+        extra_fields: Controls field selection (None=default set, '*all'=everything, 'f1,f2'=add to defaults).
         expand: Optional fields to expand.
         comment_limit: Maximum number of comments.
         properties: Issue properties to return.
@@ -171,9 +175,13 @@ async def get_issue(
         ValueError: If the Jira client is not configured or available.
     """
     jira = await get_jira_fetcher(ctx)
-    fields_list: str | list[str] | None = fields
-    if fields and fields != "*all":
-        fields_list = [f.strip() for f in fields.split(",")]
+    if extra_fields is None:
+        fields_list: str | list[str] | None = ",".join(DEFAULT_READ_JIRA_FIELDS)
+    elif extra_fields.strip() == "*all":
+        fields_list = "*all"
+    else:
+        requested = {f.strip() for f in extra_fields.split(",") if f.strip()}
+        fields_list = ",".join(DEFAULT_READ_JIRA_FIELDS | requested)
 
     issue = jira.get_issue(
         issue_key=issue_key,
@@ -205,16 +213,21 @@ async def search(
             )
         ),
     ],
-    fields: Annotated[
-        str,
+    extra_fields: Annotated[
+        str | None,
         Field(
             description=(
-                "(Optional) Comma-separated fields to return in the results. "
-                "Use '*all' for all fields, or specify individual fields like 'summary,status,assignee,priority'"
+                "LEAVE THIS EMPTY for all normal searches. "
+                "The default already returns summary, status, assignee, reporter, labels, "
+                "priority, description, issuetype, fixVersions, versions, created, updated. "
+                "Only override in these two exact cases: "
+                "(1) user explicitly says 'show all fields' or 'include custom fields' → pass '*all'; "
+                "(2) user explicitly names a specific field not in the default set, e.g. 'show duedate' → pass 'duedate'. "
+                "DO NOT pass '*all' or any field list for general questions like 'tell me about PROJ-123' or 'find issues in project X'."
             ),
-            default=",".join(DEFAULT_READ_JIRA_FIELDS),
+            default=None,
         ),
-    ] = ",".join(DEFAULT_READ_JIRA_FIELDS),
+    ] = None,
     limit: Annotated[
         int,
         Field(description="Maximum number of results (1-50)", default=10, ge=1),
@@ -248,7 +261,7 @@ async def search(
     Args:
         ctx: The FastMCP context.
         jql: JQL query string.
-        fields: Comma-separated fields to return.
+        extra_fields: Controls field selection (None=default set, '*all'=everything, 'f1,f2'=add to defaults).
         limit: Maximum number of results.
         start_at: Starting index for pagination.
         projects_filter: Comma-separated list of project keys to filter by.
@@ -258,9 +271,22 @@ async def search(
         JSON string representing the search results including pagination info.
     """
     jira = await get_jira_fetcher(ctx)
-    fields_list: str | list[str] | None = fields
-    if fields and fields != "*all":
-        fields_list = [f.strip() for f in fields.split(",")]
+    if extra_fields is None:
+        fields_list: str | list[str] | None = ",".join(DEFAULT_READ_JIRA_FIELDS)
+    elif extra_fields.strip() == "*all":
+        fields_list = "*all"
+    else:
+        requested = {f.strip() for f in extra_fields.split(",") if f.strip()}
+        fields_list = ",".join(DEFAULT_READ_JIRA_FIELDS | requested)
+    logger.info(
+        "Executing JQL search: jql=%s, fields=%s, limit=%d, start_at=%d, expand=%s, projects_filter=%s",
+        jql,
+        fields_list,
+        limit,
+        start_at,
+        expand,
+        projects_filter,
+    )
 
     search_result = jira.search_issues(
         jql=jql,
@@ -525,17 +551,21 @@ async def get_board_issues(
             )
         ),
     ],
-    fields: Annotated[
-        str,
+    extra_fields: Annotated[
+        str | None,
         Field(
             description=(
-                "Comma-separated fields to return in the results. "
-                "Use '*all' for all fields, or specify individual "
-                "fields like 'summary,status,assignee,priority'"
+                "LEAVE THIS EMPTY for all normal board issue queries. "
+                "The default already returns summary, status, assignee, reporter, labels, "
+                "priority, description, issuetype, fixVersions, versions, created, updated. "
+                "Only override in these two exact cases: "
+                "(1) user explicitly says 'show all fields' or 'include custom fields' → pass '*all'; "
+                "(2) user explicitly names a specific field not in the default set, e.g. 'show duedate' → pass 'duedate'. "
+                "DO NOT pass '*all' or any field list for general board queries."
             ),
-            default=",".join(DEFAULT_READ_JIRA_FIELDS),
+            default=None,
         ),
-    ] = ",".join(DEFAULT_READ_JIRA_FIELDS),
+    ] = None,
     start_at: Annotated[
         int,
         Field(description="Starting index for pagination (0-based)", default=0, ge=0),
@@ -558,7 +588,7 @@ async def get_board_issues(
         ctx: The FastMCP context.
         board_id: The ID of the board.
         jql: JQL query string to filter issues.
-        fields: Comma-separated fields to return.
+        extra_fields: Controls field selection (None=default set, '*all'=everything, 'f1,f2'=add to defaults).
         start_at: Starting index for pagination.
         limit: Maximum number of results.
         expand: Optional fields to expand.
@@ -567,9 +597,13 @@ async def get_board_issues(
         JSON string representing the search results including pagination info.
     """
     jira = await get_jira_fetcher(ctx)
-    fields_list: str | list[str] | None = fields
-    if fields and fields != "*all":
-        fields_list = [f.strip() for f in fields.split(",")]
+    if extra_fields is None:
+        fields_list: str | list[str] | None = ",".join(DEFAULT_READ_JIRA_FIELDS)
+    elif extra_fields.strip() == "*all":
+        fields_list = "*all"
+    else:
+        requested = {f.strip() for f in extra_fields.split(",") if f.strip()}
+        fields_list = ",".join(DEFAULT_READ_JIRA_FIELDS | requested)
 
     search_result = jira.get_board_issues(
         board_id=board_id,
@@ -624,17 +658,21 @@ async def get_sprints_from_board(
 async def get_sprint_issues(
     ctx: Context,
     sprint_id: Annotated[str, Field(description="The id of sprint (e.g., '10001')")],
-    fields: Annotated[
-        str,
+    extra_fields: Annotated[
+        str | None,
         Field(
             description=(
-                "Comma-separated fields to return in the results. "
-                "Use '*all' for all fields, or specify individual "
-                "fields like 'summary,status,assignee,priority'"
+                "LEAVE THIS EMPTY for all normal sprint issue queries. "
+                "The default already returns summary, status, assignee, reporter, labels, "
+                "priority, description, issuetype, fixVersions, versions, created, updated. "
+                "Only override in these two exact cases: "
+                "(1) user explicitly says 'show all fields' or 'include custom fields' → pass '*all'; "
+                "(2) user explicitly names a specific field not in the default set, e.g. 'show duedate' → pass 'duedate'. "
+                "DO NOT pass '*all' or any field list for general sprint queries."
             ),
-            default=",".join(DEFAULT_READ_JIRA_FIELDS),
+            default=None,
         ),
-    ] = ",".join(DEFAULT_READ_JIRA_FIELDS),
+    ] = None,
     start_at: Annotated[
         int,
         Field(description="Starting index for pagination (0-based)", default=0, ge=0),
@@ -649,7 +687,7 @@ async def get_sprint_issues(
     Args:
         ctx: The FastMCP context.
         sprint_id: The ID of the sprint.
-        fields: Comma-separated fields to return.
+        extra_fields: Controls field selection (None=default set, '*all'=everything, 'f1,f2'=add to defaults).
         start_at: Starting index.
         limit: Maximum results.
 
@@ -657,9 +695,13 @@ async def get_sprint_issues(
         JSON string representing the search results including pagination info.
     """
     jira = await get_jira_fetcher(ctx)
-    fields_list: str | list[str] | None = fields
-    if fields and fields != "*all":
-        fields_list = [f.strip() for f in fields.split(",")]
+    if extra_fields is None:
+        fields_list: str | list[str] | None = ",".join(DEFAULT_READ_JIRA_FIELDS)
+    elif extra_fields.strip() == "*all":
+        fields_list = "*all"
+    else:
+        requested = {f.strip() for f in extra_fields.split(",") if f.strip()}
+        fields_list = ",".join(DEFAULT_READ_JIRA_FIELDS | requested)
 
     search_result = jira.get_sprint_issues(
         sprint_id=sprint_id, fields=fields_list, start=start_at, limit=limit

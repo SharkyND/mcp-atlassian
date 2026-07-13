@@ -12,4 +12,6 @@ DEFAULT_READ_JIRA_FIELDS: set[str] = {
     "created",
     "updated",
     "issuetype",
+    "fixVersions",
+    "versions",
 }
