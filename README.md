@@ -1009,6 +1009,8 @@ A per-product header always takes precedence over the global header for that pro
 - `jira_update_issue`: Update an existing issue
 - `jira_transition_issue`: Transition an issue to a new status
 - `jira_add_comment`: Add a comment to an issue
+- `jira_summarize_attachments`: Extract readable text from PDF/Office/CSV/JSON attachments (via Microsoft MarkItDown)
+- `jira_get_attachment_images`: Fetch image attachments as viewable image content so a vision-capable client model can describe them
 
 #### Confluence Tools
 
@@ -1071,8 +1073,8 @@ A per-product header always takes precedence over the global header for that pro
 |           | `jira_download_attachments`   |                                |                                    | `get_test_executions_with_test_plan` |
 |           | `jira_get_project_versions`   |                                |                                    | `get_tests_with_test_execution`   |
 |           |                               |                                |                                    | `get_test_run`                    |
-|           |                               |                                |                                    | `get_test_run_assignee`           |
-|           |                               |                                |                                    | `get_test_run_iteration`          |
+|           | `jira_summarize_attachments`  |                                |                                    | `get_test_run_assignee`           |
+|           | `jira_get_attachment_images`  |                                |                                    | `get_test_run_iteration`          |
 |           |                               |                                |                                    | `get_test_run_status`             |
 |           |                               |                                |                                    | `get_test_run_defects`            |
 |           |                               |                                |                                    | `get_test_run_comment`            |

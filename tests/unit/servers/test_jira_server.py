@@ -66,7 +66,8 @@ def mock_jira_fetcher():
     }
 
     board_mock = MagicMock()
-    board_mock.to_simplified_dict.return_value = {"id": 1, "name": "Sample Board"}
+    board_mock.to_simplified_dict.return_value = {
+        "id": 1, "name": "Sample Board"}
     mock_fetcher.get_all_agile_boards_model.return_value = [board_mock]
 
     board_issues_result = MagicMock()
@@ -111,8 +112,10 @@ def mock_jira_fetcher():
     transition_issue.to_simplified_dict.return_value = {"key": "TEST-999"}
     mock_fetcher.transition_issue.return_value = transition_issue
 
-    mock_fetcher.add_comment.return_value = {"id": "10000", "body": "Added comment"}
-    mock_fetcher.add_worklog.return_value = {"id": "worklog-1", "timeSpent": "1h"}
+    mock_fetcher.add_comment.return_value = {
+        "id": "10000", "body": "Added comment"}
+    mock_fetcher.add_worklog.return_value = {
+        "id": "worklog-1", "timeSpent": "1h"}
 
     linked_issue = MagicMock()
     linked_issue.to_simplified_dict.return_value = {"key": "TEST-100"}
@@ -123,7 +126,8 @@ def mock_jira_fetcher():
     mock_fetcher.remove_issue_link.return_value = {"removed": True}
 
     sprint_obj = MagicMock()
-    sprint_obj.to_simplified_dict.return_value = {"id": 77, "name": "Created Sprint"}
+    sprint_obj.to_simplified_dict.return_value = {
+        "id": 77, "name": "Created Sprint"}
     mock_fetcher.create_sprint.return_value = sprint_obj
 
     sprint_updated_obj = MagicMock()
@@ -244,7 +248,8 @@ def mock_jira_fetcher():
                     )
                 issues = parsed_issues
             except (json.JSONDecodeError, TypeError):
-                raise ValueError("Issues must be a list or a valid JSON array string.")
+                raise ValueError(
+                    "Issues must be a list or a valid JSON array string.")
         mock_issues = []
         for idx, issue_data in enumerate(issues, 1):
             mock_issue = MagicMock()
@@ -271,7 +276,7 @@ def mock_jira_fetcher():
                 "status": {"name": "To Do" if i % 2 == 0 else "In Progress"},
             }
             mock_issues.append(mock_issue)
-        return mock_issues[start : start + limit]
+        return mock_issues[start: start + limit]
 
     mock_fetcher.get_epic_issues.side_effect = mock_get_epic_issues
 
@@ -448,7 +453,6 @@ class DirectJiraToolCaller:
             get_project_issues,
             get_project_versions,
             get_sprint_issues,
-            summarize_attachments,
             get_sprints_from_board,
             get_transitions,
             get_user_profile,
@@ -457,6 +461,7 @@ class DirectJiraToolCaller:
             remove_issue_link,
             search,
             search_fields,
+            summarize_attachments,
             transition_issue,
             update_issue,
             update_sprint,
@@ -651,7 +656,8 @@ async def test_search_fields_tool(jira_client, mock_jira_fetcher):
 async def test_get_project_issues_tool(jira_client, mock_jira_fetcher):
     """Test jira_get_project_issues returns simplified search result."""
     response = await jira_client.call_tool(
-        "jira_get_project_issues", {"project_key": "PROJ", "limit": 5, "start_at": 2}
+        "jira_get_project_issues", {
+            "project_key": "PROJ", "limit": 5, "start_at": 2}
     )
     mock_jira_fetcher.get_project_issues.assert_called_once_with(
         project_key="PROJ", start=2, limit=5
@@ -667,7 +673,8 @@ async def test_get_transitions_tool(jira_client, mock_jira_fetcher):
     response = await jira_client.call_tool(
         "jira_get_transitions", {"issue_key": "PROJ-1"}
     )
-    mock_jira_fetcher.get_available_transitions.assert_called_once_with("PROJ-1")
+    mock_jira_fetcher.get_available_transitions.assert_called_once_with(
+        "PROJ-1")
     data = json.loads(response.content[0].text)
     assert data[0]["name"] == "Start Progress"
 
@@ -787,7 +794,8 @@ def test_attachment_cache_clear_deregisters_static_resources(monkeypatch):
     cache.clear()
 
     resource_manager = DummyResourceManager()
-    monkeypatch.setattr(jira_server.jira_mcp, "_resource_manager", resource_manager)
+    monkeypatch.setattr(jira_server.jira_mcp,
+                        "_resource_manager", resource_manager)
 
     cache.store(
         issue_key="PROJ-1",
@@ -1003,7 +1011,8 @@ async def test_batch_create_issues_invalid_json(jira_client):
 async def test_get_user_profile_tool_success(jira_client, mock_jira_fetcher):
     """Test the get_user_profile tool successfully retrieves user info."""
     response = await jira_client.call_tool(
-        "jira_get_user_profile", {"user_identifier": "test.profile@example.com"}
+        "jira_get_user_profile", {
+            "user_identifier": "test.profile@example.com"}
     )
     mock_jira_fetcher.get_user_profile_by_identifier.assert_called_once_with(
         "test.profile@example.com"
@@ -1055,7 +1064,8 @@ async def test_get_user_profile_tool_auth_error(jira_client, mock_jira_fetcher):
 async def test_get_user_profile_tool_network_error(jira_client, mock_jira_fetcher):
     """Test network errors are captured."""
     original_side_effect = mock_jira_fetcher.get_user_profile_by_identifier.side_effect
-    mock_jira_fetcher.get_user_profile_by_identifier.side_effect = OSError("boom")
+    mock_jira_fetcher.get_user_profile_by_identifier.side_effect = OSError(
+        "boom")
     response = await jira_client.call_tool(
         "jira_get_user_profile", {"user_identifier": "network@example.com"}
     )
@@ -1069,7 +1079,8 @@ async def test_get_user_profile_tool_network_error(jira_client, mock_jira_fetche
 async def test_get_user_profile_tool_unexpected_error(jira_client, mock_jira_fetcher):
     """Test unexpected exceptions in get_user_profile."""
     original_side_effect = mock_jira_fetcher.get_user_profile_by_identifier.side_effect
-    mock_jira_fetcher.get_user_profile_by_identifier.side_effect = RuntimeError("boom")
+    mock_jira_fetcher.get_user_profile_by_identifier.side_effect = RuntimeError(
+        "boom")
     response = await jira_client.call_tool(
         "jira_get_user_profile", {"user_identifier": "oops@example.com"}
     )
@@ -1213,7 +1224,8 @@ async def test_add_comment_tool(jira_client, mock_jira_fetcher):
     response = await jira_client.call_tool(
         "jira_add_comment", {"issue_key": "PROJ-1", "comment": "Nice work!"}
     )
-    mock_jira_fetcher.add_comment.assert_called_once_with("PROJ-1", "Nice work!")
+    mock_jira_fetcher.add_comment.assert_called_once_with(
+        "PROJ-1", "Nice work!")
     payload = json.loads(response.content[0].text)
     assert payload["body"] == "Added comment"
 
@@ -1240,7 +1252,8 @@ async def test_link_to_epic_tool(jira_client, mock_jira_fetcher):
     response = await jira_client.call_tool(
         "jira_link_to_epic", {"issue_key": "PROJ-1", "epic_key": "EPIC-9"}
     )
-    mock_jira_fetcher.link_issue_to_epic.assert_called_once_with("PROJ-1", "EPIC-9")
+    mock_jira_fetcher.link_issue_to_epic.assert_called_once_with(
+        "PROJ-1", "EPIC-9")
     payload = json.loads(response.content[0].text)
     assert "linked to epic" in payload["message"]
 
@@ -1308,7 +1321,8 @@ async def test_transition_issue_validation(jira_client):
     with pytest.raises(ToolError):
         await jira_client.call_tool(
             "jira_transition_issue",
-            {"issue_key": "", "transition_id": "", "fields": {"resolution": "Done"}},
+            {"issue_key": "", "transition_id": "",
+                "fields": {"resolution": "Done"}},
         )
 
 
@@ -1466,7 +1480,8 @@ async def test_get_all_projects_tool(jira_client, mock_jira_fetcher):
     assert data[1]["name"] == "Project Two"
 
     # Verify the underlying method was called with default parameter
-    mock_jira_fetcher.get_all_projects.assert_called_once_with(include_archived=False)
+    mock_jira_fetcher.get_all_projects.assert_called_once_with(
+        include_archived=False)
 
 
 @pytest.mark.anyio
@@ -1514,7 +1529,8 @@ async def test_get_all_projects_tool_with_archived(jira_client, mock_jira_fetche
     assert data[1]["key"] == "ARCHIVED"
 
     # Verify the underlying method was called with include_archived=True
-    mock_jira_fetcher.get_all_projects.assert_called_once_with(include_archived=True)
+    mock_jira_fetcher.get_all_projects.assert_called_once_with(
+        include_archived=True)
 
 
 @pytest.mark.anyio
@@ -1578,7 +1594,8 @@ async def test_get_all_projects_tool_with_projects_filter(
     assert "OTHER" not in returned_keys
 
     # Verify the underlying method was called (still gets all projects, but then filters)
-    mock_jira_fetcher.get_all_projects.assert_called_once_with(include_archived=False)
+    mock_jira_fetcher.get_all_projects.assert_called_once_with(
+        include_archived=False)
 
 
 @pytest.mark.anyio
@@ -1633,7 +1650,8 @@ async def test_get_all_projects_tool_no_projects_filter(jira_client, mock_jira_f
     assert "OTHER" in returned_keys
 
     # Verify the underlying method was called
-    mock_jira_fetcher.get_all_projects.assert_called_once_with(include_archived=False)
+    mock_jira_fetcher.get_all_projects.assert_called_once_with(
+        include_archived=False)
 
 
 @pytest.mark.anyio
@@ -1697,7 +1715,8 @@ async def test_get_all_projects_tool_case_insensitive_filter(
     assert "OTHER" not in returned_keys  # not in filter
 
     # Verify the underlying method was called
-    mock_jira_fetcher.get_all_projects.assert_called_once_with(include_archived=False)
+    mock_jira_fetcher.get_all_projects.assert_called_once_with(
+        include_archived=False)
 
 
 @pytest.mark.anyio
@@ -1844,7 +1863,8 @@ async def test_batch_create_versions_partial_failure(jira_client, mock_jira_fetc
 @pytest.mark.anyio
 async def test_batch_create_versions_all_failure(jira_client, mock_jira_fetcher):
     """Test batch creation of Jira versions where all fail."""
-    mock_jira_fetcher.create_project_version.side_effect = Exception("API down")
+    mock_jira_fetcher.create_project_version.side_effect = Exception(
+        "API down")
     versions = [
         {"name": "fail1"},
         {"name": "fail2"},
@@ -1916,15 +1936,28 @@ def _make_issue_response(attachments):
     return {"fields": {"attachment": attachments}}
 
 
+def _mock_download_response(*chunks: bytes):
+    """Build a mock streaming HTTP response for attachment downloads.
+
+    Mirrors the ``stream=True`` / ``iter_content`` access pattern used by
+    :func:`mcp_atlassian.servers.jira._download_attachment_bytes`.
+    """
+    resp = MagicMock()
+    resp.raise_for_status = MagicMock()
+    resp.iter_content = MagicMock(return_value=list(chunks))
+    resp.close = MagicMock()
+    return resp
+
+
 @pytest.mark.anyio
 async def test_summarize_attachments_pdf(jira_client, mock_jira_fetcher):
     """PDF attachment is downloaded and converted to markdown."""
-    mock_jira_fetcher.jira.issue.return_value = _make_issue_response([_PDF_ATTACHMENT])
+    mock_jira_fetcher.jira.issue.return_value = _make_issue_response([
+                                                                     _PDF_ATTACHMENT])
 
-    mock_resp = MagicMock()
-    mock_resp.content = b"%PDF-1.4 fake pdf bytes"
-    mock_resp.raise_for_status = MagicMock()
-    mock_jira_fetcher.jira._session.get.return_value = mock_resp
+    mock_jira_fetcher.jira._session.get.return_value = _mock_download_response(
+        b"%PDF-1.4 fake pdf bytes"
+    )
 
     with patch(
         "mcp_atlassian.servers.jira._summarize_content_with_markitdown",
@@ -1948,12 +1981,12 @@ async def test_summarize_attachments_pdf(jira_client, mock_jira_fetcher):
 @pytest.mark.anyio
 async def test_summarize_attachments_image(jira_client, mock_jira_fetcher):
     """Image attachment is downloaded and EXIF metadata extracted."""
-    mock_jira_fetcher.jira.issue.return_value = _make_issue_response([_PNG_ATTACHMENT])
+    mock_jira_fetcher.jira.issue.return_value = _make_issue_response([
+                                                                     _PNG_ATTACHMENT])
 
-    mock_resp = MagicMock()
-    mock_resp.content = b"\x89PNG\r\nfake png bytes"
-    mock_resp.raise_for_status = MagicMock()
-    mock_jira_fetcher.jira._session.get.return_value = mock_resp
+    mock_jira_fetcher.jira._session.get.return_value = _mock_download_response(
+        b"\x89PNG\r\nfake png bytes"
+    )
 
     with patch(
         "mcp_atlassian.servers.jira._summarize_content_with_markitdown",
@@ -1977,10 +2010,9 @@ async def test_summarize_attachments_skips_unsupported(jira_client, mock_jira_fe
         [_ZIP_ATTACHMENT, _PDF_ATTACHMENT]
     )
 
-    mock_resp = MagicMock()
-    mock_resp.content = b"fake content"
-    mock_resp.raise_for_status = MagicMock()
-    mock_jira_fetcher.jira._session.get.return_value = mock_resp
+    mock_jira_fetcher.jira._session.get.return_value = _mock_download_response(
+        b"fake content"
+    )
 
     with patch(
         "mcp_atlassian.servers.jira._summarize_content_with_markitdown",
@@ -2005,10 +2037,9 @@ async def test_summarize_attachments_filename_filter(jira_client, mock_jira_fetc
         [_PDF_ATTACHMENT, _PNG_ATTACHMENT]
     )
 
-    mock_resp = MagicMock()
-    mock_resp.content = b"fake bytes"
-    mock_resp.raise_for_status = MagicMock()
-    mock_jira_fetcher.jira._session.get.return_value = mock_resp
+    mock_jira_fetcher.jira._session.get.return_value = _mock_download_response(
+        b"fake bytes"
+    )
 
     with patch(
         "mcp_atlassian.servers.jira._summarize_content_with_markitdown",
@@ -2030,12 +2061,12 @@ async def test_summarize_attachments_truncates_long_content(
     jira_client, mock_jira_fetcher
 ):
     """Content longer than max_chars_per_file is truncated."""
-    mock_jira_fetcher.jira.issue.return_value = _make_issue_response([_PDF_ATTACHMENT])
+    mock_jira_fetcher.jira.issue.return_value = _make_issue_response([
+                                                                     _PDF_ATTACHMENT])
 
-    mock_resp = MagicMock()
-    mock_resp.content = b"fake pdf"
-    mock_resp.raise_for_status = MagicMock()
-    mock_jira_fetcher.jira._session.get.return_value = mock_resp
+    mock_jira_fetcher.jira._session.get.return_value = _mock_download_response(
+        b"fake pdf"
+    )
 
     long_text = "A" * 5000
 
@@ -2073,9 +2104,11 @@ async def test_summarize_attachments_no_attachments(jira_client, mock_jira_fetch
 @pytest.mark.anyio
 async def test_summarize_attachments_download_failure(jira_client, mock_jira_fetcher):
     """Network error during download is captured per-file as a failed summary."""
-    mock_jira_fetcher.jira.issue.return_value = _make_issue_response([_PDF_ATTACHMENT])
+    mock_jira_fetcher.jira.issue.return_value = _make_issue_response([
+                                                                     _PDF_ATTACHMENT])
 
-    mock_jira_fetcher.jira._session.get.side_effect = OSError("connection refused")
+    mock_jira_fetcher.jira._session.get.side_effect = OSError(
+        "connection refused")
 
     response = await jira_client.call_tool(
         "jira_summarize_attachments",
@@ -2094,12 +2127,12 @@ async def test_summarize_attachments_markitdown_not_installed(
     jira_client, mock_jira_fetcher
 ):
     """Missing markitdown package returns an actionable top-level error."""
-    mock_jira_fetcher.jira.issue.return_value = _make_issue_response([_PDF_ATTACHMENT])
+    mock_jira_fetcher.jira.issue.return_value = _make_issue_response([
+                                                                     _PDF_ATTACHMENT])
 
-    mock_resp = MagicMock()
-    mock_resp.content = b"fake pdf"
-    mock_resp.raise_for_status = MagicMock()
-    mock_jira_fetcher.jira._session.get.return_value = mock_resp
+    mock_jira_fetcher.jira._session.get.return_value = _mock_download_response(
+        b"fake pdf"
+    )
 
     with patch(
         "mcp_atlassian.servers.jira._summarize_content_with_markitdown",
@@ -2130,9 +2163,45 @@ async def test_summarize_attachments_issue_not_found(jira_client, mock_jira_fetc
     assert "INVALID-999" in data["error"]
 
 
+@pytest.mark.anyio
+async def test_summarize_attachments_oversized_download(jira_client, mock_jira_fetcher):
+    """Attachments exceeding the size cap are rejected mid-stream."""
+    mock_jira_fetcher.jira.issue.return_value = _make_issue_response([
+                                                                     _PDF_ATTACHMENT])
+    mock_jira_fetcher.jira._session.get.return_value = _mock_download_response(
+        b"AAAAA", b"BBBBB", b"CCCCC"
+    )
+
+    with patch("mcp_atlassian.servers.jira._ATTACHMENT_MAX_DOWNLOAD_BYTES", 8):
+        response = await jira_client.call_tool(
+            "jira_summarize_attachments",
+            {"issue_key": "PROJ-12"},
+        )
+
+    data = json.loads(response.content[0].text)
+    assert data["success"] is True
+    assert data["failed"] == 1
+    assert data["summaries"][0]["success"] is False
+    assert "maximum allowed size" in data["summaries"][0]["error"]
+
+
 # ---------------------------------------------------------------------------
 # Unit tests for helper functions
 # ---------------------------------------------------------------------------
+
+
+def test_download_attachment_bytes_enforces_size_limit():
+    """_download_attachment_bytes aborts once the size cap is exceeded."""
+    from mcp_atlassian.servers import jira as jira_module
+    from mcp_atlassian.servers.jira import _download_attachment_bytes
+
+    session = MagicMock()
+    session.get.return_value = _mock_download_response(
+        b"XXXXX", b"YYYYY", b"ZZZZZ")
+
+    with patch.object(jira_module, "_ATTACHMENT_MAX_DOWNLOAD_BYTES", 8):
+        with pytest.raises(ValueError, match="maximum allowed size"):
+            _download_attachment_bytes(session, "https://example/big.bin")
 
 
 def test_summarize_content_with_markitdown_pdf():
@@ -2142,8 +2211,8 @@ def test_summarize_content_with_markitdown_pdf():
     fake_result = MagicMock()
     fake_result.text_content = "Extracted PDF text"
 
-    with patch("markitdown.MarkItDown") as MockMD:
-        instance = MockMD.return_value
+    with patch("markitdown.MarkItDown") as mock_md:
+        instance = mock_md.return_value
         instance.convert_stream.return_value = fake_result
 
         text = _summarize_content_with_markitdown(b"%PDF fake", "report.pdf")
@@ -2161,8 +2230,8 @@ def test_summarize_content_with_markitdown_empty_result():
     fake_result = MagicMock()
     fake_result.text_content = ""
 
-    with patch("markitdown.MarkItDown") as MockMD:
-        instance = MockMD.return_value
+    with patch("markitdown.MarkItDown") as mock_md:
+        instance = mock_md.return_value
         instance.convert_stream.return_value = fake_result
 
         text = _summarize_content_with_markitdown(b"empty", "blank.pdf")
@@ -2177,3 +2246,138 @@ def test_summarize_content_with_markitdown_missing_package():
     with patch.dict("sys.modules", {"markitdown": None}):
         with pytest.raises(ImportError, match="markitdown"):
             _summarize_content_with_markitdown(b"data", "file.pdf")
+
+
+# ---------------------------------------------------------------------------
+# Tests for get_attachment_images
+# ---------------------------------------------------------------------------
+
+
+async def _call_get_attachment_images(mock_jira_fetcher, **params):
+    """Invoke get_attachment_images.fn directly with a patched fetcher."""
+    from mcp_atlassian.servers.jira import get_attachment_images
+
+    ctx = MagicMock()
+    with patch(
+        "mcp_atlassian.servers.jira.get_jira_fetcher",
+        AsyncMock(return_value=mock_jira_fetcher),
+    ):
+        return await get_attachment_images.fn(ctx, **params)
+
+
+@pytest.mark.anyio
+async def test_get_attachment_images_success(mock_jira_fetcher):
+    """Image attachments are returned as image content blocks; non-images ignored."""
+    mock_jira_fetcher.jira.issue.return_value = _make_issue_response(
+        [_PNG_ATTACHMENT, _PDF_ATTACHMENT]
+    )
+    mock_jira_fetcher.jira._session.get.return_value = _mock_download_response(
+        b"\x89PNG binary"
+    )
+
+    result = await _call_get_attachment_images(mock_jira_fetcher, issue_key="PROJ-1")
+
+    # One text label + one image block for the single PNG (PDF ignored).
+    kinds = [c.type for c in result.content]
+    assert kinds == ["text", "image"]
+    image_block = result.content[1]
+    assert image_block.mimeType == "image/png"
+    assert image_block.data  # base64 payload present
+
+    sc = result.structured_content
+    assert sc["success"] is True
+    assert sc["returned"] == 1
+    assert sc["images"][0]["filename"] == "screenshot.png"
+    assert sc["failed"] == []
+
+
+@pytest.mark.anyio
+async def test_get_attachment_images_no_images(mock_jira_fetcher):
+    """An issue with no image attachments returns an informational message."""
+    mock_jira_fetcher.jira.issue.return_value = _make_issue_response([
+                                                                     _PDF_ATTACHMENT])
+
+    result = await _call_get_attachment_images(mock_jira_fetcher, issue_key="PROJ-2")
+
+    assert result.content[0].type == "text"
+    assert "No image attachments" in result.content[0].text
+    assert result.structured_content["images"] == []
+
+
+@pytest.mark.anyio
+async def test_get_attachment_images_filename_filter(mock_jira_fetcher):
+    """filename_filter selects only the requested image(s)."""
+    second = {
+        "filename": "diagram.jpg",
+        "content": "https://test.atlassian.net/secure/diagram.jpg",
+        "size": 4096,
+        "mimeType": "image/jpeg",
+    }
+    mock_jira_fetcher.jira.issue.return_value = _make_issue_response(
+        [_PNG_ATTACHMENT, second]
+    )
+    mock_jira_fetcher.jira._session.get.return_value = _mock_download_response(
+        b"\xff\xd8\xff jpeg"
+    )
+
+    result = await _call_get_attachment_images(
+        mock_jira_fetcher, issue_key="PROJ-3", filename_filter="diagram.jpg"
+    )
+
+    sc = result.structured_content
+    assert sc["returned"] == 1
+    assert sc["images"][0]["filename"] == "diagram.jpg"
+    assert result.content[1].mimeType == "image/jpeg"
+
+
+@pytest.mark.anyio
+async def test_get_attachment_images_download_failure(mock_jira_fetcher):
+    """A download error is recorded under 'failed' without raising."""
+    mock_jira_fetcher.jira.issue.return_value = _make_issue_response([
+                                                                     _PNG_ATTACHMENT])
+    mock_jira_fetcher.jira._session.get.side_effect = RuntimeError("boom")
+
+    result = await _call_get_attachment_images(mock_jira_fetcher, issue_key="PROJ-4")
+
+    sc = result.structured_content
+    assert sc["success"] is False
+    assert sc["returned"] == 0
+    assert sc["failed"][0]["filename"] == "screenshot.png"
+    assert "boom" in sc["failed"][0]["error"]
+    # No image blocks were produced.
+    assert all(c.type != "image" for c in result.content)
+
+
+@pytest.mark.anyio
+async def test_get_attachment_images_max_images(mock_jira_fetcher):
+    """max_images caps how many images are returned."""
+    imgs = [
+        {
+            "filename": f"img{i}.png",
+            "content": f"https://test.atlassian.net/secure/img{i}.png",
+            "size": 10,
+            "mimeType": "image/png",
+        }
+        for i in range(5)
+    ]
+    mock_jira_fetcher.jira.issue.return_value = _make_issue_response(imgs)
+    mock_jira_fetcher.jira._session.get.return_value = _mock_download_response(
+        b"png")
+
+    result = await _call_get_attachment_images(
+        mock_jira_fetcher, issue_key="PROJ-5", max_images=2
+    )
+
+    assert result.structured_content["returned"] == 2
+    assert result.structured_content["total_images"] == 2
+
+
+@pytest.mark.anyio
+async def test_get_attachment_images_issue_not_found(mock_jira_fetcher):
+    """A non-dict issue response yields a failure ToolResult."""
+    mock_jira_fetcher.jira.issue.return_value = None
+
+    result = await _call_get_attachment_images(mock_jira_fetcher, issue_key="MISSING-1")
+
+    assert result.structured_content["success"] is False
+    assert "MISSING-1" in result.structured_content["error"]

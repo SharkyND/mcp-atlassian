@@ -10,6 +10,7 @@ from urllib.parse import quote, unquote
 
 from fastmcp import Context, FastMCP
 from fastmcp.resources import FunctionResource
+from fastmcp.tools.tool import ToolResult
 from pydantic import Field
 from requests.exceptions import HTTPError
 
@@ -47,10 +48,23 @@ _SUMMARIZABLE_EXTENSIONS: frozenset[str] = frozenset(
     }
 )
 
-# Image extensions — eligible for Copilot vision description.
+# Image extensions — returned as viewable image content by
+# ``jira_get_attachment_images`` so a vision-capable client model can see them.
 _IMAGE_EXTENSIONS: frozenset[str] = frozenset(
     {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".tif", ".webp"}
 )
+
+# Image file extension -> format string accepted by MCP ImageContent / vision models.
+_IMAGE_FORMAT_MAP: dict[str, str] = {
+    ".jpg": "jpeg",
+    ".jpeg": "jpeg",
+    ".png": "png",
+    ".gif": "gif",
+    ".webp": "webp",
+    ".bmp": "bmp",
+    ".tiff": "tiff",
+    ".tif": "tiff",
+}
 
 
 def _summarize_content_with_markitdown(
@@ -107,10 +121,12 @@ def _get_external_base_url() -> str:
         if isinstance(candidate, str):
             base_url = candidate.strip()
     except Exception as exc:
-        logger.debug("Jira endpoint base URL unavailable from request state: %s", exc)
+        logger.debug(
+            "Jira endpoint base URL unavailable from request state: %s", exc)
 
     if not base_url:
-        base_url = os.environ.get("MCP_SERVER_BASE_URL", "http://localhost:8932")
+        base_url = os.environ.get(
+            "MCP_SERVER_BASE_URL", "http://localhost:8932")
     return base_url.rstrip("/")
 
 
@@ -382,7 +398,8 @@ async def get_project_issues(
     project_key: Annotated[str, Field(description="The project key")],
     limit: Annotated[
         int,
-        Field(description="Maximum number of results (1-50)", default=10, ge=1, le=50),
+        Field(description="Maximum number of results (1-50)",
+              default=10, ge=1, le=50),
     ] = 10,
     start_at: Annotated[
         int,
@@ -532,7 +549,8 @@ async def get_agile_boards(
         Field(description="(Optional) The name of board, support fuzzy search"),
     ] = None,
     project_key: Annotated[
-        str | None, Field(description="(Optional) Jira project key (e.g., 'PROJ-123')")
+        str | None, Field(
+            description="(Optional) Jira project key (e.g., 'PROJ-123')")
     ] = None,
     board_type: Annotated[
         str | None,
@@ -546,7 +564,8 @@ async def get_agile_boards(
     ] = 0,
     limit: Annotated[
         int,
-        Field(description="Maximum number of results (1-50)", default=10, ge=1, le=50),
+        Field(description="Maximum number of results (1-50)",
+              default=10, ge=1, le=50),
     ] = 10,
 ) -> str:
     """Get jira agile boards by name, project key, or type.
@@ -610,7 +629,8 @@ async def get_board_issues(
     ] = 0,
     limit: Annotated[
         int,
-        Field(description="Maximum number of results (1-50)", default=10, ge=1, le=50),
+        Field(description="Maximum number of results (1-50)",
+              default=10, ge=1, le=50),
     ] = 10,
     expand: Annotated[
         str,
@@ -665,7 +685,8 @@ async def get_sprints_from_board(
     ] = 0,
     limit: Annotated[
         int,
-        Field(description="Maximum number of results (1-50)", default=10, ge=1, le=50),
+        Field(description="Maximum number of results (1-50)",
+              default=10, ge=1, le=50),
     ] = 10,
 ) -> str:
     """Get jira sprints from board by state.
@@ -709,7 +730,8 @@ async def get_sprint_issues(
     ] = 0,
     limit: Annotated[
         int,
-        Field(description="Maximum number of results (1-50)", default=10, ge=1, le=50),
+        Field(description="Maximum number of results (1-50)",
+              default=10, ge=1, le=50),
     ] = 10,
 ) -> str:
     """Get jira issues from sprint.
@@ -748,7 +770,8 @@ async def get_link_types(ctx: Context) -> str:
     """
     jira = await get_jira_fetcher(ctx)
     link_types = jira.get_issue_link_types()
-    formatted_link_types = [link_type.to_simplified_dict() for link_type in link_types]
+    formatted_link_types = [link_type.to_simplified_dict()
+                            for link_type in link_types]
     return json.dumps(formatted_link_types, indent=2, ensure_ascii=False)
 
 
@@ -913,7 +936,8 @@ async def batch_create_issues(
         raise ValueError(msg) from e
 
     # Create issues in batch
-    created_issues = jira.batch_create_issues(issues_list, validate_only=validate_only)
+    created_issues = jira.batch_create_issues(
+        issues_list, validate_only=validate_only)
 
     message = (
         "Issues validated successfully"
@@ -1066,7 +1090,8 @@ async def update_issue(
                 if isinstance(parsed, list):
                     attachment_paths = [str(p) for p in parsed]
                 else:
-                    raise ValueError("attachments JSON string must be an array.")
+                    raise ValueError(
+                        "attachments JSON string must be an array.")
             except json.JSONDecodeError:
                 # Assume comma-separated if not valid JSON array
                 attachment_paths = [
@@ -1096,7 +1121,8 @@ async def update_issue(
             ensure_ascii=False,
         )
     except Exception as e:
-        logger.error(f"Error updating issue {issue_key}: {str(e)}", exc_info=True)
+        logger.error(
+            f"Error updating issue {issue_key}: {str(e)}", exc_info=True)
         msg = f"Failed to update issue {issue_key}: {str(e)}"
         raise ValueError(msg)
 
@@ -1181,10 +1207,12 @@ async def add_worklog(
     ] = None,
     # Add original_estimate and remaining_estimate as per original tool
     original_estimate: Annotated[
-        str | None, Field(description="(Optional) New value for the original estimate")
+        str | None, Field(
+            description="(Optional) New value for the original estimate")
     ] = None,
     remaining_estimate: Annotated[
-        str | None, Field(description="(Optional) New value for the remaining estimate")
+        str | None, Field(
+            description="(Optional) New value for the remaining estimate")
     ] = None,
 ) -> str:
     """Add a worklog entry to a Jira issue.
@@ -1215,7 +1243,8 @@ async def add_worklog(
         original_estimate=original_estimate,
         remaining_estimate=remaining_estimate,
     )
-    result = {"message": "Worklog added successfully", "worklog": worklog_result}
+    result = {"message": "Worklog added successfully",
+              "worklog": worklog_result}
     return json.dumps(result, indent=2, ensure_ascii=False)
 
 
@@ -1227,7 +1256,8 @@ async def link_to_epic(
         str, Field(description="The key of the issue to link (e.g., 'PROJ-123')")
     ],
     epic_key: Annotated[
-        str, Field(description="The key of the epic to link to (e.g., 'PROJ-456')")
+        str, Field(
+            description="The key of the epic to link to (e.g., 'PROJ-456')")
     ],
 ) -> str:
     """Link an existing issue to an epic.
@@ -1313,7 +1343,8 @@ async def create_issue_link(
             if "type" in comment_visibility and "value" in comment_visibility:
                 comment_obj["visibility"] = comment_visibility
             else:
-                logger.warning("Invalid comment_visibility dictionary structure.")
+                logger.warning(
+                    "Invalid comment_visibility dictionary structure.")
         link_data["comment"] = comment_obj
 
     result = jira.create_issue_link(link_data)
@@ -1350,7 +1381,8 @@ async def create_remote_issue_link(
         ),
     ] = None,
     icon_url: Annotated[
-        str | None, Field(description="(Optional) URL to a 16x16 icon for the link")
+        str | None, Field(
+            description="(Optional) URL to a 16x16 icon for the link")
     ] = None,
 ) -> str:
     """Create a remote issue link (web link or Confluence link) for a Jira issue.
@@ -1559,7 +1591,8 @@ async def update_sprint(
         Field(description="(Optional) New state for the sprint (future|active|closed)"),
     ] = None,
     start_date: Annotated[
-        str | None, Field(description="(Optional) New start date for the sprint")
+        str | None, Field(
+            description="(Optional) New start date for the sprint")
     ] = None,
     end_date: Annotated[
         str | None, Field(description="(Optional) New end date for the sprint")
@@ -1690,10 +1723,12 @@ async def create_version(
         str | None, Field(description="Start date (YYYY-MM-DD)", default=None)
     ] = None,
     release_date: Annotated[
-        str | None, Field(description="Release date (YYYY-MM-DD)", default=None)
+        str | None, Field(
+            description="Release date (YYYY-MM-DD)", default=None)
     ] = None,
     description: Annotated[
-        str | None, Field(description="Description of the version", default=None)
+        str | None, Field(
+            description="Description of the version", default=None)
     ] = None,
 ) -> str:
     """Create a new fix version in a Jira project.
@@ -1874,7 +1909,8 @@ def _register_static_attachment_resource(issue_key: str, filename: str) -> None:
         logger.warning(f"Could not register resource {uri}: {exc}")
 
 
-get_attachment_cache().add_remove_listener(_deregister_static_attachment_resource)
+get_attachment_cache().add_remove_listener(
+    _deregister_static_attachment_resource)
 
 
 # ---------------------------------------------------------------------------
@@ -1909,7 +1945,8 @@ def get_attachment_by_issue_resource(issue_key: str, filename: str) -> bytes:
     # Strip query-string params that some MCP clients (e.g. VS Code) append
     # for cache-busting (e.g. ?version=1234567890).
     actual_filename = unquote(filename).split("?")[0]
-    attachment_data = cache.get_by_issue_and_filename(issue_key, actual_filename)
+    attachment_data = cache.get_by_issue_and_filename(
+        issue_key, actual_filename)
 
     if not attachment_data:
         logger.warning(
@@ -1920,7 +1957,8 @@ def get_attachment_by_issue_resource(issue_key: str, filename: str) -> bytes:
             "It may have expired (10-minute TTL). Re-run download_attachments to refresh."
         )
 
-    logger.info(f"Serving static resource: jira://attachments/{issue_key}/{filename}")
+    logger.info(
+        f"Serving static resource: jira://attachments/{issue_key}/{filename}")
     return attachment_data["content"]
 
 
@@ -2378,65 +2416,39 @@ async def jira_upload_attachment(
 
 _ATTACHMENT_DOWNLOAD_TIMEOUT = 60  # seconds per attachment download
 
+# Maximum bytes to download per attachment. Prevents memory exhaustion from
+# very large attachments and matches the AttachmentCache default cap used by
+# the existing download tooling in ``jira/attachments.py``.
+_ATTACHMENT_MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024  # 100 MB
+
 
 def _download_attachment_bytes(jira_session: Any, url: str) -> bytes:
-    """Download raw attachment bytes via an authenticated Jira session."""
-    resp = jira_session.get(url, stream=False, timeout=_ATTACHMENT_DOWNLOAD_TIMEOUT)
-    resp.raise_for_status()
-    return resp.content
+    """Download raw attachment bytes via an authenticated Jira session.
 
+    Streams the response and enforces a per-file size cap
+    (:data:`_ATTACHMENT_MAX_DOWNLOAD_BYTES`) to avoid loading arbitrarily large
+    attachments into memory.
 
-async def _describe_image_via_sampling(
-    ctx: Context,
-    content_bytes: bytes,
-    filename: str,
-    mime_type: str,
-    max_chars: int,
-) -> str:
-    """Send an image to the connected MCP client (GitHub Copilot) for description.
-
-    Uses MCP sampling — no external API key required.  The description is
-    generated by whichever vision-capable model the client exposes.
+    Raises:
+        ValueError: if the attachment exceeds the maximum allowed size.
     """
-    import base64
-
-    from fastmcp.server.context import SamplingMessage
-    from mcp.types import ImageContent, TextContent
-
-    b64 = base64.standard_b64encode(content_bytes).decode("ascii")
+    resp = jira_session.get(
+        url, stream=True, timeout=_ATTACHMENT_DOWNLOAD_TIMEOUT)
+    resp.raise_for_status()
     try:
-        result = await ctx.sample(
-            messages=[
-                SamplingMessage(
-                    role="user",
-                    content=[
-                        TextContent(
-                            type="text",
-                            text=(
-                                f"Please describe the attached image '{filename}' in detail. "
-                                "Include any visible text, UI elements, charts, diagrams, "
-                                "screenshots, or other content. Format your response as Markdown."
-                            ),
-                        ),
-                        ImageContent(type="image", data=b64, mimeType=mime_type),
-                    ],
+        buffer = bytearray()
+        for chunk in resp.iter_content(chunk_size=8192):
+            if not chunk:
+                continue
+            buffer.extend(chunk)
+            if len(buffer) > _ATTACHMENT_MAX_DOWNLOAD_BYTES:
+                raise ValueError(
+                    "Attachment exceeds maximum allowed size "
+                    f"({_ATTACHMENT_MAX_DOWNLOAD_BYTES} bytes)"
                 )
-            ],
-            system_prompt=(
-                "You are analysing image attachments from Jira issues. "
-                "Provide a thorough description that helps readers understand "
-                "the image content without seeing it."
-            ),
-            max_tokens=2000,
-        )
-        text = (result.text or "").strip()
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Copilot sampling failed for '%s': %s", filename, exc)
-        return f"[Image description failed: {exc}]"
-
-    if max_chars and len(text) > max_chars:
-        text = text[:max_chars] + f"\n\n[...truncated — {len(text):,} chars total]"
-    return text if text else "[No description returned by the model]"
+        return bytes(buffer)
+    finally:
+        resp.close()
 
 
 def _build_attachment_summary(
@@ -2470,18 +2482,29 @@ def _build_attachment_summary(
 
     ext = _Path(filename).suffix.lower()
     if ext not in _SUMMARIZABLE_EXTENSIONS:
-        logger.info("Skipping unsupported attachment: %s (%s)", filename, mime_type)
+        logger.info("Skipping unsupported attachment: %s (%s)",
+                    filename, mime_type)
         return filename, None
 
     if not url:
-        return None, {**base_info, "success": False, "error": "No download URL available."}
+        return None, {
+            **base_info,
+            "success": False,
+            "error": "No download URL available.",
+        }
 
     try:
         content_bytes = _download_attachment_bytes(jira_session, url)
     except Exception as dl_exc:
-        return None, {**base_info, "success": False, "error": f"Download failed: {dl_exc}"}
+        return None, {
+            **base_info,
+            "success": False,
+            "error": f"Download failed: {dl_exc}",
+        }
 
-    markdown_text = _summarize_content_with_markitdown(content_bytes, filename, md_instance)
+    markdown_text = _summarize_content_with_markitdown(
+        content_bytes, filename, md_instance
+    )
     if max_chars and len(markdown_text) > max_chars:
         markdown_text = (
             markdown_text[:max_chars]
@@ -2495,7 +2518,9 @@ async def summarize_attachments(
     ctx: Context,
     issue_key: Annotated[
         str,
-        Field(description="Jira issue key whose attachments should be summarized (e.g., 'PROJ-123')"),
+        Field(
+            description="Jira issue key whose attachments should be summarized (e.g., 'PROJ-123')"
+        ),
     ],
     filename_filter: Annotated[
         str | None,
@@ -2518,25 +2543,13 @@ async def summarize_attachments(
             ge=0,
         ),
     ] = 4000,
-    describe_images: Annotated[
-        bool,
-        Field(
-            description=(
-                "When true, uses GitHub Copilot (via MCP sampling) to generate rich visual "
-                "descriptions of image attachments (PNG, JPG, etc.). "
-                "When false (default), only EXIF metadata is extracted from images. "
-                "No API key required — the connected AI assistant handles the request."
-            ),
-            default=False,
-        ),
-    ] = False,
 ) -> str:
     """Scan and summarize attachments (PDFs, images, Office documents) from a Jira issue.
 
     Uses Microsoft MarkItDown to extract readable content from each supported attachment:
 
     • **PDF**          → full text extracted via pdfminer
-    • **Images**       → EXIF metadata by default; rich visual description when describe_images=true
+    • **Images**       → EXIF metadata (for a visual description use jira_get_attachment_images)
     • **DOCX / PPTX / XLSX** → document text and structure as Markdown
     • **CSV / JSON / XML**   → raw content rendered as Markdown
 
@@ -2546,15 +2559,15 @@ async def summarize_attachments(
     Requires the ``markitdown`` package — add it with:
         uv add 'markitdown[pdf]'
 
-    Image descriptions (``describe_images=true``) are powered by GitHub Copilot
-    via MCP sampling — no extra API key or package needed.
+    To have a vision-capable model *see* image attachments (screenshots, diagrams,
+    charts), use ``jira_get_attachment_images`` instead — it returns the raw images
+    as content blocks your model can view directly.
 
     Args:
         ctx: The FastMCP context.
         issue_key: Jira issue key (e.g., 'PROJ-123').
         filename_filter: Optional comma-separated list of filenames to process.
         max_chars_per_file: Truncation limit per file in characters (0 = unlimited).
-        describe_images: Use Copilot vision to describe images (default: false).
 
     Returns:
         JSON string with per-attachment summaries including extracted markdown content.
@@ -2585,11 +2598,13 @@ async def summarize_attachments(
 
     filter_names: set[str] | None = None
     if filename_filter:
-        filter_names = {n.strip() for n in filename_filter.split(",") if n.strip()}
+        filter_names = {n.strip()
+                        for n in filename_filter.split(",") if n.strip()}
 
     # Create MarkItDown once and share across all document workers.
     try:
         from markitdown import MarkItDown  # type: ignore[import-untyped]
+
         md_instance: Any = MarkItDown(enable_plugins=False)
     except ImportError as exc:
         return json.dumps(
@@ -2606,8 +2621,7 @@ async def summarize_attachments(
 
     from pathlib import Path as _Path
 
-    # Partition attachments: images (optionally via Copilot) vs documents (MarkItDown threads).
-    image_atts: list[dict] = []
+    # Collect supported attachments; unsupported types are skipped.
     doc_atts: list[dict] = []
     for att in raw_attachments:
         if not isinstance(att, dict):
@@ -2620,12 +2634,9 @@ async def summarize_attachments(
         if ext not in _SUMMARIZABLE_EXTENSIONS:
             skipped.append(fn)
             continue
-        if describe_images and ext in _IMAGE_EXTENSIONS:
-            image_atts.append(att)
-        else:
-            doc_atts.append(att)
+        doc_atts.append(att)
 
-    # --- Documents: run MarkItDown concurrently in thread-pool workers ---
+    # Run MarkItDown concurrently in thread-pool workers.
     doc_tasks = [
         asyncio.to_thread(
             functools.partial(
@@ -2642,79 +2653,19 @@ async def summarize_attachments(
     doc_results = await asyncio.gather(*doc_tasks, return_exceptions=True)
     for res in doc_results:
         if isinstance(res, ImportError):
-            return json.dumps({"success": False, "error": str(res)}, indent=2, ensure_ascii=False)
+            return json.dumps(
+                {"success": False, "error": str(res)}, indent=2, ensure_ascii=False
+            )
         if isinstance(res, BaseException):
-            logger.warning("Unexpected error processing document attachment: %s", res)
-            summaries.append({"filename": "unknown", "success": False, "error": str(res)})
+            logger.warning(
+                "Unexpected error processing document attachment: %s", res)
+            summaries.append(
+                {"filename": "unknown", "success": False, "error": str(res)}
+            )
             continue
         _, summary = res
         if summary is not None:
             summaries.append(summary)
-
-    # --- Images: download in threads, then describe via Copilot sampling ---
-    if image_atts:
-        # Step 1: download all image bytes in parallel.
-        download_tasks = [
-            asyncio.to_thread(
-                _download_attachment_bytes,
-                jira.jira._session,
-                att.get("content", ""),
-            )
-            for att in image_atts
-        ]
-        download_results = await asyncio.gather(*download_tasks, return_exceptions=True)
-
-        # Step 2: describe each downloaded image via ctx.sample() (concurrent async).
-        describe_tasks = []
-        failed_downloads: list[tuple[dict, str]] = []
-        for att, dl_result in zip(image_atts, download_results, strict=True):
-            if isinstance(dl_result, BaseException):
-                failed_downloads.append((att, str(dl_result)))
-            else:
-                mime_type = att.get("mimeType", "image/png")
-                describe_tasks.append(
-                    _describe_image_via_sampling(
-                        ctx, dl_result, att.get("filename", ""), mime_type, max_chars_per_file
-                    )
-                )
-
-        for att, err in failed_downloads:
-            summaries.append(
-                {
-                    "filename": att.get("filename", ""),
-                    "size": att.get("size", 0),
-                    "mime_type": att.get("mimeType", "image/png"),
-                    "success": False,
-                    "error": f"Download failed: {err}",
-                }
-            )
-
-        describe_results = await asyncio.gather(*describe_tasks, return_exceptions=True)
-        img_iter = (
-            att for att in image_atts
-            if not any(att is fd[0] for fd in failed_downloads)
-        )
-        for att, desc_result in zip(img_iter, describe_results, strict=True):
-            if isinstance(desc_result, BaseException):
-                summaries.append(
-                    {
-                        "filename": att.get("filename", ""),
-                        "size": att.get("size", 0),
-                        "mime_type": att.get("mimeType", "image/png"),
-                        "success": False,
-                        "error": str(desc_result),
-                    }
-                )
-            else:
-                summaries.append(
-                    {
-                        "filename": att.get("filename", ""),
-                        "size": att.get("size", 0),
-                        "mime_type": att.get("mimeType", "image/png"),
-                        "success": True,
-                        "markdown_content": desc_result,
-                    }
-                )
 
     processed = sum(1 for s in summaries if s.get("success"))
     failed = sum(1 for s in summaries if not s.get("success"))
@@ -2732,4 +2683,154 @@ async def summarize_attachments(
         },
         indent=2,
         ensure_ascii=False,
+    )
+
+
+@jira_mcp.tool(tags={"jira", "read"})
+async def get_attachment_images(
+    ctx: Context,
+    issue_key: Annotated[
+        str,
+        Field(
+            description="Jira issue key whose image attachments should be fetched (e.g., 'PROJ-123')"
+        ),
+    ],
+    filename_filter: Annotated[
+        str | None,
+        Field(
+            description=(
+                "(Optional) Comma-separated list of specific image filenames to fetch. "
+                "When omitted all image attachments on the issue are returned."
+            ),
+            default=None,
+        ),
+    ] = None,
+    max_images: Annotated[
+        int,
+        Field(
+            description="Maximum number of images to return (default: 10).",
+            default=10,
+            ge=1,
+        ),
+    ] = 10,
+) -> ToolResult:
+    """Fetch image attachments from a Jira issue as viewable image content.
+
+    Returns each image as an MCP image content block so a vision-capable model can
+    see and describe it directly — no MarkItDown text extraction and no MCP
+    sampling required. Works with any client whose own model supports images
+    (e.g., Claude, GPT-4o, Bedrock vision models).
+
+    Non-image attachments are ignored; use ``jira_summarize_attachments`` for
+    documents (PDF / DOCX / XLSX / CSV / …).
+
+    Args:
+        ctx: The FastMCP context.
+        issue_key: Jira issue key (e.g., 'PROJ-123').
+        filename_filter: Optional comma-separated list of image filenames to fetch.
+        max_images: Maximum number of images to return (default: 10).
+
+    Returns:
+        A ToolResult whose content holds one image block per attachment (each
+        preceded by a text label) and whose structured content lists the image
+        metadata plus any download failures.
+    """
+    from pathlib import Path as _Path
+
+    from fastmcp.utilities.types import Image
+    from mcp.types import TextContent
+
+    jira = await get_jira_fetcher(ctx)
+
+    issue_data = jira.jira.issue(issue_key, fields="attachment")
+    if not isinstance(issue_data, dict) or "fields" not in issue_data:
+        return ToolResult(
+            content=[
+                TextContent(
+                    type="text", text=f"Could not retrieve issue {issue_key}.")
+            ],
+            structured_content={
+                "success": False,
+                "error": f"Could not retrieve issue {issue_key}",
+            },
+        )
+
+    raw_attachments = issue_data.get("fields", {}).get("attachment", []) or []
+
+    filter_names: set[str] | None = None
+    if filename_filter:
+        filter_names = {n.strip()
+                        for n in filename_filter.split(",") if n.strip()}
+
+    image_atts: list[dict] = []
+    for att in raw_attachments:
+        if not isinstance(att, dict):
+            continue
+        fn = att.get("filename", "")
+        if filter_names and fn not in filter_names:
+            continue
+        if _Path(fn).suffix.lower() in _IMAGE_EXTENSIONS:
+            image_atts.append(att)
+
+    image_atts = image_atts[:max_images]
+
+    if not image_atts:
+        return ToolResult(
+            content=[
+                TextContent(
+                    type="text", text=f"No image attachments found on {issue_key}."
+                )
+            ],
+            structured_content={
+                "success": True,
+                "issue_key": issue_key,
+                "images": [],
+                "failed": [],
+            },
+        )
+
+    # Download all image bytes in parallel.
+    download_results = await asyncio.gather(
+        *(
+            asyncio.to_thread(
+                _download_attachment_bytes,
+                jira.jira._session,
+                att.get("content", ""),
+            )
+            for att in image_atts
+        ),
+        return_exceptions=True,
+    )
+
+    content_blocks: list[Any] = []
+    image_meta: list[dict] = []
+    failed: list[dict] = []
+    for att, result in zip(image_atts, download_results, strict=True):
+        filename = att.get("filename", "")
+        base = {
+            "filename": filename,
+            "size": att.get("size", 0),
+            "mime_type": att.get("mimeType", "application/octet-stream"),
+        }
+        if isinstance(result, BaseException):
+            failed.append({**base, "error": f"Download failed: {result}"})
+            continue
+        fmt = _IMAGE_FORMAT_MAP.get(_Path(filename).suffix.lower(), "png")
+        content_blocks.append(
+            TextContent(type="text", text=f"Image attachment: {filename}")
+        )
+        content_blocks.append(
+            Image(data=result, format=fmt).to_image_content())
+        image_meta.append(base)
+
+    return ToolResult(
+        content=content_blocks,
+        structured_content={
+            "success": len(failed) == 0,
+            "issue_key": issue_key,
+            "total_images": len(image_atts),
+            "returned": len(image_meta),
+            "images": image_meta,
+            "failed": failed,
+        },
     )
