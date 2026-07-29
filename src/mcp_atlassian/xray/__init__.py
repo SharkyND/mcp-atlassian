@@ -4,10 +4,12 @@ from atlassian.xray import Xray
 
 from .client import XrayClient
 from .config import XrayConfig
+from .results import MixTestResults
 from .user import MixUsers
 
 
 class XrayFetcher(
+    MixTestResults,
     MixUsers,
     XrayClient,
 ):
@@ -26,6 +28,7 @@ __all__ = [
     "XrayClient",
     "XrayConfig",
     "XrayFetcher",
+    "MixTestResults",
     "MixUsers",
     "Xray",
 ]

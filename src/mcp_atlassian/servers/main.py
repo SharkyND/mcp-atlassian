@@ -365,7 +365,7 @@ async def main_lifespan(app: FastMCP[MainAppContext]) -> AsyncIterator[dict]:
 class AtlassianMCP(FastMCP[MainAppContext]):
     """Custom FastMCP server class for Atlassian integration with tool filtering."""
 
-    async def _mcp_list_tools(self) -> list[MCPTool]:
+    async def _list_tools_mcp(self) -> list[MCPTool]:
         # Filter tools based on enabled_tools, read_only mode, and service configuration
         # from the lifespan context.
         req_context = self._mcp_server.request_context
@@ -433,6 +433,12 @@ class AtlassianMCP(FastMCP[MainAppContext]):
                 logger.debug(
                     f"Header-based service availability: {header_based_services}"
                 )
+
+        # Fall back to env var when running in stdio mode (no HTTP request headers)
+        if enable_xray_header is None:
+            env_xray = os.environ.get("X-Atlassian-Enable-Xray", "").strip().lower()
+            if env_xray:
+                enable_xray_header = env_xray
 
         # When no service-identifying headers are present, list all tools so clients
         # can discover the full tool catalogue without needing to provide URLs upfront.
@@ -674,6 +680,10 @@ class AtlassianMCP(FastMCP[MainAppContext]):
             f"_main_mcp_list_tools: Total tools after filtering: {len(filtered_tools)}"
         )
         return filtered_tools
+
+    async def _mcp_list_tools(self) -> list[MCPTool]:
+        """Backward-compatible alias for tests and older FastMCP versions."""
+        return await self._list_tools_mcp()
 
     def http_app(
         self,

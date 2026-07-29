@@ -448,6 +448,180 @@ MOCK_XRAY_TEST_EXECUTIONS_WITH_TEST_PLAN_RESPONSE = [
     },
 ]
 
+# Mock data for test results tools (get_test_runs_in_context)
+MOCK_XRAY_TEST_RUNS_IN_CONTEXT_RESPONSE = [
+    {
+        "id": 12345,
+        "status": "PASS",
+        "color": "#95C160",
+        "testKey": "TEST-001",
+        "testExecKey": "EXEC-001",
+        "assignee": "test-user",
+        "startedOn": "2024-01-15T10:00:00-05:00",
+        "startedOnIso": "2024-01-15T10:00:00-05:00",
+        "defects": [],
+        "comment": "Test executed successfully",
+        "steps": [
+            {
+                "id": 1001,
+                "index": 1,
+                "status": "PASS",
+                "comment": {"rendered": "Step passed"},
+                "actualResult": {"rendered": "Application loaded"},
+            }
+        ],
+    },
+    {
+        "id": 12346,
+        "status": "FAIL",
+        "color": "#D45D52",
+        "testKey": "TEST-002",
+        "testExecKey": "EXEC-001",
+        "assignee": "test-user-2",
+        "startedOn": "2024-01-16T10:00:00-05:00",
+        "startedOnIso": "2024-01-16T10:00:00-05:00",
+        "defects": ["BUG-001"],
+        "comment": "Test failed",
+        "steps": [
+            {
+                "id": 1002,
+                "index": 1,
+                "status": "FAIL",
+                "comment": {"rendered": "Step failed"},
+                "actualResult": {"rendered": "Error occurred"},
+            }
+        ],
+    },
+]
+
+# Mock detailed test execution result items (from get_tests_with_test_execution detailed=True)
+MOCK_XRAY_TEST_EXECUTION_DETAILED_RESPONSE = [
+    {
+        "id": 12345,
+        "key": "TEST-001",
+        "status": "PASS",
+        "assignee": "test-user",
+        "defects": [],
+        "startedOn": "2024-01-15T10:00:00-05:00",
+        "comment": "Test executed successfully",
+    },
+    {
+        "id": 12346,
+        "key": "TEST-002",
+        "status": "FAIL",
+        "assignee": "test-user-2",
+        "defects": ["BUG-001"],
+        "startedOn": "2024-01-16T10:00:00-05:00",
+        "comment": "Test failed with error",
+    },
+    {
+        "id": 12347,
+        "key": "TEST-003",
+        "status": "TODO",
+        "assignee": None,
+        "defects": [],
+        "startedOn": None,
+        "comment": None,
+    },
+]
+
+# Mock full test run results (combined status + steps + defects + comment + assignee)
+MOCK_XRAY_TEST_RUN_FULL_RESULTS = {
+    "run_id": 12345,
+    "status": "PASS",
+    "assignee": "test-user",
+    "comment": "Test executed successfully",
+    "defects": [],
+    "steps": [
+        {
+            "id": 1001,
+            "index": 1,
+            "status": "PASS",
+            "comment": {"rendered": "Step passed"},
+            "actualResult": {"rendered": "Application loaded successfully"},
+        }
+    ],
+    "details": MOCK_XRAY_TEST_RUN_RESPONSE,
+}
+
+# Mock evidence / attachment data returned by testrun/{id}/attachment
+MOCK_XRAY_EVIDENCE_LIST = [
+    {
+        "id": 301,
+        "fileName": "screenshot_pass.png",
+        "fileSize": 45678,
+        "fileURL": "http://example.com/rest/raven/1.0/api/testrun/12345/attachment/301",
+        "contentType": "image/png",
+        "created": "2024-01-15T10:05:00-05:00",
+    },
+    {
+        "id": 302,
+        "fileName": "log_output.txt",
+        "fileSize": 1234,
+        "fileURL": "http://example.com/rest/raven/1.0/api/testrun/12345/attachment/302",
+        "contentType": "text/plain",
+        "created": "2024-01-15T10:06:00-05:00",
+    },
+]
+
+MOCK_XRAY_EVIDENCE_LIST_EMPTY: list = []
+
+# Mock aggregated evidences for a test execution
+MOCK_XRAY_TEST_EXECUTION_EVIDENCES = {
+    "execution_key": "EXEC-001",
+    "total_runs": 2,
+    "total_evidences": 3,
+    "evidences": [
+        {
+            "run_id": 12345,
+            "test_key": "TEST-001",
+            "attachments": [
+                {
+                    "id": 301,
+                    "fileName": "screenshot_pass.png",
+                    "fileSize": 45678,
+                    "fileURL": "http://example.com/rest/raven/1.0/api/testrun/12345/attachment/301",
+                    "contentType": "image/png",
+                    "created": "2024-01-15T10:05:00-05:00",
+                },
+                {
+                    "id": 302,
+                    "fileName": "log_output.txt",
+                    "fileSize": 1234,
+                    "fileURL": "http://example.com/rest/raven/1.0/api/testrun/12345/attachment/302",
+                    "contentType": "text/plain",
+                    "created": "2024-01-15T10:06:00-05:00",
+                },
+            ],
+        },
+        {
+            "run_id": 12346,
+            "test_key": "TEST-002",
+            "attachments": [
+                {
+                    "id": 303,
+                    "fileName": "failure_screenshot.png",
+                    "fileSize": 89012,
+                    "fileURL": "http://example.com/rest/raven/1.0/api/testrun/12346/attachment/303",
+                    "contentType": "image/png",
+                    "created": "2024-01-16T10:07:00-05:00",
+                },
+            ],
+        },
+    ],
+}
+
+# Mock download result (Base64-encoded content)
+MOCK_XRAY_EVIDENCE_DOWNLOAD_RESULT = {
+    "attachment_id": 301,
+    "run_id": 12345,
+    "file_name": "screenshot_pass.png",
+    "content_type": "image/png",
+    "size_bytes": 6,
+    "saved_to": None,
+    "content_base64": "aGVsbG8=",  # base64("hello\n")
+}
+
 # Success Response Templates
 MOCK_XRAY_SUCCESS_RESPONSE = {
     "success": True,
