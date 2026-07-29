@@ -2350,3 +2350,40 @@ async def test_get_attachment_images_issue_not_found(mock_jira_fetcher):
 
     assert result.structured_content["success"] is False
     assert "MISSING-1" in result.structured_content["error"]
+
+
+@pytest.mark.anyio
+async def test_get_workflow_paginated_alias_tool(mock_jira_fetcher):
+    """Singular alias tool returns the same payload as the plural tool."""
+    from fastmcp.server.context import Context
+
+    from mcp_atlassian.servers.jira import get_workflow_paginated
+
+    mock_jira_fetcher.get_workflows_paginated.return_value = {
+        "values": [{"name": "WF-1"}],
+        "total": 1,
+    }
+
+    ctx = MagicMock(spec=Context)
+    with patch(
+        "mcp_atlassian.servers.jira.get_jira_fetcher",
+        new_callable=AsyncMock,
+    ) as mock_get_fetcher:
+        mock_get_fetcher.return_value = mock_jira_fetcher
+        raw = await get_workflow_paginated.fn(
+            ctx,
+            workflow_name="WF",
+            expand="statuses",
+            start_at=0,
+            max_results=25,
+        )
+
+    data = json.loads(raw)
+    assert data["total"] == 1
+    assert data["values"][0]["name"] == "WF-1"
+    mock_jira_fetcher.get_workflows_paginated.assert_called_once_with(
+        start_at=0,
+        max_results=25,
+        workflow_name="WF",
+        expand="statuses",
+    )

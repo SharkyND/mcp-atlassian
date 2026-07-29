@@ -48,13 +48,12 @@ _SUMMARIZABLE_EXTENSIONS: frozenset[str] = frozenset(
     }
 )
 
-# Image extensions — returned as viewable image content by
-# ``jira_get_attachment_images`` so a vision-capable client model can see them.
+# Image extensions used by jira_get_attachment_images.
 _IMAGE_EXTENSIONS: frozenset[str] = frozenset(
     {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".tif", ".webp"}
 )
 
-# Image file extension -> format string accepted by MCP ImageContent / vision models.
+# Image file extension -> format string accepted by MCP ImageContent.
 _IMAGE_FORMAT_MAP: dict[str, str] = {
     ".jpg": "jpeg",
     ".jpeg": "jpeg",
@@ -72,13 +71,7 @@ def _summarize_content_with_markitdown(
     filename: str,
     md_instance: Any | None = None,
 ) -> str:
-    """Convert raw attachment bytes to Markdown text using MarkItDown.
-
-    Supports PDFs (text extraction), images (EXIF metadata), and Office
-    documents.  Raises ``ImportError`` if ``markitdown`` is not installed.
-    Pass a pre-built ``md_instance`` to avoid re-initialization overhead when
-    processing multiple files.
-    """
+    """Convert raw attachment bytes to Markdown text using MarkItDown."""
     if md_instance is None:
         try:
             from markitdown import MarkItDown  # type: ignore[import-untyped]
@@ -488,13 +481,13 @@ async def download_attachments(
     """Download attachments from a Jira issue to disk, MCP resources, or both.
 
     When resource caching is enabled, each attachment is immediately available in the MCP
-    resource browser via a static URI — no cache key required:
+    resource browser via a static URI with no cache key required:
 
         jira://attachments/{issue_key}/{filename}
 
     Examples:
-        jira://attachments/JDQU-2322/desktop-screenshot-1.png   ← renders as image
-        jira://attachments/JDQU-2322/SPyDR%20Metadata.txt       ← opens as text
+        jira://attachments/JDQU-2322/desktop-screenshot-1.png  renders as image
+        jira://attachments/JDQU-2322/SPyDR%20Metadata.txt      opens as text
 
     Cached resources are valid for 10 minutes. Re-run this tool to refresh.
 
@@ -530,7 +523,7 @@ async def download_attachments(
     if should_return_content:
         # Dynamically register a concrete static MCP resource URI for every
         # downloaded attachment so they appear as direct clickable links in the
-        # VS Code MCP resource browser — no manual input required.
+        # VS Code MCP resource browser with no manual input required.
         for item in result.get("downloaded", []):
             filename = item.get("filename")
             if filename:
@@ -1842,7 +1835,7 @@ def _register_static_attachment_resource(issue_key: str, filename: str) -> None:
     """Dynamically register a concrete (non-template) MCP resource URI.
 
     Calling ``jira_mcp.add_resource_fn()`` at runtime creates a static entry in
-    the MCP resource list, which VS Code shows as a direct clickable link — no
+    the MCP resource list, which VS Code shows as a direct clickable link with no
     manual text input required by the user.
 
     The registered function checks the live cache, so it returns a clear error
@@ -1872,7 +1865,7 @@ def _register_static_attachment_resource(issue_key: str, filename: str) -> None:
     resource = FunctionResource.from_function(
         _resource_fn,
         uri=uri,
-        name=f"{issue_key} — {filename}",
+        name=f"{issue_key} - {filename}",
         description=f"Jira attachment '{filename}' from issue {issue_key}",
         mime_type=mime_type,
     )
@@ -1902,7 +1895,7 @@ def get_attachment_by_issue_resource(issue_key: str, filename: str) -> bytes:
     Serve a cached Jira attachment directly by issue key and filename.
 
     These static URIs are auto-generated when download_attachments is called and
-    are valid for 10 minutes.  No cache key is required — just use the issue key
+    are valid for 10 minutes. No cache key is required; just use the issue key
     and the original filename (URL-encoded).
 
     Example URIs (rendered automatically in VS Code / MCP clients):
@@ -1914,7 +1907,7 @@ def get_attachment_by_issue_resource(issue_key: str, filename: str) -> bytes:
         filename: URL-encoded attachment filename (e.g., 'desktop-screenshot-1.png')
 
     Returns:
-        Raw binary content — images render inline in MCP clients that support it.
+        Raw binary content. Images render inline in MCP clients that support it.
 
     Raises:
         ValueError: If no matching entry is found or it has expired (10-min TTL).
@@ -1990,7 +1983,7 @@ async def save_attachment_to_disk(
 ) -> str:
     """Save a cached attachment to the MCP SERVER's filesystem.
 
-    ⚠️ WARNING: This saves to the SERVER's filesystem, NOT your local client machine!
+        WARNING: This saves to the SERVER's filesystem, NOT your local client machine!
 
     Use cases:
     - MCP server is running locally on your machine
@@ -2115,7 +2108,7 @@ async def list_cached_attachments(ctx: Context) -> str:
         "usage_instructions": {
             "open_in_browser": "Click static_resource_uri in the MCP resource browser",
             "images": "PNG/JPEG files render inline automatically",
-            "expiry": "Resources expire after 10 minutes — re-run download_attachments to refresh",
+            "expiry": "Resources expire after 10 minutes; re-run download_attachments to refresh",
         },
     }
 
@@ -2194,9 +2187,9 @@ async def construct_upload_endpoint(ctx: Context) -> str:
                 "5. Call jira_upload_attachment with issue_key and those uri value(s)."
             ),
             "path_with_spaces_note": (
-                "Windows PowerShell — outer single quotes, path in double quotes: "
+                "Windows PowerShell: outer single quotes, path in double quotes: "
                 "-F 'file=@\"C:\\My Docs\\file.pdf\"'  |  "
-                "Linux/macOS bash — path in single quotes inside double quotes: "
+                "Linux/macOS bash: path in single quotes inside double quotes: "
                 "-F \"file=@'/my docs/file.pdf'\""
             ),
         },
@@ -2301,7 +2294,7 @@ async def jira_upload_attachment(
     and POSTing files to /upload).
 
     Each upload:// URI is resolved from the server-side staging store, then
-    uploaded directly to Jira via the REST API — no base64, no context-window
+    uploaded directly to Jira via the REST API with no base64 and no context-window
     overhead.
 
     Staged files are removed from the store after a successful upload.
@@ -2390,6 +2383,317 @@ async def jira_upload_attachment(
     )
 
 
+# ---------------------------------------------------------------------------
+# Workflow tools
+# ---------------------------------------------------------------------------
+
+
+@jira_mcp.tool(tags={"jira", "read"})
+async def get_all_workflows(ctx: Context) -> str:
+    """Get all workflows available in Jira (requires admin permissions on Server/DC).
+
+    Returns basic information about each workflow including its name, description,
+    and whether it is a default workflow.
+
+    Args:
+        ctx: The FastMCP context.
+
+    Returns:
+        JSON string representing a list of workflow objects.
+
+    Raises:
+        ValueError: If the Jira client is not configured or available.
+    """
+    jira = await get_jira_fetcher(ctx)
+    try:
+        workflows = jira.get_all_workflows()
+        return json.dumps(workflows, indent=2, ensure_ascii=False)
+    except MCPAtlassianAuthenticationError as e:
+        return json.dumps(
+            {"success": False, "error": f"Authentication/Permission Error: {e}"},
+            indent=2,
+        )
+    except Exception as e:
+        logger.error(f"Error in get_all_workflows: {e}", exc_info=True)
+        return json.dumps({"success": False, "error": str(e)}, indent=2)
+
+
+@jira_mcp.tool(tags={"jira", "read"})
+async def get_workflows_paginated(
+    ctx: Context,
+    workflow_name: Annotated[
+        str | None,
+        Field(description="(Optional) Filter by workflow name", default=None),
+    ] = None,
+    expand: Annotated[
+        str | None,
+        Field(
+            description=(
+                "(Optional) Comma-separated list of fields to expand. Options:\n"
+                "- 'transitions': include transitions\n"
+                "- 'transitions.rules': include transition rules\n"
+                "- 'statuses': include statuses for each workflow\n"
+                "- 'statuses.properties': include status properties (e.g. "
+                "jira.permission.edit.denied, jira.issue.editable)"
+            ),
+            default=None,
+        ),
+    ] = None,
+    start_at: Annotated[
+        int,
+        Field(description="Starting index for pagination (0-based)", default=0, ge=0),
+    ] = 0,
+    max_results: Annotated[
+        int,
+        Field(description="Maximum number of results", default=50, ge=1, le=200),
+    ] = 50,
+) -> str:
+    """Search and list Jira workflows with optional expansion of statuses and transitions.
+
+    Use ``expand='statuses,statuses.properties'`` to retrieve the workflow status
+    properties that control issue editability and link permissions (e.g.
+    ``jira.permission.edit.denied``, ``jira.issue.editable``,
+    ``jira.permission.link.denied``).
+
+    Args:
+        ctx: The FastMCP context.
+        workflow_name: Optional filter by workflow name.
+        expand: Comma-separated fields to expand.
+        start_at: Pagination offset.
+        max_results: Maximum results to return.
+
+    Returns:
+        JSON string with paginated workflow results.
+
+    Raises:
+        ValueError: If the Jira client is not configured or available.
+    """
+    jira = await get_jira_fetcher(ctx)
+    try:
+        result = jira.get_workflows_paginated(
+            start_at=start_at,
+            max_results=max_results,
+            workflow_name=workflow_name,
+            expand=expand,
+        )
+        return json.dumps(result, indent=2, ensure_ascii=False)
+    except MCPAtlassianAuthenticationError as e:
+        return json.dumps(
+            {"success": False, "error": f"Authentication/Permission Error: {e}"},
+            indent=2,
+        )
+    except Exception as e:
+        logger.error(f"Error in get_workflows_paginated: {e}", exc_info=True)
+        return json.dumps({"success": False, "error": str(e)}, indent=2)
+
+
+@jira_mcp.tool(tags={"jira", "read"})
+async def get_workflow_paginated(
+    ctx: Context,
+    workflow_name: Annotated[
+        str | None,
+        Field(description="(Optional) Filter by workflow name", default=None),
+    ] = None,
+    expand: Annotated[
+        str | None,
+        Field(
+            description=(
+                "(Optional) Comma-separated list of fields to expand. Options:\n"
+                "- 'transitions': include transitions\n"
+                "- 'transitions.rules': include transition rules\n"
+                "- 'statuses': include statuses for each workflow\n"
+                "- 'statuses.properties': include status properties (e.g. "
+                "jira.permission.edit.denied, jira.issue.editable)"
+            ),
+            default=None,
+        ),
+    ] = None,
+    start_at: Annotated[
+        int,
+        Field(description="Starting index for pagination (0-based)", default=0, ge=0),
+    ] = 0,
+    max_results: Annotated[
+        int,
+        Field(description="Maximum number of results", default=50, ge=1, le=200),
+    ] = 50,
+) -> str:
+    """Backward-compatible alias for ``jira_get_workflows_paginated``."""
+    return await get_workflows_paginated.fn(
+        ctx,
+        workflow_name=workflow_name,
+        expand=expand,
+        start_at=start_at,
+        max_results=max_results,
+    )
+
+
+@jira_mcp.tool(tags={"jira", "read"})
+async def get_workflow_properties(
+    ctx: Context,
+    workflow_name: Annotated[str, Field(description="The exact name of the workflow")],
+    transition_id: Annotated[
+        int,
+        Field(description="Transition ID within the workflow"),
+    ],
+    workflow_mode: Annotated[
+        str,
+        Field(
+            description="Workflow mode: 'live' (default) or 'draft'",
+            default="live",
+        ),
+    ] = "live",
+    key: Annotated[
+        str | None,
+        Field(description="(Optional) Property key filter", default=None),
+    ] = None,
+) -> str:
+    """Get properties set on a Jira workflow transition.
+
+    Jira Data Center exposes transition properties via
+    ``/rest/api/2/workflow/transitions/{transitionId}/properties``.
+
+    Args:
+        ctx: The FastMCP context.
+        workflow_name: The exact name of the workflow.
+        transition_id: Transition ID within the workflow.
+        workflow_mode: 'live' or 'draft'.
+        key: Optional property key filter.
+
+    Returns:
+        JSON string representing a list of ``{"key": ..., "value": ...}`` property objects.
+
+    Raises:
+        ValueError: If the Jira client is not configured or available.
+    """
+    jira = await get_jira_fetcher(ctx)
+    try:
+        props = jira.get_workflow_properties(
+            workflow_name=workflow_name,
+            transition_id=transition_id,
+            workflow_mode=workflow_mode,
+            key=key,
+        )
+        return json.dumps(props, indent=2, ensure_ascii=False)
+    except MCPAtlassianAuthenticationError as e:
+        return json.dumps(
+            {"success": False, "error": f"Authentication/Permission Error: {e}"},
+            indent=2,
+        )
+    except Exception as e:
+        logger.error(f"Error in get_workflow_properties: {e}", exc_info=True)
+        return json.dumps({"success": False, "error": str(e)}, indent=2)
+
+
+@jira_mcp.tool(tags={"jira", "read"})
+async def get_workflow_status_properties(
+    ctx: Context,
+    workflow_name: Annotated[
+        str | None,
+        Field(
+            description="(Optional) Filter results to a specific workflow by name",
+            default=None,
+        ),
+    ] = None,
+) -> str:
+    """Get status-level properties for Jira workflows.
+
+    Status properties control what users can do when an issue is in a given
+    status.  Common property keys include:
+
+    | Key | Meaning |
+    |---|---|
+    | ``jira.issue.editable`` | ``"true"`` / ``"false"`` means the issue can be edited |
+    | ``jira.permission.edit.denied`` | ``"true"`` blocks the *Edit Issue* action |
+    | ``jira.permission.link.denied`` | ``"true"`` blocks the *Link Issue* action |
+    | ``jira.permission.attach.denied`` | ``"true"`` blocks file attachments |
+    | ``jira.permission.comment.denied`` | ``"true"`` blocks adding comments |
+    | ``jira.permission.assign.denied`` | ``"true"`` blocks re-assignment |
+    | ``jira.permission.resolve.denied`` | ``"true"`` blocks resolving the issue |
+    | ``jira.permission.delete.denied`` | ``"true"`` blocks deletion |
+    | ``jira.permission.worklog.denied`` | ``"true"`` blocks worklog entries |
+
+    Args:
+        ctx: The FastMCP context.
+        workflow_name: Optional workflow name to filter results.
+
+    Returns:
+        JSON string listing workflows with their statuses and status properties.
+
+    Raises:
+        ValueError: If the Jira client is not configured or available.
+    """
+    jira = await get_jira_fetcher(ctx)
+    try:
+        result = jira.get_workflow_status_properties(workflow_name=workflow_name)
+        return json.dumps(result, indent=2, ensure_ascii=False)
+    except MCPAtlassianAuthenticationError as e:
+        return json.dumps(
+            {"success": False, "error": f"Authentication/Permission Error: {e}"},
+            indent=2,
+        )
+    except Exception as e:
+        logger.error(f"Error in get_workflow_status_properties: {e}", exc_info=True)
+        return json.dumps({"success": False, "error": str(e)}, indent=2)
+
+
+@jira_mcp.tool(tags={"jira", "read"})
+async def check_issue_workflow_permissions(
+    ctx: Context,
+    issue_key: Annotated[str, Field(description="Jira issue key (e.g., 'PROJ-123')")],
+) -> str:
+    """Check workflow-based permission properties for a Jira issue's current status.
+
+    Determines whether the issue can be edited, linked, commented on, etc. based
+    on the workflow status properties configured for the issue's *current* status.
+
+        The response includes:
+        - ``current_status``: the name of the issue's current workflow status
+        - ``status_properties``: all status property key/value pairs found
+        - ``is_editable``: ``true`` / ``false`` when properties are available,
+            or ``null`` when status properties are missing
+        - ``evaluation_status``: one of:
+            ``"determined_workflow_properties"``, ``"determined_permissions_api"``,
+            ``"missing_status_properties"``
+        - ``denied_permissions``: list of ``jira.permission.*`` keys that are set to ``"true"``
+            (i.e. the corresponding actions are denied)
+
+    Common denied permission keys:
+    - ``jira.permission.edit.denied``
+    - ``jira.permission.link.denied``
+    - ``jira.permission.attach.denied``
+    - ``jira.permission.comment.denied``
+    - ``jira.permission.assign.denied``
+    - ``jira.permission.resolve.denied``
+    - ``jira.permission.delete.denied``
+    - ``jira.permission.worklog.denied``
+
+    Args:
+        ctx: The FastMCP context.
+        issue_key: Jira issue key.
+
+    Returns:
+        JSON string with issue editability and permission details.
+
+    Raises:
+        ValueError: If the Jira client is not configured or available.
+    """
+    jira = await get_jira_fetcher(ctx)
+    try:
+        result = jira.check_issue_workflow_permissions(issue_key=issue_key)
+        return json.dumps(result, indent=2, ensure_ascii=False)
+    except MCPAtlassianAuthenticationError as e:
+        return json.dumps(
+            {"success": False, "error": f"Authentication/Permission Error: {e}"},
+            indent=2,
+        )
+    except Exception as e:
+        logger.error(
+            f"Error in check_issue_workflow_permissions for {issue_key}: {e}",
+            exc_info=True,
+        )
+        return json.dumps({"success": False, "error": str(e)}, indent=2)
+
+
 _ATTACHMENT_DOWNLOAD_TIMEOUT = 60  # seconds per attachment download
 
 # Maximum bytes to download per attachment. Prevents memory exhaustion from
@@ -2436,7 +2740,7 @@ def _build_attachment_summary(
     """Process a single Jira attachment dict into a summary entry.
 
     Returns:
-        (skip_filename, summary_dict) — exactly one of the two is *not* ``None``.
+        (skip_filename, summary_dict): exactly one of the two is *not* ``None``.
         ``skip_filename`` is set when the file should be skipped (unsupported type
         or filtered out).  ``summary_dict`` is set for processed / failed files.
 
@@ -2482,7 +2786,7 @@ def _build_attachment_summary(
     if max_chars and len(markdown_text) > max_chars:
         markdown_text = (
             markdown_text[:max_chars]
-            + f"\n\n[...truncated — {len(markdown_text):,} chars total]"
+            + f"\n\n[...truncated: {len(markdown_text):,} chars total]"
         )
     return None, {**base_info, "success": True, "markdown_content": markdown_text}
 
@@ -2522,19 +2826,19 @@ async def summarize_attachments(
 
     Uses Microsoft MarkItDown to extract readable content from each supported attachment:
 
-    • **PDF**          → full text extracted via pdfminer
-    • **Images**       → EXIF metadata (for a visual description use jira_get_attachment_images)
-    • **DOCX / PPTX / XLSX** → document text and structure as Markdown
-    • **CSV / JSON / XML**   → raw content rendered as Markdown
+        **PDF**: full text extracted via pdfminer
+        **Images**: EXIF metadata (for a visual description use jira_get_attachment_images)
+        **DOCX / PPTX / XLSX**: document text and structure as Markdown
+        **CSV / JSON / XML**: raw content rendered as Markdown
 
     Unsupported file types (e.g., zip, mp4, exe) are skipped and listed under
     ``"skipped"`` in the response.
 
-    Requires the ``markitdown`` package — add it with:
+    Requires the ``markitdown`` package. Add it with:
         uv add 'markitdown[pdf]'
 
     To have a vision-capable model *see* image attachments (screenshots, diagrams,
-    charts), use ``jira_get_attachment_images`` instead — it returns the raw images
+    charts), use ``jira_get_attachment_images`` instead. It returns the raw images
     as content blocks your model can view directly.
 
     Args:
@@ -2689,12 +2993,12 @@ async def get_attachment_images(
     """Fetch image attachments from a Jira issue as viewable image content.
 
     Returns each image as an MCP image content block so a vision-capable model can
-    see and describe it directly — no MarkItDown text extraction and no MCP
+    see and describe it directly with no MarkItDown text extraction and no MCP
     sampling required. Works with any client whose own model supports images
     (e.g., Claude, GPT-4o, Bedrock vision models).
 
     Non-image attachments are ignored; use ``jira_summarize_attachments`` for
-    documents (PDF / DOCX / XLSX / CSV / …).
+    documents (PDF / DOCX / XLSX / CSV / etc.).
 
     Args:
         ctx: The FastMCP context.

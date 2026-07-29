@@ -1012,6 +1012,13 @@ A per-product header always takes precedence over the global header for that pro
 - `jira_summarize_attachments`: Extract readable text from PDF/Office/CSV/JSON attachments (via Microsoft MarkItDown)
 - `jira_get_attachment_images`: Fetch image attachments as viewable image content so a vision-capable client model can describe them
 
+**Workflow Tools**
+
+- `jira_get_all_workflows`: List all workflows (requires admin on Server/DC)
+- `jira_get_workflows_paginated`: Search/list workflows with optional expansion of statuses and transition details (Cloud)
+- `jira_get_workflow_status_properties`: Retrieve status-level properties for workflows — including `jira.permission.edit.denied`, `jira.issue.editable`, `jira.permission.link.denied`, and other permission flags that control issue actions
+- `jira_check_issue_workflow_permissions`: For a specific issue, inspect its current workflow-status properties and return `is_editable`, `denied_permissions` list, and the full `status_properties` dict
+
 #### Confluence Tools
 
 - `confluence_search`: Search Confluence content using CQL
@@ -1072,13 +1079,13 @@ A per-product header always takes precedence over the global header for that pro
 |           | `jira_get_user_profile`       |                                |                                    | `get_tests_with_test_plan`        |
 |           | `jira_download_attachments`   |                                |                                    | `get_test_executions_with_test_plan` |
 |           | `jira_get_project_versions`   |                                |                                    | `get_tests_with_test_execution`   |
-|           |                               |                                |                                    | `get_test_run`                    |
-|           | `jira_summarize_attachments`  |                                |                                    | `get_test_run_assignee`           |
-|           | `jira_get_attachment_images`  |                                |                                    | `get_test_run_iteration`          |
-|           |                               |                                |                                    | `get_test_run_status`             |
-|           |                               |                                |                                    | `get_test_run_defects`            |
-|           |                               |                                |                                    | `get_test_run_comment`            |
-|           |                               |                                |                                    | `get_test_run_steps`              |
+|           | `jira_get_all_workflows`      |                                |                                    | `get_test_run`                    |
+|           | `jira_get_workflows_paginated`|                                |                                    | `get_test_run_assignee`           |
+|           |                               |                                |                                    | `get_test_run_iteration`          |
+|           | `jira_get_workflow_status_properties` |                         |                                    | `get_test_run_status`             |
+|           | `jira_check_issue_workflow_permissions` |                       |                                    | `get_test_run_defects`            |
+|           | `jira_summarize_attachments`  |                                |                                    | `get_test_run_comment`            |
+|           | `jira_get_attachment_images`  |                                |                                    | `get_test_run_steps`              |
 |           |                               |                                |                                    |                                   |
 |           |                               |                                |                                    |                                   |
 |           |                               |                                |                                    |                                   |
