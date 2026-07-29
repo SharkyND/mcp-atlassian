@@ -163,6 +163,75 @@ async def get_repository_info(
         return json.dumps(error_result, indent=2)
 
 
+@bitbucket_mcp.tool(tags={"bitbucket", "write"})
+@check_write_access
+async def create_repository(
+    ctx: Context,
+    workspace: Annotated[
+        str,
+        Field(description="Workspace name (Cloud) or project key (Server/DC)"),
+    ],
+    repo_slug: Annotated[
+        str,
+        Field(description="Repository name/slug to create"),
+    ],
+    is_private: Annotated[
+        bool,
+        Field(description="Whether the repository should be private"),
+    ] = True,
+    forkable: Annotated[
+        bool,
+        Field(description="Whether the repository can be forked"),
+    ] = False,
+) -> str:
+    """
+    Create a new repository in a workspace/project.
+
+    Args:
+        ctx: The MCP context.
+        workspace: Workspace name (Cloud) or project key (Server/DC).
+        repo_slug: Repository name/slug to create.
+        is_private: Whether the repository should be private (default: True).
+        forkable: Whether the repository can be forked (default: False).
+
+    Returns:
+        JSON string containing the created repository details.
+
+    Raises:
+        ValueError: If the Bitbucket client is not configured or available.
+    """
+    try:
+        bitbucket = await get_bitbucket_fetcher(ctx)
+        repo = bitbucket.create_repository(
+            workspace, repo_slug, is_private=is_private, forkable=forkable
+        )
+        return json.dumps(
+            {
+                "success": True,
+                "repository": repo.model_dump(mode="json", serialize_as_any=True),
+            },
+            indent=2,
+        )
+    except Exception as e:
+        log_level = logging.ERROR
+        if isinstance(e, MCPAtlassianAuthenticationError):
+            error_message = f"Authentication/Permission Error: {str(e)}"
+        elif isinstance(e, OSError | HTTPError):
+            error_message = f"Network or API Error: {str(e)}"
+        elif isinstance(e, ValueError):
+            error_message = f"Configuration Error: {str(e)}"
+        else:
+            error_message = f"An unexpected error occurred while creating repository {repo_slug} in {workspace}."
+            logger.exception("Unexpected error in bitbucket_create_repository:")
+
+        error_result = {
+            "success": False,
+            "error": error_message,
+        }
+        logger.log(log_level, f"bitbucket_create_repository failed: {error_message}")
+        return json.dumps(error_result, indent=2)
+
+
 @bitbucket_mcp.tool(tags={"bitbucket", "read"})
 async def list_branches(
     ctx: Context,
