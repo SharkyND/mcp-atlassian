@@ -6,6 +6,7 @@ from typing import Annotated
 
 from fastmcp import Context, FastMCP
 from pydantic import Field
+from requests.exceptions import HTTPError
 
 from mcp_atlassian.servers.dependencies import get_xray_fetcher
 from mcp_atlassian.utils.decorators import check_write_access
@@ -289,27 +290,51 @@ async def get_test_executions(
     test_key: Annotated[
         str,
         Field(
-            description="The test key to retrieve test executions for (e.g., 'TEST-001')"
+            description=(
+                "The issue key of a Test issue to retrieve its associated test executions "
+                "(e.g., 'TEST-001'). NOTE: this must be a Test issue, NOT a Test Execution "
+                "issue. To get results inside a Test Execution, use get_test_execution_results."
+            )
         ),
     ],
 ) -> str:
     """
     Retrieve test executions of a test.
 
+    This tool requires ``test_key`` to be a **Test** issue (Xray issue type
+    ``Test``).  If you pass a Test Execution key you will receive a 400 error
+    from the Xray API.  To inspect the results *within* a Test Execution, use
+    ``get_test_execution_results`` instead.
+
     Args:
         ctx: The FastMCP context.
-        test_key: The test key to retrieve test executions for.
+        test_key: The key of a Test issue whose executions should be listed.
 
     Returns:
         JSON string representing the test executions.
 
     Raises:
-        ValueError: If the Xray client is not configured or available.
+        ValueError: If the Xray client is not configured, or if the supplied
+            key does not belong to a Test issue.
     """
     xray = await get_xray_fetcher(ctx)
     try:
         result = xray.xray.get_test_executions(test_key)
         return json.dumps(result, indent=2, default=str)
+    except HTTPError as e:
+        if e.response is not None and e.response.status_code == 400:
+            msg = (
+                f"400 Bad Request for '{test_key}': the Xray API rejected this key. "
+                f"'{test_key}' is likely a Test Execution issue, not a Test issue. "
+                f"To get the test results inside a Test Execution, call "
+                f"'get_test_execution_results' with execution_key='{test_key}'. "
+                f"To get evidences, call 'get_test_execution_evidences' with "
+                f"execution_key='{test_key}'."
+            )
+            logger.error(msg)
+            raise ValueError(msg) from e
+        logger.error(f"Error retrieving test executions for {test_key}: {e}")
+        raise
     except Exception as e:
         logger.error(f"Error retrieving test executions for {test_key}: {e}")
         raise
@@ -1676,4 +1701,362 @@ async def get_test_run_steps(
         return json.dumps(result, indent=2, default=str)
     except Exception as e:
         logger.error(f"Error retrieving steps for test run {test_run_id}: {e}")
+        raise
+
+
+# Test Results Tools
+
+
+@xray_mcp.tool(tags={"xray", "read"})
+async def get_test_runs_in_context(
+    ctx: Context,
+    test_exec_key: Annotated[
+        str | None,
+        Field(
+            description="The test execution key to retrieve runs from (e.g., 'EXEC-001')",
+            default=None,
+        ),
+    ] = None,
+    test_key: Annotated[
+        str | None,
+        Field(
+            description="Filter by a specific test key within the execution (e.g., 'TEST-001'). "
+            "Only valid when test_exec_key is also provided.",
+            default=None,
+        ),
+    ] = None,
+    test_plan_key: Annotated[
+        str | None,
+        Field(
+            description="The test plan key to retrieve runs from (e.g., 'PLAN-001')",
+            default=None,
+        ),
+    ] = None,
+    saved_filter_id: Annotated[
+        str | None,
+        Field(
+            description="A Jira JQL filter ID or name that returns test execution issues",
+            default=None,
+        ),
+    ] = None,
+    include_test_fields: Annotated[
+        str | None,
+        Field(
+            description="Comma-separated list of custom test-issue fields to include in the response",
+            default=None,
+        ),
+    ] = None,
+    page: Annotated[
+        int,
+        Field(description="Page number for pagination (default: 1)", default=1),
+    ] = 1,
+    limit: Annotated[
+        int,
+        Field(
+            description="Maximum number of test runs to return (default: 50)",
+            default=50,
+        ),
+    ] = 50,
+) -> str:
+    """
+    Retrieve all test runs (with their results) from a given context.
+
+    Supports three mutually exclusive contexts:
+    - A specific test execution (test_exec_key), optionally narrowed to one test.
+    - A test plan (test_plan_key).
+    - A saved JQL filter returning test execution issues (saved_filter_id).
+
+    Each returned test run includes its result status, steps summary, defects,
+    and other execution metadata.
+
+    Args:
+        ctx: The FastMCP context.
+        test_exec_key: Optional test execution key.
+        test_key: Optional test key (only with test_exec_key).
+        test_plan_key: Optional test plan key.
+        saved_filter_id: Optional saved JQL filter ID or name.
+        include_test_fields: Optional comma-separated custom field names.
+        page: Page number for pagination.
+        limit: Maximum number of results per page.
+
+    Returns:
+        JSON string representing the test runs with result data.
+
+    Raises:
+        ValueError: If the Xray client is not configured or available.
+    """
+    xray = await get_xray_fetcher(ctx)
+    try:
+        result = xray.xray.get_test_runs_in_context(
+            test_exec_key=test_exec_key,
+            test_key=test_key,
+            test_plan_key=test_plan_key,
+            include_test_fields=include_test_fields,
+            saved_filter_id=saved_filter_id,
+            limit=limit,
+            page=page,
+        )
+        return json.dumps(result, indent=2, default=str)
+    except Exception as e:
+        logger.error(f"Error retrieving test runs in context: {e}")
+        raise
+
+
+@xray_mcp.tool(tags={"xray", "read"})
+async def get_test_execution_results(
+    ctx: Context,
+    execution_key: Annotated[
+        str,
+        Field(
+            description="The test execution key to retrieve results for (e.g., 'EXEC-001')"
+        ),
+    ],
+    page: Annotated[
+        int,
+        Field(description="Page number for pagination (default: 1)", default=1),
+    ] = 1,
+    limit: Annotated[
+        int,
+        Field(
+            description="Maximum number of results per page (default: 50)", default=50
+        ),
+    ] = 50,
+) -> str:
+    """
+    Retrieve enriched test results for a test execution.
+
+    Returns each test in the execution with its run status, assignee, linked
+    defects, run ID, start time, and comment in a structured summary format.
+
+    Args:
+        ctx: The FastMCP context.
+        execution_key: The test execution key.
+        page: Page number for pagination.
+        limit: Maximum number of results per page.
+
+    Returns:
+        JSON string with execution_key, page, limit, total count, and a
+        ``results`` list where each entry contains test_key, run_id, status,
+        assignee, defects, started_on, and comment.
+
+    Raises:
+        ValueError: If the Xray client is not configured or available.
+    """
+    xray = await get_xray_fetcher(ctx)
+    try:
+        result = xray.get_test_execution_results(
+            execution_key=execution_key,
+            page=page,
+            limit=limit,
+        )
+        return json.dumps(result, indent=2, default=str)
+    except Exception as e:
+        logger.error(
+            f"Error retrieving test results for execution {execution_key}: {e}"
+        )
+        raise
+
+
+@xray_mcp.tool(tags={"xray", "read"})
+async def get_test_run_full_results(
+    ctx: Context,
+    test_run_id: Annotated[
+        int,
+        Field(description="The numeric ID of the test run"),
+    ],
+) -> str:
+    """
+    Retrieve comprehensive results for a single test run.
+
+    Aggregates the overall status, assignee, comment, linked defects, and
+    step-level results into one structured response. Useful for a deep-dive
+    view of how a specific test was executed.
+
+    Args:
+        ctx: The FastMCP context.
+        test_run_id: The numeric test run ID.
+
+    Returns:
+        JSON string containing run_id, status, assignee, comment, defects,
+        steps (with per-step status and actual results), and the full raw
+        details object from the Xray API.
+
+    Raises:
+        ValueError: If the Xray client is not configured or available.
+    """
+    xray = await get_xray_fetcher(ctx)
+    try:
+        result = xray.get_test_run_full_results(test_run_id=test_run_id)
+        return json.dumps(result, indent=2, default=str)
+    except Exception as e:
+        logger.error(f"Error retrieving full results for test run {test_run_id}: {e}")
+        raise
+
+
+# Evidence / Attachment Tools
+
+
+@xray_mcp.tool(tags={"xray", "read"})
+async def get_test_run_evidences(
+    ctx: Context,
+    test_run_id: Annotated[
+        int,
+        Field(description="The numeric ID of the test run"),
+    ],
+) -> str:
+    """
+    List all evidence (attachment) metadata for a test run.
+
+    Returns the file name, size, content type, URL, and creation date for
+    every evidence file attached to the specified test run. Use this to
+    discover available attachments before downloading them.
+
+    Args:
+        ctx: The FastMCP context.
+        test_run_id: The numeric test run ID.
+
+    Returns:
+        JSON array of evidence objects. Each object contains:
+        ``id``, ``fileName``, ``fileSize``, ``fileURL``,
+        ``contentType``, and ``created``.
+
+    Raises:
+        ValueError: If the Xray client is not configured or available.
+    """
+    xray = await get_xray_fetcher(ctx)
+    try:
+        result = xray.get_test_run_evidences(test_run_id=test_run_id)
+        return json.dumps(result, indent=2, default=str)
+    except Exception as e:
+        logger.error(f"Error retrieving evidences for test run {test_run_id}: {e}")
+        raise
+
+
+@xray_mcp.tool(tags={"xray", "read"})
+async def get_test_execution_evidences(
+    ctx: Context,
+    execution_key: Annotated[
+        str,
+        Field(
+            description="The test execution key to retrieve evidences for (e.g., 'EXEC-001')"
+        ),
+    ],
+    page: Annotated[
+        int,
+        Field(description="Page number for pagination (default: 1)", default=1),
+    ] = 1,
+    limit: Annotated[
+        int,
+        Field(
+            description="Maximum number of test runs to inspect per page (default: 50)",
+            default=50,
+        ),
+    ] = 50,
+) -> str:
+    """
+    Retrieve all evidence attachments across every test run in a test execution.
+
+    Iterates over every test run in the given execution and collects the
+    evidence metadata (file name, size, URL, etc.) from each run into a
+    single aggregated response. Useful for auditing all attachments produced
+    during an execution cycle.
+
+    Args:
+        ctx: The FastMCP context.
+        execution_key: The test execution key.
+        page: Page number for pagination.
+        limit: Maximum number of test runs to inspect per page.
+
+    Returns:
+        JSON object with ``execution_key``, ``total_runs``,
+        ``total_evidences``, and ``evidences`` — a list where each entry
+        contains ``run_id``, ``test_key``, and ``attachments``.
+
+    Raises:
+        ValueError: If the Xray client is not configured or available.
+    """
+    xray = await get_xray_fetcher(ctx)
+    try:
+        result = xray.get_test_execution_evidences(
+            execution_key=execution_key,
+            page=page,
+            limit=limit,
+        )
+        return json.dumps(result, indent=2, default=str)
+    except Exception as e:
+        logger.error(f"Error retrieving evidences for execution {execution_key}: {e}")
+        raise
+
+
+@xray_mcp.tool(tags={"xray", "read"})
+async def download_test_run_evidence(
+    ctx: Context,
+    test_run_id: Annotated[
+        int,
+        Field(description="The numeric ID of the test run"),
+    ],
+    attachment_id: Annotated[
+        int,
+        Field(description="The numeric ID of the evidence attachment"),
+    ],
+    target_path: Annotated[
+        str | None,
+        Field(
+            description="Optional filesystem path to save the file (e.g., 'C:/Downloads/screenshot.png'). "
+            "When omitted the file content is returned as a Base64 string.",
+            default=None,
+        ),
+    ] = None,
+    file_url: Annotated[
+        str | None,
+        Field(
+            description="Optional direct download URL for the evidence file "
+            "(the 'fileURL' field from get_test_execution_evidences or get_test_run_evidences). "
+            "Provide this to bypass the Xray attachment endpoint when it returns a 500 error.",
+            default=None,
+        ),
+    ] = None,
+) -> str:
+    """
+    Download a specific evidence file from a test run.
+
+    Fetches the raw binary content of the evidence attachment. The file can
+    either be saved directly to disk (when ``target_path`` is provided) or
+    returned as a Base64-encoded string suitable for further processing.
+
+    If the Xray attachment endpoint returns a 500 error (a known server-side
+    bug in some Xray versions), the tool automatically falls back to the
+    ``fileURL`` from the evidence metadata. You can also supply ``file_url``
+    directly (from ``get_test_execution_evidences``) to skip the broken
+    endpoint entirely.
+
+    Args:
+        ctx: The FastMCP context.
+        test_run_id: The numeric test run ID.
+        attachment_id: The numeric evidence attachment ID (from ``get_test_run_evidences``).
+        target_path: Optional path to save the file on disk.
+        file_url: Optional direct URL for the evidence file (bypasses the Xray endpoint).
+
+    Returns:
+        JSON object with ``attachment_id``, ``run_id``, ``file_name``,
+        ``content_type``, ``size_bytes``, ``saved_to`` (path if saved),
+        ``content_base64`` (Base64 content if not saved to disk), and
+        ``fallback_used`` (``true`` when the fileURL fallback was used).
+
+    Raises:
+        ValueError: If the Xray client is not configured or available.
+    """
+    xray = await get_xray_fetcher(ctx)
+    try:
+        result = xray.download_test_run_evidence(
+            test_run_id=test_run_id,
+            attachment_id=attachment_id,
+            target_path=target_path,
+            file_url=file_url,
+        )
+        return json.dumps(result, indent=2, default=str)
+    except Exception as e:
+        logger.error(
+            f"Error downloading evidence {attachment_id} from test run {test_run_id}: {e}"
+        )
         raise
