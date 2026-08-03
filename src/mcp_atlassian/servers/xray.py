@@ -6,6 +6,7 @@ from typing import Annotated
 
 from fastmcp import Context, FastMCP
 from pydantic import Field
+from requests.exceptions import HTTPError
 
 from mcp_atlassian.servers.dependencies import get_xray_fetcher
 from mcp_atlassian.utils.decorators import check_write_access
@@ -213,27 +214,51 @@ async def get_test_executions(
     test_key: Annotated[
         str,
         Field(
-            description="The test key to retrieve test executions for (e.g., 'TEST-001')"
+            description=(
+                "The issue key of a Test issue to retrieve its associated test executions "
+                "(e.g., 'TEST-001'). NOTE: this must be a Test issue, NOT a Test Execution "
+                "issue. To get results inside a Test Execution, use get_test_execution_results."
+            )
         ),
     ],
 ) -> str:
     """
     Retrieve test executions of a test.
 
+    This tool requires ``test_key`` to be a **Test** issue (Xray issue type
+    ``Test``).  If you pass a Test Execution key you will receive a 400 error
+    from the Xray API.  To inspect the results *within* a Test Execution, use
+    ``get_test_execution_results`` instead.
+
     Args:
         ctx: The FastMCP context.
-        test_key: The test key to retrieve test executions for.
+        test_key: The key of a Test issue whose executions should be listed.
 
     Returns:
         JSON string representing the test executions.
 
     Raises:
-        ValueError: If the Xray client is not configured or available.
+        ValueError: If the Xray client is not configured, or if the supplied
+            key does not belong to a Test issue.
     """
     xray = await get_xray_fetcher(ctx)
     try:
         result = xray.xray.get_test_executions(test_key)
         return json.dumps(result, indent=2, default=str)
+    except HTTPError as e:
+        if e.response is not None and e.response.status_code == 400:
+            msg = (
+                f"400 Bad Request for '{test_key}': the Xray API rejected this key. "
+                f"'{test_key}' is likely a Test Execution issue, not a Test issue. "
+                f"To get the test results inside a Test Execution, call "
+                f"'get_test_execution_results' with execution_key='{test_key}'. "
+                f"To get evidences, call 'get_test_execution_evidences' with "
+                f"execution_key='{test_key}'."
+            )
+            logger.error(msg)
+            raise ValueError(msg) from e
+        logger.error(f"Error retrieving test executions for {test_key}: {e}")
+        raise
     except Exception as e:
         logger.error(f"Error retrieving test executions for {test_key}: {e}")
         raise
@@ -1901,8 +1926,17 @@ async def download_test_run_evidence(
     target_path: Annotated[
         str | None,
         Field(
-            description="Optional filesystem path to save the file (e.g., '/tmp/screenshot.png'). "
+            description="Optional filesystem path to save the file (e.g., 'C:/Downloads/screenshot.png'). "
             "When omitted the file content is returned as a Base64 string.",
+            default=None,
+        ),
+    ] = None,
+    file_url: Annotated[
+        str | None,
+        Field(
+            description="Optional direct download URL for the evidence file "
+            "(the 'fileURL' field from get_test_execution_evidences or get_test_run_evidences). "
+            "Provide this to bypass the Xray attachment endpoint when it returns a 500 error.",
             default=None,
         ),
     ] = None,
@@ -1914,16 +1948,24 @@ async def download_test_run_evidence(
     either be saved directly to disk (when ``target_path`` is provided) or
     returned as a Base64-encoded string suitable for further processing.
 
+    If the Xray attachment endpoint returns a 500 error (a known server-side
+    bug in some Xray versions), the tool automatically falls back to the
+    ``fileURL`` from the evidence metadata. You can also supply ``file_url``
+    directly (from ``get_test_execution_evidences``) to skip the broken
+    endpoint entirely.
+
     Args:
         ctx: The FastMCP context.
         test_run_id: The numeric test run ID.
         attachment_id: The numeric evidence attachment ID (from ``get_test_run_evidences``).
         target_path: Optional path to save the file on disk.
+        file_url: Optional direct URL for the evidence file (bypasses the Xray endpoint).
 
     Returns:
         JSON object with ``attachment_id``, ``run_id``, ``file_name``,
         ``content_type``, ``size_bytes``, ``saved_to`` (path if saved),
-        and ``content_base64`` (Base64 content if not saved to disk).
+        ``content_base64`` (Base64 content if not saved to disk), and
+        ``fallback_used`` (``true`` when the fileURL fallback was used).
 
     Raises:
         ValueError: If the Xray client is not configured or available.
@@ -1934,6 +1976,7 @@ async def download_test_run_evidence(
             test_run_id=test_run_id,
             attachment_id=attachment_id,
             target_path=target_path,
+            file_url=file_url,
         )
         return json.dumps(result, indent=2, default=str)
     except Exception as e:

@@ -192,22 +192,52 @@ class MixTestResults(XrayClient):
             "evidences": evidence_rows,
         }
 
+    def _resolve_evidence_file_url(
+        self, test_run_id: int, attachment_id: int
+    ) -> str | None:
+        """Look up the direct ``fileURL`` for an evidence attachment.
+
+        Fetches the evidence list for *test_run_id* and returns the ``fileURL``
+        of the entry whose ``id`` matches *attachment_id*, or ``None`` if not
+        found.
+        """
+        try:
+            evidences = self.get_test_run_evidences(test_run_id)
+            for ev in evidences:
+                if str(ev.get("id")) == str(attachment_id):
+                    return ev.get("fileURL") or ev.get("fileUrl")
+        except Exception as lookup_err:
+            logger.warning(
+                "Could not look up fileURL for attachment %s on run %s: %s",
+                attachment_id,
+                test_run_id,
+                lookup_err,
+            )
+        return None
+
     def download_test_run_evidence(
         self,
         test_run_id: int,
         attachment_id: int,
         target_path: str | None = None,
+        file_url: str | None = None,
     ) -> dict[str, Any]:
         """Download a specific evidence file from a test run.
 
-        Fetches the raw file bytes using the Xray session and either saves
-        the file to *target_path* or returns the content as a Base64 string.
+        Attempts the Xray ``testrun/{id}/attachment/{attachment_id}`` endpoint
+        first.  If the server returns a 5xx error (a known Xray server-side
+        bug), the method automatically falls back to downloading via the
+        ``fileURL`` stored in the evidence metadata (a standard Jira attachment
+        URL that requires only the PAT token, which is already in the session).
 
         Args:
             test_run_id: The numeric ID of the test run.
             attachment_id: The numeric ID of the evidence attachment.
             target_path: Optional filesystem path to save the file. When
                 ``None`` (default) the content is returned Base64-encoded.
+            file_url: Optional direct download URL for the evidence file
+                (e.g. from ``get_test_execution_evidences``).  When provided
+                this URL is used directly, skipping the Xray endpoint entirely.
 
         Returns:
             dict containing:
@@ -220,12 +250,42 @@ class MixTestResults(XrayClient):
                 - saved_to: Absolute path if saved to disk, else ``None``.
                 - content_base64: Base64-encoded file content when *target_path*
                   is ``None``, else ``None``.
+                - fallback_used: ``True`` when the Xray endpoint failed and the
+                  ``fileURL`` fallback was used.
         """
-        url = self.xray.resource_url(
-            f"testrun/{test_run_id}/attachment/{attachment_id}"
-        )
-        response = self.xray._session.get(f"{self.xray.url}/{url}", stream=True)
-        response.raise_for_status()
+        fallback_used = False
+
+        if file_url:
+            # Caller supplied a direct URL — use it straight away.
+            fallback_used = True
+            response = self.xray._session.get(file_url, stream=True)
+            response.raise_for_status()
+        else:
+            xray_url = self.xray.resource_url(
+                f"testrun/{test_run_id}/attachment/{attachment_id}"
+            )
+            response = self.xray._session.get(
+                f"{self.xray.url}/{xray_url}", stream=True
+            )
+
+            if response.status_code >= 500:
+                logger.warning(
+                    "Xray attachment endpoint returned %s for run %s / attachment %s; "
+                    "falling back to fileURL lookup.",
+                    response.status_code,
+                    test_run_id,
+                    attachment_id,
+                )
+                resolved_url = self._resolve_evidence_file_url(
+                    test_run_id, attachment_id
+                )
+                if not resolved_url:
+                    response.raise_for_status()  # re-raise the original 5xx
+                fallback_used = True
+                response = self.xray._session.get(resolved_url, stream=True)
+                response.raise_for_status()
+            else:
+                response.raise_for_status()
 
         content = response.content
         content_type = response.headers.get("Content-Type", "application/octet-stream")
@@ -266,4 +326,5 @@ class MixTestResults(XrayClient):
             "size_bytes": len(content),
             "saved_to": saved_to,
             "content_base64": content_base64,
+            "fallback_used": fallback_used,
         }
