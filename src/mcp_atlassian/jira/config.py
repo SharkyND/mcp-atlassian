@@ -45,14 +45,23 @@ class JiraConfig:
             True if this is a cloud instance (atlassian.net), False otherwise.
             Localhost URLs are always considered non-cloud (Server/Data Center).
         """
-        # Multi-Cloud OAuth mode: URL might be None, but we use api.atlassian.com
+        # OAuth with cloud_id uses api.atlassian.com which is always Cloud
         if (
             self.auth_type == "oauth"
             and self.oauth_config
             and self.oauth_config.cloud_id
         ):
-            # OAuth with cloud_id uses api.atlassian.com which is always Cloud
             return True
+
+        # DC OAuth has base_url but no cloud_id — not Cloud
+        if (
+            self.auth_type == "oauth"
+            and self.oauth_config
+            and hasattr(self.oauth_config, "base_url")
+            and self.oauth_config.base_url
+            and not self.oauth_config.cloud_id
+        ):
+            return False
 
         # For other auth types, check the URL
         return is_atlassian_cloud_url(self.url) if self.url else False
@@ -86,30 +95,36 @@ class JiraConfig:
         api_token = os.getenv("JIRA_API_TOKEN")
         personal_token = os.getenv("JIRA_PERSONAL_TOKEN")
 
-        # Check for OAuth configuration
-        oauth_config = get_oauth_config_from_env()
+        # Use the shared utility function directly
+        is_cloud = is_atlassian_cloud_url(url) if url else False
+
+        # Check for OAuth configuration (pass service info for DC detection)
+        oauth_config = get_oauth_config_from_env(service_url=url, service_type="jira")
         auth_type = None
 
-        # Use the shared utility function directly
-        is_cloud = is_atlassian_cloud_url(url)
-
         if oauth_config:
-            # OAuth is available - could be full config or minimal config for user-provided tokens
             auth_type = "oauth"
         elif is_cloud:
             if username and api_token:
                 auth_type = "basic"
             else:
-                error_msg = "Cloud authentication requires JIRA_USERNAME and JIRA_API_TOKEN, or OAuth configuration (set ATLASSIAN_OAUTH_ENABLE=true for user-provided tokens)"
+                error_msg = (
+                    "Cloud authentication requires JIRA_USERNAME and "
+                    "JIRA_API_TOKEN, or OAuth configuration "
+                    "(set ATLASSIAN_OAUTH_ENABLE=true for user-provided tokens)"
+                )
                 raise ValueError(error_msg)
         else:  # Server/Data Center
+            # Server/DC: PAT takes priority
             if personal_token:
                 auth_type = "pat"
             elif username and api_token:
-                # Allow basic auth for Server/DC too
                 auth_type = "basic"
             else:
-                error_msg = "Server/Data Center authentication requires JIRA_PERSONAL_TOKEN or JIRA_USERNAME and JIRA_API_TOKEN"
+                error_msg = (
+                    "Server/Data Center authentication requires "
+                    "JIRA_PERSONAL_TOKEN or JIRA_USERNAME and JIRA_API_TOKEN"
+                )
                 raise ValueError(error_msg)
 
         # SSL verification (for Server/DC)
@@ -128,7 +143,7 @@ class JiraConfig:
         custom_headers = get_custom_headers("JIRA_CUSTOM_HEADERS")
 
         return cls(
-            url=url,
+            url=url or "",
             auth_type=auth_type,
             username=username,
             api_token=api_token,
@@ -151,10 +166,26 @@ class JiraConfig:
         """
         logger = logging.getLogger("mcp-atlassian.jira.config")
         if self.auth_type == "oauth":
-            # Handle different OAuth configuration types
             if self.oauth_config:
-                # Full OAuth configuration (traditional mode)
+                # Minimal OAuth (user-provided tokens mode)
                 if isinstance(self.oauth_config, OAuthConfig):
+                    if (
+                        not self.oauth_config.client_id
+                        and not self.oauth_config.client_secret
+                    ):
+                        logger.debug(
+                            "Minimal OAuth config detected - "
+                            "expecting user-provided tokens via headers"
+                        )
+                        return True
+                    # DC OAuth: needs client_id + client_secret (no cloud_id needed)
+                    if hasattr(self.oauth_config, "is_data_center"):
+                        if self.oauth_config.is_data_center:
+                            return bool(
+                                self.oauth_config.client_id
+                                and self.oauth_config.client_secret
+                            )
+                    # Cloud OAuth: full set required
                     if (
                         self.oauth_config.client_id
                         and self.oauth_config.client_secret
@@ -163,23 +194,17 @@ class JiraConfig:
                         and self.oauth_config.cloud_id
                     ):
                         return True
-                    # Minimal OAuth configuration (user-provided tokens mode)
-                    # This is valid if we have oauth_config but missing client credentials
-                    # In this case, we expect authentication to come from user-provided headers
-                    elif (
-                        not self.oauth_config.client_id
-                        and not self.oauth_config.client_secret
-                    ):
-                        logger.debug(
-                            "Minimal OAuth config detected - expecting user-provided tokens via headers"
-                        )
-                        return True
-                # Bring Your Own Access Token mode
+                # BYO Access Token mode
                 elif isinstance(self.oauth_config, BYOAccessTokenOAuthConfig):
-                    if self.oauth_config.cloud_id and self.oauth_config.access_token:
-                        return True
+                    if self.oauth_config.access_token:
+                        # DC BYO: access_token is enough
+                        if hasattr(self.oauth_config, "is_data_center"):
+                            if self.oauth_config.is_data_center:
+                                return True
+                        # Cloud BYO: needs cloud_id + access_token
+                        if self.oauth_config.cloud_id:
+                            return True
 
-            # Partial configuration is invalid
             logger.warning("Incomplete OAuth configuration detected")
             return False
         elif self.auth_type == "pat":
