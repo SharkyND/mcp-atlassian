@@ -2,8 +2,6 @@
 
 from mcp_atlassian.utils.urls import (
     is_atlassian_cloud_url,
-    resolve_relative_url,
-    validate_url_for_ssrf,
 )
 
 

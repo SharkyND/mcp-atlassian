@@ -1,4 +1,4 @@
-﻿"""URL-related utility functions for MCP Atlassian."""
+"""URL-related utility functions for MCP Atlassian."""
 
 import ipaddress
 import os

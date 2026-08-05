@@ -1,4 +1,4 @@
-﻿"""Tests for the environment utilities module."""
+"""Tests for the environment utilities module."""
 
 import logging
 

@@ -94,7 +94,9 @@ class ConfluenceConfig:
         personal_token = os.getenv("CONFLUENCE_PERSONAL_TOKEN")
 
         # Check for OAuth configuration
-        oauth_config = get_oauth_config_from_env(service_url=url, service_type="confluence")
+        oauth_config = get_oauth_config_from_env(
+            service_url=url, service_type="confluence"
+        )
         auth_type = None
 
         # Use the shared utility function directly
@@ -186,7 +188,10 @@ class ConfluenceConfig:
                             if self.oauth_config.is_data_center:
                                 return True
                         # Cloud BYO: need cloud_id too
-                        if self.oauth_config.cloud_id and self.oauth_config.access_token:
+                        if (
+                            self.oauth_config.cloud_id
+                            and self.oauth_config.access_token
+                        ):
                             return True
 
             # Partial configuration is invalid

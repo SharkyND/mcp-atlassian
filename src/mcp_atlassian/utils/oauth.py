@@ -1,4 +1,4 @@
-﻿"""OAuth 2.0 utilities for Atlassian Cloud and Data Center authentication.
+"""OAuth 2.0 utilities for Atlassian Cloud and Data Center authentication.
 
 This module provides utilities for OAuth 2.0 (3LO) authentication with Atlassian.
 It handles:

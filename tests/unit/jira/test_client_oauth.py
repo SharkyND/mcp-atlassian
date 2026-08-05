@@ -461,7 +461,9 @@ class TestJiraClientDCOAuth:
             oauth_config=None,
         )
 
-        with pytest.raises(ValueError, match="OAuth authentication requires oauth_config"):
+        with pytest.raises(
+            ValueError, match="OAuth authentication requires oauth_config"
+        ):
             JiraClient(config=config)
 
     def test_cloud_oauth_missing_cloud_id_raises(self):

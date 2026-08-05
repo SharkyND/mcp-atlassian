@@ -74,9 +74,7 @@ class JiraClient:
                 is_cloud = False
             else:
                 # Cloud: use the Atlassian Cloud API URL
-                api_url = (
-                    f"https://api.atlassian.com/ex/jira/{self.config.oauth_config.cloud_id}"
-                )
+                api_url = f"https://api.atlassian.com/ex/jira/{self.config.oauth_config.cloud_id}"
                 is_cloud = True
 
             # Initialize Jira with the session

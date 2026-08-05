@@ -186,7 +186,10 @@ class JiraConfig:
                             if self.oauth_config.is_data_center:
                                 return True
                         # Cloud BYO: need cloud_id too
-                        if self.oauth_config.cloud_id and self.oauth_config.access_token:
+                        if (
+                            self.oauth_config.cloud_id
+                            and self.oauth_config.access_token
+                        ):
                             return True
 
             # Partial configuration is invalid

@@ -1,4 +1,4 @@
-﻿"""Utility functions related to environment checking."""
+"""Utility functions related to environment checking."""
 
 import logging
 import os
@@ -23,17 +23,17 @@ def get_available_services(
         # Cloud OAuth check (needs cloud_id)
         if all(
             [
-                os.getenv("ATLASSIAN_OAUTH_CLIENT_ID") or os.getenv("CONFLUENCE_OAUTH_CLIENT_ID"),
-                os.getenv("ATLASSIAN_OAUTH_CLIENT_SECRET") or os.getenv("CONFLUENCE_OAUTH_CLIENT_SECRET"),
+                os.getenv("ATLASSIAN_OAUTH_CLIENT_ID")
+                or os.getenv("CONFLUENCE_OAUTH_CLIENT_ID"),
+                os.getenv("ATLASSIAN_OAUTH_CLIENT_SECRET")
+                or os.getenv("CONFLUENCE_OAUTH_CLIENT_SECRET"),
                 os.getenv(
                     "ATLASSIAN_OAUTH_CLOUD_ID"
                 ),  # CLOUD_ID is essential for OAuth client init
             ]
         ):
             confluence_is_setup = True
-            logger.info(
-                "Using Confluence OAuth 2.0 (3LO) authentication (Cloud)"
-            )
+            logger.info("Using Confluence OAuth 2.0 (3LO) authentication (Cloud)")
         # DC OAuth check (no cloud_id, but has client credentials + non-cloud URL)
         elif (
             not is_cloud
@@ -47,9 +47,7 @@ def get_available_services(
             )
         ):
             confluence_is_setup = True
-            logger.info(
-                "Using Confluence OAuth 2.0 authentication (Data Center)"
-            )
+            logger.info("Using Confluence OAuth 2.0 authentication (Data Center)")
         elif all(
             [
                 os.getenv("ATLASSIAN_OAUTH_ACCESS_TOKEN")
@@ -111,15 +109,15 @@ def get_available_services(
         # Cloud OAuth check (needs cloud_id)
         if all(
             [
-                os.getenv("ATLASSIAN_OAUTH_CLIENT_ID") or os.getenv("JIRA_OAUTH_CLIENT_ID"),
-                os.getenv("ATLASSIAN_OAUTH_CLIENT_SECRET") or os.getenv("JIRA_OAUTH_CLIENT_SECRET"),
+                os.getenv("ATLASSIAN_OAUTH_CLIENT_ID")
+                or os.getenv("JIRA_OAUTH_CLIENT_ID"),
+                os.getenv("ATLASSIAN_OAUTH_CLIENT_SECRET")
+                or os.getenv("JIRA_OAUTH_CLIENT_SECRET"),
                 os.getenv("ATLASSIAN_OAUTH_CLOUD_ID"),
             ]
         ):
             jira_is_setup = True
-            logger.info(
-                "Using Jira OAuth 2.0 (3LO) authentication (Cloud)"
-            )
+            logger.info("Using Jira OAuth 2.0 (3LO) authentication (Cloud)")
         # DC OAuth check (no cloud_id, but has client credentials + non-cloud URL)
         elif (
             not is_cloud
@@ -133,9 +131,7 @@ def get_available_services(
             )
         ):
             jira_is_setup = True
-            logger.info(
-                "Using Jira OAuth 2.0 authentication (Data Center)"
-            )
+            logger.info("Using Jira OAuth 2.0 authentication (Data Center)")
         elif all(
             [
                 os.getenv("ATLASSIAN_OAUTH_ACCESS_TOKEN")
@@ -206,9 +202,7 @@ def get_available_services(
             ]
         ):
             bitbucket_is_setup = True
-            logger.info(
-                "Using Bitbucket OAuth 2.0 (3LO) authentication (Cloud)"
-            )
+            logger.info("Using Bitbucket OAuth 2.0 (3LO) authentication (Cloud)")
         elif all(
             [
                 os.getenv("ATLASSIAN_OAUTH_ACCESS_TOKEN"),
@@ -320,4 +314,3 @@ def get_available_services(
         "bitbucket": bitbucket_is_setup,
         "xray": xray_is_setup,
     }
-
