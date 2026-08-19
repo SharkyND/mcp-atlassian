@@ -67,8 +67,14 @@ class JiraConfig:
         return self.ssl_verify
 
     @classmethod
-    def from_env(cls) -> "JiraConfig":
+    def from_env(
+        cls, url: str | None = None, personal_token: str | None = None
+    ) -> "JiraConfig":
         """Create configuration from environment variables.
+
+        Args:
+            url: An optional override for the url.
+            personal_token: An optional orverride for the personal_token.
 
         Returns:
             JiraConfig with values from environment variables
@@ -76,7 +82,7 @@ class JiraConfig:
         Raises:
             ValueError: If required environment variables are missing or invalid
         """
-        url = os.getenv("JIRA_URL")
+        url = url or os.getenv("JIRA_URL")
         if not url and not os.getenv("ATLASSIAN_OAUTH_ENABLE"):
             error_msg = "Missing required JIRA_URL environment variable"
             raise ValueError(error_msg)
@@ -84,7 +90,7 @@ class JiraConfig:
         # Determine authentication type based on available environment variables
         username = os.getenv("JIRA_USERNAME")
         api_token = os.getenv("JIRA_API_TOKEN")
-        personal_token = os.getenv("JIRA_PERSONAL_TOKEN")
+        personal_token = personal_token or os.getenv("JIRA_PERSONAL_TOKEN")
 
         # Check for OAuth configuration
         oauth_config = get_oauth_config_from_env()

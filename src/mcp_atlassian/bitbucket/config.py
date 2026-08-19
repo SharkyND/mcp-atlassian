@@ -81,8 +81,14 @@ class BitbucketConfig:
         return False
 
     @classmethod
-    def from_env(cls) -> "BitbucketConfig":
+    def from_env(
+        cls, url: str | None = None, personal_token: str | None = None
+    ) -> "BitbucketConfig":
         """Create configuration from environment variables.
+
+        Args:
+            url: An optional override for the url.
+            personal_token: An optional orverride for the personal_token.
 
         Returns:
             BitbucketConfig with values from environment variables
@@ -90,7 +96,7 @@ class BitbucketConfig:
         Raises:
             ValueError: If required environment variables are missing or invalid
         """
-        url = os.getenv("BITBUCKET_URL")
+        url = url or os.getenv("BITBUCKET_URL")
         if not url and not os.getenv("ATLASSIAN_OAUTH_ENABLE"):
             error_msg = "Missing required BITBUCKET_URL environment variable"
             raise ValueError(error_msg)
@@ -98,7 +104,7 @@ class BitbucketConfig:
         # Determine authentication type based on available environment variables
         username = os.getenv("BITBUCKET_USERNAME")
         app_password = os.getenv("BITBUCKET_APP_PASSWORD")
-        personal_token = os.getenv("BITBUCKET_PERSONAL_TOKEN")
+        personal_token = personal_token or os.getenv("BITBUCKET_PERSONAL_TOKEN")
 
         # Check for OAuth configuration
         oauth_config = get_oauth_config_from_env()
