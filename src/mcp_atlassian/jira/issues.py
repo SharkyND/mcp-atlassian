@@ -1383,6 +1383,22 @@ class IssuesMixin(
                             self._add_assignee_to_fields(update_fields, account_id)
                         except ValueError as e:
                             logger.warning(f"Could not update assignee: {str(e)}")
+
+                elif key == "components":
+                    if isinstance(value, list):
+                        # Support both string names and pre-formatted {"name": ...} dicts
+                        if all(isinstance(c, dict) for c in value):
+                            update_fields["components"] = value
+                        else:
+                            valid_components = [
+                                c.strip()
+                                for c in value
+                                if isinstance(c, str) and c.strip()
+                            ]
+                            if valid_components:
+                                update_fields["components"] = [
+                                    {"name": c} for c in valid_components
+                                ]
                 elif key == "description":
                     # Handle description with markdown conversion
                     update_fields["description"] = self._markdown_to_jira(value)
@@ -1783,6 +1799,11 @@ class IssuesMixin(
                             fields["components"] = [
                                 {"name": comp_name} for comp_name in valid_components
                             ]
+
+                # Unpack nested additional_fields dict into issue_data before processing
+                additional_fields = issue_data.pop("additional_fields", None)
+                if additional_fields and isinstance(additional_fields, dict):
+                    issue_data.update(additional_fields)
 
                 # Preserve original kwargs for additional-field processing before
                 # epic prep mutates issue_data (mirrors create_issue's kwargs_copy)
