@@ -219,6 +219,7 @@ async def get_jira_fetcher(ctx: Context) -> JiraFetcher:
         service_headers = getattr(request.state, "atlassian_service_headers", {})
         jira_url_header = service_headers.get("X-Atlassian-Jira-Url")
         jira_token_header = service_headers.get("X-Atlassian-Jira-Personal-Token")
+        jira_username_header = service_headers.get("X-Atlassian-Jira-Username")
 
         if (
             user_auth_type == "pat"
@@ -226,21 +227,46 @@ async def get_jira_fetcher(ctx: Context) -> JiraFetcher:
             and jira_token_header
             and not hasattr(request.state, "user_atlassian_token")
         ):
-            logger.info(
-                f"Creating header-based JiraFetcher with URL: {jira_url_header} and PAT token"
-            )
-            header_config = JiraConfig(
-                url=jira_url_header,
-                auth_type="pat",
-                personal_token=jira_token_header,
-                ssl_verify=True,
-                projects_filter=None,
-                http_proxy=None,
-                https_proxy=None,
-                no_proxy=None,
-                socks_proxy=None,
-                custom_headers=None,
-            )
+            # A username header accompanying the token indicates a classic
+            # Atlassian Cloud API token, which the API only accepts via Basic
+            # auth (base64 username:token) -- never as a Bearer/Token header.
+            # Without the username header, fall back to the previous
+            # Bearer/Token-based behavior (OAuth access tokens, Server/DC PATs).
+            if jira_username_header:
+                logger.info(
+                    f"Creating header-based JiraFetcher with URL: {jira_url_header} "
+                    "and Basic auth (username + Cloud API token)"
+                )
+                header_config = JiraConfig(
+                    url=jira_url_header,
+                    auth_type="basic",
+                    username=jira_username_header,
+                    api_token=jira_token_header,
+                    ssl_verify=True,
+                    projects_filter=None,
+                    http_proxy=None,
+                    https_proxy=None,
+                    no_proxy=None,
+                    socks_proxy=None,
+                    custom_headers=None,
+                )
+            else:
+                logger.info(
+                    f"Creating header-based JiraFetcher with URL: {jira_url_header} "
+                    "and PAT token"
+                )
+                header_config = JiraConfig(
+                    url=jira_url_header,
+                    auth_type="pat",
+                    personal_token=jira_token_header,
+                    ssl_verify=True,
+                    projects_filter=None,
+                    http_proxy=None,
+                    https_proxy=None,
+                    no_proxy=None,
+                    socks_proxy=None,
+                    custom_headers=None,
+                )
             try:
                 header_jira_fetcher = JiraFetcher(config=header_config)
                 current_user_id = header_jira_fetcher.get_current_user_account_id()
@@ -371,6 +397,9 @@ async def get_confluence_fetcher(ctx: Context) -> ConfluenceFetcher:
         confluence_token_header = service_headers.get(
             "X-Atlassian-Confluence-Personal-Token"
         )
+        confluence_username_header = service_headers.get(
+            "X-Atlassian-Confluence-Username"
+        )
 
         if (
             user_auth_type == "pat"
@@ -378,21 +407,45 @@ async def get_confluence_fetcher(ctx: Context) -> ConfluenceFetcher:
             and confluence_token_header
             and not hasattr(request.state, "user_atlassian_token")
         ):
-            logger.info(
-                f"Creating header-based ConfluenceFetcher with URL: {confluence_url_header} and PAT token"
-            )
-            header_config = ConfluenceConfig(
-                url=confluence_url_header,
-                auth_type="pat",
-                personal_token=confluence_token_header,
-                ssl_verify=True,
-                spaces_filter=None,
-                http_proxy=None,
-                https_proxy=None,
-                no_proxy=None,
-                socks_proxy=None,
-                custom_headers=None,
-            )
+            # A username header accompanying the token indicates a classic
+            # Atlassian Cloud API token, which requires Basic auth (see
+            # get_jira_fetcher above for the same pattern).
+            if confluence_username_header:
+                logger.info(
+                    "Creating header-based ConfluenceFetcher with URL: "
+                    f"{confluence_url_header} and Basic auth "
+                    "(username + Cloud API token)"
+                )
+                header_config = ConfluenceConfig(
+                    url=confluence_url_header,
+                    auth_type="basic",
+                    username=confluence_username_header,
+                    api_token=confluence_token_header,
+                    ssl_verify=True,
+                    spaces_filter=None,
+                    http_proxy=None,
+                    https_proxy=None,
+                    no_proxy=None,
+                    socks_proxy=None,
+                    custom_headers=None,
+                )
+            else:
+                logger.info(
+                    "Creating header-based ConfluenceFetcher with URL: "
+                    f"{confluence_url_header} and PAT token"
+                )
+                header_config = ConfluenceConfig(
+                    url=confluence_url_header,
+                    auth_type="pat",
+                    personal_token=confluence_token_header,
+                    ssl_verify=True,
+                    spaces_filter=None,
+                    http_proxy=None,
+                    https_proxy=None,
+                    no_proxy=None,
+                    socks_proxy=None,
+                    custom_headers=None,
+                )
             try:
                 header_confluence_fetcher = ConfluenceFetcher(config=header_config)
                 current_user_data = header_confluence_fetcher.get_current_user_info()
@@ -556,6 +609,9 @@ async def get_bitbucket_fetcher(ctx: Context) -> BitbucketFetcher:
         bitbucket_token_header = service_headers.get(
             "X-Atlassian-Bitbucket-Personal-Token"
         )
+        bitbucket_username_header = service_headers.get(
+            "X-Atlassian-Bitbucket-Username"
+        )
 
         if (
             user_auth_type == "pat"
@@ -563,21 +619,45 @@ async def get_bitbucket_fetcher(ctx: Context) -> BitbucketFetcher:
             and bitbucket_token_header
             and not hasattr(request.state, "user_atlassian_token")
         ):
-            logger.info(
-                f"Creating header-based BitbucketFetcher with URL: {bitbucket_url_header} and PAT token"
-            )
-            header_config = BitbucketConfig(
-                url=bitbucket_url_header,
-                auth_type="pat",
-                username=None,
-                personal_token=bitbucket_token_header,
-                ssl_verify=True,
-                http_proxy=None,
-                https_proxy=None,
-                no_proxy=None,
-                socks_proxy=None,
-                custom_headers=None,
-            )
+            # A username header accompanying the token indicates a classic
+            # Atlassian Cloud API token, which requires Basic auth (see
+            # get_jira_fetcher above for the same pattern).
+            if bitbucket_username_header:
+                logger.info(
+                    "Creating header-based BitbucketFetcher with URL: "
+                    f"{bitbucket_url_header} and Basic auth "
+                    "(username + Cloud API token)"
+                )
+                header_config = BitbucketConfig(
+                    url=bitbucket_url_header,
+                    auth_type="basic",
+                    username=bitbucket_username_header,
+                    app_password=bitbucket_token_header,
+                    personal_token=None,
+                    ssl_verify=True,
+                    http_proxy=None,
+                    https_proxy=None,
+                    no_proxy=None,
+                    socks_proxy=None,
+                    custom_headers=None,
+                )
+            else:
+                logger.info(
+                    "Creating header-based BitbucketFetcher with URL: "
+                    f"{bitbucket_url_header} and PAT token"
+                )
+                header_config = BitbucketConfig(
+                    url=bitbucket_url_header,
+                    auth_type="pat",
+                    username=None,
+                    personal_token=bitbucket_token_header,
+                    ssl_verify=True,
+                    http_proxy=None,
+                    https_proxy=None,
+                    no_proxy=None,
+                    socks_proxy=None,
+                    custom_headers=None,
+                )
             try:
                 header_bitbucket_fetcher = BitbucketFetcher(config=header_config)
                 current_user_data = header_bitbucket_fetcher.get_current_user_info()
