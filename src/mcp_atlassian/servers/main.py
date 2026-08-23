@@ -1009,6 +1009,14 @@ class UserTokenMiddleware:
                 jira_url_header.decode("latin-1") if jira_url_header else None
             )
 
+            # Optional username accompanying a classic Cloud API token (which must
+            # be sent as Basic auth, not Bearer/Token) for the header-based
+            # multi-tenant auth path. See get_*_fetcher in servers/dependencies.py.
+            jira_username_header = headers.get(b"x-atlassian-jira-username")
+            jira_username_header_str = (
+                jira_username_header.decode("latin-1") if jira_username_header else None
+            )
+
             confluence_token_header = headers.get(
                 b"x-atlassian-confluence-personal-token"
             )
@@ -1025,6 +1033,15 @@ class UserTokenMiddleware:
                 else None
             )
 
+            confluence_username_header = headers.get(
+                b"x-atlassian-confluence-username"
+            )
+            confluence_username_header_str = (
+                confluence_username_header.decode("latin-1")
+                if confluence_username_header
+                else None
+            )
+
             bitbucket_token_header = headers.get(
                 b"x-atlassian-bitbucket-personal-token"
             )
@@ -1037,6 +1054,15 @@ class UserTokenMiddleware:
             bitbucket_url_header = headers.get(b"x-atlassian-bitbucket-url")
             bitbucket_url_header_str = (
                 bitbucket_url_header.decode("latin-1") if bitbucket_url_header else None
+            )
+
+            bitbucket_username_header = headers.get(
+                b"x-atlassian-bitbucket-username"
+            )
+            bitbucket_username_header_str = (
+                bitbucket_username_header.decode("latin-1")
+                if bitbucket_username_header
+                else None
             )
             effective_xray_token = None
             effective_xray_url = None
@@ -1180,6 +1206,10 @@ class UserTokenMiddleware:
                 )
             if jira_url_header_str:
                 service_headers["X-Atlassian-Jira-Url"] = jira_url_header_str
+            if jira_username_header_str:
+                service_headers["X-Atlassian-Jira-Username"] = (
+                    jira_username_header_str
+                )
             if confluence_token_header_str:
                 service_headers["X-Atlassian-Confluence-Personal-Token"] = (
                     confluence_token_header_str
@@ -1188,12 +1218,20 @@ class UserTokenMiddleware:
                 service_headers["X-Atlassian-Confluence-Url"] = (
                     confluence_url_header_str
                 )
+            if confluence_username_header_str:
+                service_headers["X-Atlassian-Confluence-Username"] = (
+                    confluence_username_header_str
+                )
             if bitbucket_token_header_str:
                 service_headers["X-Atlassian-Bitbucket-Personal-Token"] = (
                     bitbucket_token_header_str
                 )
             if bitbucket_url_header_str:
                 service_headers["X-Atlassian-Bitbucket-Url"] = bitbucket_url_header_str
+            if bitbucket_username_header_str:
+                service_headers["X-Atlassian-Bitbucket-Username"] = (
+                    bitbucket_username_header_str
+                )
             if enable_xray_header_value is not None:
                 service_headers["X-Atlassian-Enable-Xray"] = enable_xray_header_value
 
