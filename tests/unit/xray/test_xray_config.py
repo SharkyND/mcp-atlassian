@@ -119,21 +119,32 @@ def test_from_env_reuses_jira_proxy_settings():
     assert config.no_proxy == "localhost,127.0.0.1"
 
 
-def test_from_jira_config_rejects_oauth():
-    """Xray should reject Jira OAuth configs."""
+def test_from_jira_config_reuses_data_center_oauth():
+    """Xray should reuse Jira's Data Center browser OAuth configuration."""
+    oauth_config = OAuthConfig(
+        client_id="jira-client",
+        client_secret="jira-secret",
+        redirect_uri="https://mcp.example.com/jira/oauth/callback",
+        scope="READ WRITE",
+        access_token="user-access-token",
+        base_url="https://jira.example.com",
+    )
     oauth_jira_config = JiraConfig(
         url="https://jira.example.com",
         auth_type="oauth",
         username=None,
         api_token=None,
         personal_token=None,
-        oauth_config=None,
+        oauth_config=oauth_config,
     )
 
-    with pytest.raises(
-        ValueError, match="Xray for Jira does not support OAuth authentication."
-    ):
-        XrayConfig.from_jira_config(oauth_jira_config)
+    xray_config = XrayConfig.from_jira_config(oauth_jira_config)
+
+    assert xray_config.url == "https://jira.example.com"
+    assert xray_config.auth_type == "oauth"
+    assert xray_config.oauth_config is oauth_config
+    assert xray_config.is_cloud is False
+    assert xray_config.is_auth_configured() is True
 
 
 def test_from_jira_config_clones_values():

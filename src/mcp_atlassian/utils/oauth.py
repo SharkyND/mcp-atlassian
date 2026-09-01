@@ -20,6 +20,8 @@ from typing import Any, Optional
 import keyring
 import requests
 
+from .urls import is_atlassian_cloud_url
+
 # Configure logging
 logger = logging.getLogger("mcp-atlassian.oauth")
 
@@ -27,6 +29,12 @@ logger = logging.getLogger("mcp-atlassian.oauth")
 TOKEN_URL = "https://auth.atlassian.com/oauth/token"  # noqa: S105 - This is a public API endpoint URL, not a password
 AUTHORIZE_URL = "https://auth.atlassian.com/authorize"
 CLOUD_ID_URL = "https://api.atlassian.com/oauth/token/accessible-resources"
+
+
+# Data Center browser OAuth endpoint paths
+DC_TOKEN_PATH = "/rest/oauth2/latest/token"  # noqa: S105
+DC_AUTHORIZE_PATH = "/rest/oauth2/latest/authorize"
+
 TOKEN_EXPIRY_MARGIN = 300  # 5 minutes in seconds
 KEYRING_SERVICE_NAME = "mcp-atlassian-oauth"
 
@@ -40,6 +48,9 @@ class OAuthConfig:
     - Token acquisition and refreshing
     - Token storage and retrieval
     - Cloud ID identification
+
+    ``base_url`` is used only by the Data Center browser proxy after FastMCP
+    has resolved an upstream access token for the current request.
     """
 
     client_id: str
@@ -47,9 +58,15 @@ class OAuthConfig:
     redirect_uri: str
     scope: str
     cloud_id: str | None = None
+    base_url: str | None = None
     refresh_token: str | None = None
     access_token: str | None = None
     expires_at: float | None = None
+
+    @property
+    def is_data_center(self) -> bool:
+        """Return whether request routing targets a Data Center instance."""
+        return bool(self.base_url) and not is_atlassian_cloud_url(self.base_url)
 
     @property
     def is_token_expired(self) -> bool:
@@ -296,7 +313,7 @@ class OAuthConfig:
             # Fall back to file storage if keyring fails
             self._save_tokens_to_file()
 
-    def _save_tokens_to_file(self, token_data: dict = None) -> None:
+    def _save_tokens_to_file(self, token_data: dict | None = None) -> None:
         """Save the tokens to a file as fallback storage.
 
         Args:
@@ -379,7 +396,11 @@ class OAuthConfig:
             return {}
 
     @classmethod
-    def from_env(cls) -> Optional["OAuthConfig"]:
+    def from_env(
+        cls,
+        service_url: str | None = None,
+        service_type: str | None = None,
+    ) -> Optional["OAuthConfig"]:
         """Create an OAuth configuration from environment variables.
 
         Returns:
@@ -392,7 +413,30 @@ class OAuthConfig:
             "yes",
         )
 
-        # Check for required environment variables
+        prefix = service_type.upper() if service_type else None
+        is_data_center = bool(service_url) and not is_atlassian_cloud_url(service_url)
+        browser_proxy_enabled = os.getenv(
+            "ATLASSIAN_OAUTH_PROXY_ENABLE", ""
+        ).lower() in ("true", "1", "yes")
+
+        if is_data_center and browser_proxy_enabled:
+            if not prefix:
+                return None
+            client_id = os.getenv(f"{prefix}_OAUTH_CLIENT_ID")
+            client_secret = os.getenv(f"{prefix}_OAUTH_CLIENT_SECRET")
+            redirect_uri = os.getenv(f"{prefix}_OAUTH_REDIRECT_URI")
+            scope = os.getenv(f"{prefix}_OAUTH_SCOPE")
+            if not all([client_id, client_secret, redirect_uri, scope]):
+                return None
+            return cls(
+                client_id=client_id or "",
+                client_secret=client_secret or "",
+                redirect_uri=redirect_uri or "",
+                scope=scope or "",
+                base_url=service_url,
+            )
+
+        # Legacy Cloud OAuth configuration remains generic and unchanged.
         client_id = os.getenv("ATLASSIAN_OAUTH_CLIENT_ID")
         client_secret = os.getenv("ATLASSIAN_OAUTH_CLIENT_SECRET")
         redirect_uri = os.getenv("ATLASSIAN_OAUTH_REDIRECT_URI")
@@ -402,15 +446,15 @@ class OAuthConfig:
         if all([client_id, client_secret, redirect_uri, scope]):
             # Create the OAuth configuration with full credentials
             config = cls(
-                client_id=client_id,
-                client_secret=client_secret,
-                redirect_uri=redirect_uri,
-                scope=scope,
+                client_id=client_id or "",
+                client_secret=client_secret or "",
+                redirect_uri=redirect_uri or "",
+                scope=scope or "",
                 cloud_id=os.getenv("ATLASSIAN_OAUTH_CLOUD_ID"),
             )
 
             # Try to load existing tokens
-            token_data = cls.load_tokens(client_id)
+            token_data = cls.load_tokens(client_id or "")
             if token_data:
                 config.refresh_token = token_data.get("refresh_token")
                 config.access_token = token_data.get("access_token")
@@ -452,8 +496,14 @@ class BYOAccessTokenOAuthConfig:
 
     cloud_id: str
     access_token: str
+    base_url: None = None
     refresh_token: None = None
     expires_at: None = None
+
+    @property
+    def is_data_center(self) -> bool:
+        """Cloud BYOT never targets Data Center."""
+        return False
 
     @classmethod
     def from_env(cls) -> Optional["BYOAccessTokenOAuthConfig"]:
@@ -471,10 +521,13 @@ class BYOAccessTokenOAuthConfig:
         if not all([cloud_id, access_token]):
             return None
 
-        return cls(cloud_id=cloud_id, access_token=access_token)
+        return cls(cloud_id=cloud_id or "", access_token=access_token or "")
 
 
-def get_oauth_config_from_env() -> OAuthConfig | BYOAccessTokenOAuthConfig | None:
+def get_oauth_config_from_env(
+    service_url: str | None = None,
+    service_type: str | None = None,
+) -> OAuthConfig | BYOAccessTokenOAuthConfig | None:
     """Get the appropriate OAuth configuration from environment variables.
 
     This function attempts to load standard OAuth configuration first (OAuthConfig).
@@ -485,6 +538,17 @@ def get_oauth_config_from_env() -> OAuthConfig | BYOAccessTokenOAuthConfig | Non
         An instance of OAuthConfig or BYOAccessTokenOAuthConfig if environment
         variables are set for either, otherwise None.
     """
+    is_data_center_browser_proxy = (
+        bool(service_url)
+        and not is_atlassian_cloud_url(service_url)
+        and os.getenv("ATLASSIAN_OAUTH_PROXY_ENABLE", "").lower()
+        in ("true", "1", "yes")
+    )
+    if is_data_center_browser_proxy:
+        return OAuthConfig.from_env(
+            service_url=service_url,
+            service_type=service_type,
+        )
     return BYOAccessTokenOAuthConfig.from_env() or OAuthConfig.from_env()
 
 

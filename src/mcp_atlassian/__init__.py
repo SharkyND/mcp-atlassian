@@ -49,6 +49,16 @@ logger = setup_logging(logging_level, logging_stream)
     help="Run OAuth 2.0 setup wizard for Atlassian Cloud",
 )
 @click.option(
+    "--auth-mode",
+    type=click.Choice(["header", "oauth"]),
+    default=None,
+    help=(
+        "Authentication mode: 'header' keeps token-based request headers "
+        "(default); 'oauth' enables Data Center browser OAuth over "
+        "streamable HTTP"
+    ),
+)
+@click.option(
     "--transport",
     type=click.Choice(["stdio", "sse", "streamable-http"]),
     default="stdio",
@@ -167,6 +177,7 @@ def main(
     verbose: int,
     env_file: str | None,
     oauth_setup: bool,
+    auth_mode: str | None,
     transport: str,
     port: int,
     host: str,
@@ -202,7 +213,8 @@ def main(
     Authentication methods supported:
     - Username and API token (Cloud)
     - Personal Access Token (Server/Data Center)
-    - OAuth 2.0 (Cloud only)
+    - Existing OAuth setup and BYOT flows (Cloud)
+    - Browser OAuth proxy (Data Center, streamable HTTP only)
     """
     # Logging level logic
     if verbose == 1:
@@ -257,6 +269,24 @@ def main(
 
     click_ctx = click.get_current_context(silent=True)
 
+    configured_auth_mode = os.getenv("MCP_AUTH_MODE")
+    if not configured_auth_mode and is_env_truthy(
+        "ATLASSIAN_OAUTH_PROXY_ENABLE", "false"
+    ):
+        configured_auth_mode = "oauth"
+    final_auth_mode = (configured_auth_mode or "header").lower()
+    if click_ctx and was_option_provided(click_ctx, "auth_mode") and auth_mode:
+        final_auth_mode = auth_mode
+    if final_auth_mode not in {"header", "oauth"}:
+        logger.warning(
+            "Invalid MCP_AUTH_MODE '%s'; using header authentication.",
+            final_auth_mode,
+        )
+        final_auth_mode = "header"
+    os.environ["MCP_AUTH_MODE"] = final_auth_mode
+    os.environ["ATLASSIAN_OAUTH_PROXY_ENABLE"] = str(final_auth_mode == "oauth").lower()
+    logger.info("Authentication mode: %s", final_auth_mode)
+
     # Transport precedence
     final_transport = os.getenv("TRANSPORT", "stdio").lower()
     if click_ctx and was_option_provided(click_ctx, "transport"):
@@ -267,6 +297,9 @@ def main(
         )
         final_transport = "stdio"
     logger.debug(f"Final transport determined: {final_transport}")
+
+    if final_auth_mode == "oauth" and final_transport != "streamable-http":
+        raise click.UsageError("--auth-mode oauth requires --transport streamable-http")
 
     # Port precedence
     final_port = 8000

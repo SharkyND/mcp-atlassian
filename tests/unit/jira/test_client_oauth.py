@@ -97,7 +97,28 @@ class TestJiraClientOAuth:
 
         # Verify error is raised
         with pytest.raises(
-            ValueError, match="OAuth authentication requires a valid cloud_id"
+            ValueError, match="OAuth authentication requires a cloud_id"
+        ):
+            JiraClient(config=config)
+
+    def test_init_rejects_cloud_base_url_without_cloud_id(self):
+        """A Cloud base URL cannot replace the API gateway cloud ID."""
+        oauth_config = OAuthConfig(
+            client_id="test-client-id",
+            client_secret="test-client-secret",
+            redirect_uri="https://example.com/callback",
+            scope="read:jira-work",
+            base_url="https://test.atlassian.net",
+            access_token="test-access-token",
+        )
+        config = JiraConfig(
+            url="https://test.atlassian.net",
+            auth_type="oauth",
+            oauth_config=oauth_config,
+        )
+
+        with pytest.raises(
+            ValueError, match="OAuth authentication requires a cloud_id"
         ):
             JiraClient(config=config)
 
@@ -216,7 +237,7 @@ class TestJiraClientOAuth:
 
         # Verify error is raised
         with pytest.raises(
-            ValueError, match="OAuth authentication requires a valid cloud_id"
+            ValueError, match="OAuth authentication requires a cloud_id"
         ):
             JiraClient(config=config)
 
@@ -295,6 +316,7 @@ class TestJiraClientOAuth:
         # Mock OAuth config and token loading
         mock_oauth_config = MagicMock()
         mock_oauth_config.cloud_id = "env-cloud-id"
+        mock_oauth_config.is_data_center = False
         mock_oauth_config.access_token = "env-access-token"
         mock_oauth_config.refresh_token = "env-refresh-token"
         mock_oauth_config.expires_at = 9999999999.0
@@ -357,6 +379,7 @@ class TestJiraClientOAuth:
         # Mock BYO OAuth config
         mock_byo_oauth_config = MagicMock(spec=BYOAccessTokenOAuthConfig)
         mock_byo_oauth_config.cloud_id = "env-byo-cloud-id"
+        mock_byo_oauth_config.is_data_center = False
         mock_byo_oauth_config.access_token = "env-byo-access-token"
         # BYO config does not have refresh_token or expires_at in the same way
         # and does not have is_token_expired or ensure_valid_token methods

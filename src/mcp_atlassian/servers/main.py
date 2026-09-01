@@ -5,9 +5,9 @@ import json
 import logging
 import os
 from collections.abc import AsyncIterator, Callable
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from typing import Any, Literal, Optional
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 from cachetools import TTLCache
 from fastmcp import FastMCP, settings
@@ -17,7 +17,7 @@ from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
-from starlette.routing import Route
+from starlette.routing import Mount, Route
 
 from mcp_atlassian.bitbucket import BitbucketFetcher
 from mcp_atlassian.bitbucket.config import BitbucketConfig
@@ -27,6 +27,7 @@ from mcp_atlassian.jira import JiraFetcher
 from mcp_atlassian.jira.attachment_cache import get_attachment_cache
 from mcp_atlassian.jira.config import JiraConfig
 from mcp_atlassian.jira.upload_staging import get_upload_staging
+from mcp_atlassian.utils.env import is_env_truthy
 from mcp_atlassian.utils.environment import get_available_services
 from mcp_atlassian.utils.io import (
     get_cli_bitbucket_read_only_flag,
@@ -42,8 +43,14 @@ from mcp_atlassian.utils.io import (
     resolve_read_only_mode,
 )
 from mcp_atlassian.utils.logging import mask_sensitive
+from mcp_atlassian.utils.oauth import (
+    DC_AUTHORIZE_PATH,
+    DC_TOKEN_PATH,
+)
 from mcp_atlassian.utils.prometheus_metrics import get_metrics, initialize_metrics
+from mcp_atlassian.utils.token_verifier import AtlassianDataCenterTokenVerifier
 from mcp_atlassian.utils.tools import get_enabled_tools, should_include_tool
+from mcp_atlassian.utils.urls import is_atlassian_cloud_url
 from mcp_atlassian.xray import XrayFetcher
 from mcp_atlassian.xray.config import XrayConfig
 
@@ -51,9 +58,18 @@ from .bitbucket import bitbucket_mcp
 from .confluence import confluence_mcp
 from .context import MainAppContext
 from .jira import jira_mcp
+from .oauth_proxy import HardenedOAuthProxy, parse_env_list
 from .xray import xray_mcp
 
 logger = logging.getLogger("mcp-atlassian.server.main")
+
+DEFAULT_ALLOWED_REDIRECT_URIS = [
+    "http://localhost:*",
+    "http://127.0.0.1:*",
+]
+DEFAULT_ALLOWED_GRANT_TYPES = ["authorization_code", "refresh_token"]
+OAUTH_PROXY_ENABLE_ENV = "ATLASSIAN_OAUTH_PROXY_ENABLE"
+DATA_CENTER_OAUTH_PRODUCTS = ("jira", "confluence", "bitbucket")
 
 # Initialize metrics immediately when module is loaded
 pod_name = os.environ.get("POD_NAME")
@@ -260,6 +276,16 @@ async def _run_staging_cleanup(interval_seconds: int) -> None:
 async def main_lifespan(app: FastMCP[MainAppContext]) -> AsyncIterator[dict]:
     logger.info("Main Atlassian MCP server lifespan starting...")
     services = get_available_services()
+    oauth_product = getattr(app, "oauth_product", None)
+    if oauth_product in DATA_CENTER_OAUTH_PRODUCTS:
+        services = {
+            service: available
+            and (
+                service == oauth_product
+                or (oauth_product == "jira" and service == "xray")
+            )
+            for service, available in services.items()
+        }
     cli_read_only = get_cli_read_only_flag()
     env_read_only = get_env_read_only_flag()
     read_only = resolve_read_only_mode(cli_read_only, env_read_only, None)
@@ -328,10 +354,16 @@ async def main_lifespan(app: FastMCP[MainAppContext]) -> AsyncIterator[dict]:
     if services.get("bitbucket"):
         try:
             bitbucket_config = BitbucketConfig.from_env()
-            loaded_bitbucket_config = bitbucket_config
-            logger.info(
-                "Bitbucket configuration loaded and authentication is configured."
-            )
+            if bitbucket_config.is_auth_configured():
+                loaded_bitbucket_config = bitbucket_config
+                logger.info(
+                    "Bitbucket configuration loaded and authentication is configured."
+                )
+            else:
+                logger.warning(
+                    "Bitbucket URL found, but authentication is not fully configured. "
+                    "Bitbucket tools will be unavailable."
+                )
         except Exception as e:
             logger.error(f"Failed to load Bitbucket configuration: {e}", exc_info=True)
     if services.get("xray"):
@@ -424,6 +456,8 @@ async def main_lifespan(app: FastMCP[MainAppContext]) -> AsyncIterator[dict]:
 
 class AtlassianMCP(FastMCP[MainAppContext]):
     """Custom FastMCP server class for Atlassian integration with tool filtering."""
+
+    oauth_product: str | None = None
 
     async def _list_tools_mcp(self) -> list[MCPTool]:
         # Filter tools based on enabled_tools, read_only mode, and service configuration
@@ -865,14 +899,19 @@ class UserTokenMiddleware:
 
         mcp_path = settings.streamable_http_path.rstrip("/")
         request_path = scope.get("path", "").rstrip("/")
+        root_path = scope.get("root_path", "").rstrip("/")
+        local_request_path = request_path
+        if root_path and request_path.startswith(root_path):
+            local_request_path = request_path[len(root_path) :] or "/"
         method = scope.get("method", "")
 
         logger.debug(
-            f"UserTokenMiddleware.__call__: Comparing request_path='{request_path}' "
+            "UserTokenMiddleware.__call__: Comparing "
+            f"local_request_path='{local_request_path}' "
             f"with mcp_path='{mcp_path}'. Request method='{method}'"
         )
 
-        if request_path == mcp_path and method == "POST":
+        if local_request_path == mcp_path and method == "POST":
             # Parse headers from scope (headers are byte tuples per ASGI spec)
             headers = dict(scope.get("headers", []))
 
@@ -1227,8 +1266,8 @@ class UserTokenMiddleware:
                     return
 
                 logger.debug(
-                    f"UserTokenMiddleware.__call__: Bearer token extracted "
-                    f"(masked): ...{mask_sensitive(token, 8)}"
+                    "UserTokenMiddleware.__call__: Bearer token extracted "
+                    "(token_present=true)"
                 )
                 scope_copy["state"]["user_atlassian_token"] = token
                 scope_copy["state"]["user_atlassian_auth_type"] = "oauth"
@@ -1247,8 +1286,7 @@ class UserTokenMiddleware:
                     return
 
                 logger.debug(
-                    f"UserTokenMiddleware.__call__: PAT (Token scheme) extracted "
-                    f"(masked): ...{mask_sensitive(token, 8)}"
+                    "UserTokenMiddleware.__call__: PAT extracted (token_present=true)"
                 )
                 scope_copy["state"]["user_atlassian_token"] = token
                 scope_copy["state"]["user_atlassian_auth_type"] = "pat"
@@ -1359,11 +1397,361 @@ class UserTokenMiddleware:
             raise
 
 
-main_mcp = AtlassianMCP(name="Atlassian MCP", lifespan=main_lifespan)
-main_mcp.mount(jira_mcp, prefix="jira")
-main_mcp.mount(confluence_mcp, prefix="confluence")
-main_mcp.mount(bitbucket_mcp, prefix="bitbucket")
-main_mcp.mount(xray_mcp, prefix="xray")
+def _get_allowed_redirect_uris() -> list[str]:
+    parsed = parse_env_list(os.getenv("ATLASSIAN_OAUTH_ALLOWED_CLIENT_REDIRECT_URIS"))
+    return DEFAULT_ALLOWED_REDIRECT_URIS if parsed is None else parsed
+
+
+def _get_allowed_grant_types() -> list[str]:
+    parsed = parse_env_list(os.getenv("ATLASSIAN_OAUTH_ALLOWED_GRANT_TYPES"))
+    return DEFAULT_ALLOWED_GRANT_TYPES if not parsed else parsed
+
+
+def _resolve_upstream_oauth_endpoints(instance_url: str) -> tuple[str, str]:
+    if is_atlassian_cloud_url(instance_url):
+        raise ValueError(
+            "Browser OAuth proxy mode currently supports Atlassian Data Center "
+            "only; use the existing Cloud OAuth setup or BYOT flow for Cloud"
+        )
+    base_url = instance_url.rstrip("/")
+    return f"{base_url}{DC_AUTHORIZE_PATH}", f"{base_url}{DC_TOKEN_PATH}"
+
+
+def _get_product_oauth_value(product: str, name: str) -> str | None:
+    """Return a product-specific Data Center browser OAuth value."""
+    return os.getenv(f"{product.upper()}_OAUTH_{name}")
+
+
+def _is_data_center_product_url(product: str, instance_url: str) -> bool:
+    """Return whether a product URL targets Server or Data Center."""
+    if product == "bitbucket" and "bitbucket.org" in instance_url.lower():
+        return False
+    return not is_atlassian_cloud_url(instance_url)
+
+
+def _get_configured_data_center_oauth_products() -> list[str]:
+    """Return Data Center products with complete browser OAuth configuration."""
+    if not is_env_truthy(OAUTH_PROXY_ENABLE_ENV, "false"):
+        return []
+
+    configured: list[str] = []
+    for product in DATA_CENTER_OAUTH_PRODUCTS:
+        instance_url = os.getenv(f"{product.upper()}_URL")
+        if not instance_url or not _is_data_center_product_url(product, instance_url):
+            continue
+        if all(
+            _get_product_oauth_value(product, name)
+            for name in ("CLIENT_ID", "CLIENT_SECRET", "REDIRECT_URI")
+        ):
+            configured.append(product)
+    return configured
+
+
+def _product_public_base_url(product: str) -> str:
+    """Build the public issuer URL for a mounted product OAuth application."""
+    public_base_url = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
+    if not public_base_url:
+        raise ValueError(
+            "Multi-product Data Center OAuth requires PUBLIC_BASE_URL, for example "
+            "https://mcp.example.com"
+        )
+
+    configured_products = _get_configured_data_center_oauth_products()
+    base_path_parts = [
+        part.lower() for part in urlparse(public_base_url).path.split("/") if part
+    ]
+    configured_suffix = (
+        base_path_parts[-1]
+        if base_path_parts and base_path_parts[-1] in DATA_CENTER_OAUTH_PRODUCTS
+        else None
+    )
+    if configured_suffix:
+        if len(configured_products) > 1:
+            raise ValueError(
+                "PUBLIC_BASE_URL must be the common public origin when multiple "
+                "Data Center OAuth products are configured; remove the product "
+                f"suffix '/{configured_suffix}'"
+            )
+        if configured_suffix != product:
+            raise ValueError(
+                f"PUBLIC_BASE_URL ends in '/{configured_suffix}' but the configured "
+                f"OAuth product is '{product}'"
+            )
+        return public_base_url
+    return f"{public_base_url}/{product}"
+
+
+def _build_product_oauth_storage(
+    product: str, client_secret: str
+) -> tuple[object, bytes]:
+    """Create an encrypted, product-isolated FastMCP OAuth store."""
+    from cryptography.fernet import Fernet
+    from fastmcp.server.auth.jwt_issuer import derive_jwt_key
+    from key_value.aio.stores.disk import DiskStore
+    from key_value.aio.wrappers.encryption import FernetEncryptionWrapper
+
+    jwt_signing_key = derive_jwt_key(
+        high_entropy_material=client_secret,
+        salt="fastmcp-jwt-signing-key",
+    )
+    storage_encryption_key = derive_jwt_key(
+        high_entropy_material=jwt_signing_key.decode(),
+        salt="fastmcp-storage-encryption-key",
+    )
+    storage_directory = settings.home / "oauth-proxy" / product
+    storage_directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if os.name != "nt":
+        storage_directory.chmod(0o700)
+    storage = FernetEncryptionWrapper(
+        key_value=DiskStore(
+            directory=storage_directory,
+        ),
+        fernet=Fernet(key=storage_encryption_key),
+    )
+    return storage, jwt_signing_key
+
+
+def _build_auth_provider(
+    product: str | None = None,
+    public_base_url: str | None = None,
+    isolate_storage: bool = False,
+) -> HardenedOAuthProxy | None:
+    """Build the opt-in OAuth provider used by remote HTTP MCP clients."""
+    if not is_env_truthy(OAUTH_PROXY_ENABLE_ENV, "false"):
+        return None
+
+    oauth_product = product
+    if oauth_product not in DATA_CENTER_OAUTH_PRODUCTS:
+        raise ValueError(
+            "Browser OAuth proxy mode requires a configured Data Center product: "
+            "jira, confluence, or bitbucket"
+        )
+
+    instance_url = os.getenv(f"{oauth_product.upper()}_URL")
+    client_id = _get_product_oauth_value(oauth_product, "CLIENT_ID")
+    client_secret = _get_product_oauth_value(oauth_product, "CLIENT_SECRET")
+    redirect_uri = _get_product_oauth_value(oauth_product, "REDIRECT_URI")
+
+    if not instance_url or not client_id or not client_secret or not redirect_uri:
+        missing = [
+            name
+            for name, value in (
+                ("instance URL", instance_url),
+                ("OAuth client ID", client_id),
+                ("OAuth client secret", client_secret),
+                ("OAuth redirect URI", redirect_uri),
+            )
+            if not value
+        ]
+        raise ValueError(
+            "OAuth mode is enabled but required configuration is missing: "
+            + ", ".join(missing)
+        )
+
+    scope_value = _get_product_oauth_value(oauth_product, "SCOPE")
+    scopes = parse_env_list(scope_value) or []
+    upstream_authorize, upstream_token = _resolve_upstream_oauth_endpoints(instance_url)
+    parsed_redirect = urlparse(redirect_uri)
+    redirect_path = parsed_redirect.path or "/callback"
+    base_url = public_base_url or os.getenv("PUBLIC_BASE_URL")
+    if not base_url and parsed_redirect.scheme and parsed_redirect.netloc:
+        redirect_dir = redirect_path.rsplit("/", 1)[0]
+        base_url = f"{parsed_redirect.scheme}://{parsed_redirect.netloc}{redirect_dir}"
+    if not base_url:
+        raise ValueError(
+            "OAuth mode requires PUBLIC_BASE_URL or an absolute "
+            "ATLASSIAN_OAUTH_REDIRECT_URI"
+        )
+
+    base_path = urlparse(base_url).path.rstrip("/")
+    if base_path and redirect_path.startswith(base_path + "/"):
+        redirect_path = redirect_path[len(base_path) :]
+    if not redirect_path.startswith("/"):
+        redirect_path = f"/{redirect_path}"
+
+    verifier = AtlassianDataCenterTokenVerifier(
+        instance_url=instance_url,
+        product=oauth_product,
+        required_scopes=scopes,
+    )
+    storage_options: dict[str, object] = {}
+    if isolate_storage and oauth_product:
+        client_storage, jwt_signing_key = _build_product_oauth_storage(
+            oauth_product, client_secret
+        )
+        storage_options = {
+            "client_storage": client_storage,
+            "jwt_signing_key": jwt_signing_key,
+        }
+
+    return HardenedOAuthProxy(
+        upstream_authorization_endpoint=upstream_authorize,
+        upstream_token_endpoint=upstream_token,
+        upstream_client_id=client_id,
+        upstream_client_secret=client_secret,
+        token_verifier=verifier,
+        base_url=base_url,
+        redirect_path=redirect_path,
+        allowed_client_redirect_uris=_get_allowed_redirect_uris(),
+        valid_scopes=scopes or None,
+        allowed_grant_types=_get_allowed_grant_types(),
+        forced_scopes=scopes or None,
+        token_endpoint_auth_method="client_secret_post",  # noqa: S106
+        require_authorization_consent=is_env_truthy(
+            "ATLASSIAN_OAUTH_REQUIRE_CONSENT", "true"
+        ),
+        **storage_options,
+    )
+
+
+def _build_product_mcp(product: str) -> AtlassianMCP:
+    """Build one independently authenticated Data Center product server."""
+    provider = _build_auth_provider(
+        product=product,
+        public_base_url=_product_public_base_url(product),
+        isolate_storage=True,
+    )
+    if provider is None:
+        raise ValueError(f"OAuth provider is not enabled for {product}")
+
+    product_mcp = AtlassianMCP(
+        name=f"Atlassian {product.title()} MCP",
+        lifespan=main_lifespan,
+        auth=provider,
+    )
+    product_mcp.oauth_product = product
+    if product == "jira":
+        product_mcp.mount(jira_mcp, prefix="jira")
+        product_mcp.mount(xray_mcp, prefix="xray")
+    elif product == "confluence":
+        product_mcp.mount(confluence_mcp, prefix="confluence")
+    elif product == "bitbucket":
+        product_mcp.mount(bitbucket_mcp, prefix="bitbucket")
+    return product_mcp
+
+
+def _copy_route(app: Starlette, source_path: str, target_path: str) -> Route:
+    """Copy an unprotected metadata route to its RFC-required external path."""
+    for route in app.routes:
+        if isinstance(route, Route) and route.path == source_path:
+            return Route(
+                target_path,
+                endpoint=route.endpoint,
+                methods=route.methods,
+                name=f"{route.name}_{target_path}" if route.name else None,
+                include_in_schema=False,
+            )
+    raise ValueError(f"OAuth metadata route not found: {source_path}")
+
+
+class MultiProductDataCenterMCP(AtlassianMCP):
+    """One HTTP process hosting isolated Data Center OAuth applications."""
+
+    def __init__(self, product_servers: dict[str, AtlassianMCP]) -> None:
+        super().__init__(name="Atlassian Data Center MCP")
+        self.product_servers = product_servers
+
+    def http_app(
+        self,
+        path: str | None = None,
+        middleware: list[Middleware] | None = None,
+        transport: Literal["streamable-http", "sse"] = "streamable-http",
+        stateless_http: bool = False,
+        **kwargs: Any,
+    ) -> Starlette:
+        if transport != "streamable-http":
+            raise ValueError(
+                "Multi-product Data Center OAuth requires streamable-http transport"
+            )
+
+        mcp_path = path or settings.streamable_http_path
+        product_apps: dict[str, Starlette] = {}
+        routes: list[Route | Mount] = [
+            Route("/healthz", _health_check_route, methods=["GET"]),
+            Route("/readyz", _ready_check_route, methods=["GET"]),
+            Route("/metrics", metrics_endpoint, methods=["GET"]),
+        ]
+        for product, server in self.product_servers.items():
+            product_app = server.http_app(
+                path=mcp_path,
+                middleware=middleware,
+                transport="streamable-http",
+                stateless_http=stateless_http,
+                **kwargs,
+            )
+            product_apps[product] = product_app
+            protected_metadata_path = next(
+                route.path
+                for route in product_app.routes
+                if isinstance(route, Route)
+                and route.path.startswith("/.well-known/oauth-protected-resource/")
+            )
+            routes.append(
+                _copy_route(
+                    product_app,
+                    protected_metadata_path,
+                    protected_metadata_path,
+                )
+            )
+            routes.append(
+                _copy_route(
+                    product_app,
+                    "/.well-known/oauth-authorization-server",
+                    f"/.well-known/oauth-authorization-server/{product}",
+                )
+            )
+
+        routes.extend(
+            Mount(f"/{product}", app=product_app)
+            for product, product_app in product_apps.items()
+        )
+
+        @asynccontextmanager
+        async def lifespan(app: Starlette) -> AsyncIterator[None]:
+            async with AsyncExitStack() as stack:
+                for product_app in product_apps.values():
+                    await stack.enter_async_context(
+                        product_app.router.lifespan_context(product_app)
+                    )
+                yield
+
+        app = Starlette(routes=routes, lifespan=lifespan)
+        app.state.path = "/"
+        app.state.fastmcp_server = self
+        return app
+
+
+def _build_main_mcp() -> AtlassianMCP:
+    data_center_products = _get_configured_data_center_oauth_products()
+    if data_center_products:
+        logger.info(
+            "Starting multi-product Data Center OAuth routes for: %s",
+            ", ".join(data_center_products),
+        )
+        return MultiProductDataCenterMCP(
+            {product: _build_product_mcp(product) for product in data_center_products}
+        )
+
+    if is_env_truthy(OAUTH_PROXY_ENABLE_ENV, "false"):
+        raise ValueError(
+            "Browser OAuth proxy mode requires complete Jira, Confluence, or "
+            "Bitbucket Data Center OAuth configuration. Cloud browser proxy "
+            "support is not enabled."
+        )
+
+    server = AtlassianMCP(
+        name="Atlassian MCP",
+        lifespan=main_lifespan,
+        auth=None,
+    )
+    server.mount(jira_mcp, prefix="jira")
+    server.mount(confluence_mcp, prefix="confluence")
+    server.mount(bitbucket_mcp, prefix="bitbucket")
+    server.mount(xray_mcp, prefix="xray")
+    return server
+
+
+main_mcp = _build_main_mcp()
 
 
 @main_mcp.custom_route("/healthz", methods=["GET"], include_in_schema=False)

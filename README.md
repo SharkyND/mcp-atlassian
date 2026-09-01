@@ -63,16 +63,18 @@ MCP Atlassian supports four authentication methods:
 2. Click **Create token**, name it, set expiry
 3. Copy the token immediately
 
-#### C. OAuth 2.0 Authentication (Cloud) - **Advanced**
+#### C. OAuth 2.0 Authentication (Cloud or Data Center) - **Advanced**
 
 > [!NOTE]
 > OAuth 2.0 is more complex to set up but provides enhanced security features. For most users, API Token authentication (Method A) is simpler and sufficient.
+
+**Cloud setup:**
 
 1. Go to [Atlassian Developer Console](https://developer.atlassian.com/console/myapps/)
 2. Create an "OAuth 2.0 (3LO) integration" app
 3. Configure **Permissions** (scopes) for Jira/Confluence
 4. Set **Callback URL** (e.g., `http://localhost:8080/callback`)
-5. Run setup wizard:
+5. Run the Cloud setup wizard:
    ```bash
    docker run --rm -i \
      -p 8080:8080 \
@@ -90,6 +92,143 @@ MCP Atlassian supports four authentication methods:
 
 > [!IMPORTANT]
 > For the standard OAuth flow described above, include `offline_access` in your scope (e.g., `read:jira-work write:jira-work offline_access`). This allows the server to refresh the access token automatically.
+
+**Data Center browser OAuth for deployed HTTP servers:**
+
+The browser OAuth proxy introduced here supports **Atlassian Data Center only**.
+It is separate from the existing Cloud `--oauth-setup` and BYOT workflows. In
+browser mode, each MCP user signs in interactively and receives product-scoped
+access based on their own Atlassian permissions.
+
+One `mcp-atlassian` process and one port can host every configured product:
+
+| Product | MCP endpoint | Registered upstream callback |
+|---|---|---|
+| Jira | `/jira/mcp` | `/jira/oauth/callback` |
+| Confluence | `/confluence/mcp` | `/confluence/oauth/callback` |
+| Bitbucket | `/bitbucket/mcp` | `/bitbucket/oauth/callback` |
+
+Set one common public origin and one complete credential group for each product
+you want to enable:
+```env
+MCP_AUTH_MODE=oauth
+TRANSPORT=streamable-http
+PUBLIC_BASE_URL=https://mcp.example.com
+
+JIRA_URL=https://jira.example.com
+JIRA_OAUTH_CLIENT_ID=your_jira_client_id
+JIRA_OAUTH_CLIENT_SECRET=your_jira_client_secret
+JIRA_OAUTH_REDIRECT_URI=https://mcp.example.com/jira/oauth/callback
+JIRA_OAUTH_SCOPE=WRITE
+
+CONFLUENCE_URL=https://confluence.example.com
+CONFLUENCE_OAUTH_CLIENT_ID=your_confluence_client_id
+CONFLUENCE_OAUTH_CLIENT_SECRET=your_confluence_client_secret
+CONFLUENCE_OAUTH_REDIRECT_URI=https://mcp.example.com/confluence/oauth/callback
+CONFLUENCE_OAUTH_SCOPE=READ WRITE
+
+BITBUCKET_URL=https://confluence.example.com
+BITBUCKET_OAUTH_CLIENT_ID=your_confluence_client_id
+BITBUCKET_OAUTH_CLIENT_SECRET=your_confluence_client_secret
+BITBUCKET_OAUTH_REDIRECT_URI=https://mcp.example.com/confluence/oauth/callback
+BITBUCKET_OAUTH_SCOPE=READ WRITE
+
+ATLASSIAN_OAUTH_ALLOWED_CLIENT_REDIRECT_URIS=http://127.0.0.1:*,http://localhost:*
+ATLASSIAN_OAUTH_REQUIRE_CONSENT=true
+```
+
+Only fully configured Data Center products are mounted. For example, Jira-only
+configuration exposes `/jira/mcp` without requiring Confluence credentials.
+Register every `*_OAUTH_REDIRECT_URI` exactly in the matching Data Center
+incoming application link.
+
+Start the single server:
+
+```bash
+uv run mcp-atlassian \
+  --transport streamable-http \
+  --host 0.0.0.0 \
+  --port 8000 \
+  --auth-mode oauth
+```
+
+Configure MCP clients without PAT or product-selection headers:
+
+```json
+{
+  "servers": {
+    "jira-dc": {
+      "type": "http",
+      "url": "https://mcp.example.com/jira/mcp"
+    },
+    "confluence-dc": {
+      "type": "http",
+      "url": "https://mcp.example.com/confluence/mcp"
+    },
+    "bitbucket-dc": {
+      "type": "http",
+      "url": "https://mcp.example.com/bitbucket/mcp"
+    }
+  }
+}
+```
+
+The ingress must forward product paths and root `/.well-known/*` OAuth
+discovery paths to the same port without stripping product prefixes. Use one
+replica and persist `/home/app/.local/share/fastmcp`; each product has an
+independent encrypted DCR/token store.
+
+**Data Center OAuth setup:**
+
+1. Create an incoming application link in each Data Center product.
+2. Register that product's exact callback and scopes.
+3. Configure the matching product environment variables.
+4. Start `mcp-atlassian` once with `--auth-mode oauth`.
+5. Connect to each configured product MCP URL and approve its browser consent.
+
+**Data Center OAuth Scopes by Product:**
+
+- **Jira** scopes: `READ`, `WRITE`, `ADMIN`, `SYSTEM_ADMIN`
+  - `READ`: View issues, projects, and other Jira content
+  - `WRITE`: Create and update issues, add comments, manage workflows (most common)
+  - `ADMIN`: Perform administrative operations
+  - `SYSTEM_ADMIN`: Full system administration
+  - Default: `WRITE`
+  - Xray for Jira uses the same Jira scopes and credentials
+
+- **Confluence** scopes: `READ`, `WRITE`, `ADMIN`, `SYSTEM_ADMIN`
+  - `READ`: View pages and spaces
+  - `WRITE`: Create and update pages, add comments (most common)
+  - `ADMIN`: Perform administrative operations
+  - `SYSTEM_ADMIN`: Full system administration
+  - Default: `WRITE`
+
+- **Bitbucket** scopes: Space-separated combinations of:
+  - `REPO_READ`: View projects and repositories, pull code, clone, fork, comment on pull requests
+  - `REPO_WRITE`: Push code, merge pull requests, create branches
+  - `REPO_ADMIN`: Delete pull requests, update repository settings and permissions
+  - `PROJECT_ADMIN`: Create repositories, update project settings and permissions
+  - `ADMIN_WRITE`: Administer Bitbucket (excluding backups/imports)
+  - `SYSTEM_ADMIN`: Full system administration
+  - Recommended: `REPO_READ REPO_WRITE` for most MCP operations
+  - Add `PROJECT_ADMIN` only if you need to create repositories
+
+**Service-Specific Configuration:**
+
+Each Data Center product normally has its own incoming application link. Use product-specific environment variables:
+- Jira: `JIRA_OAUTH_CLIENT_ID`, `JIRA_OAUTH_CLIENT_SECRET`, `JIRA_OAUTH_REDIRECT_URI`, `JIRA_OAUTH_SCOPE`
+- Confluence: `CONFLUENCE_OAUTH_CLIENT_ID`, `CONFLUENCE_OAUTH_CLIENT_SECRET`, `CONFLUENCE_OAUTH_REDIRECT_URI`, `CONFLUENCE_OAUTH_SCOPE`
+- Bitbucket: `BITBUCKET_OAUTH_CLIENT_ID`, `BITBUCKET_OAUTH_CLIENT_SECRET`, `BITBUCKET_OAUTH_REDIRECT_URI`, `BITBUCKET_OAUTH_SCOPE`
+
+For Data Center browser OAuth, `PUBLIC_BASE_URL` is the common public origin;
+the server adds each product path. Product-specific OAuth values override
+shared defaults.
+
+Data Center access and refresh tokens are issued by the instance at
+`/rest/oauth2/latest/token`. If the instance does not issue a refresh token,
+the MCP client must start browser authorization again after the access token
+expires.
+
 
 <details>
 <summary>Alternative: Using a Pre-existing OAuth Access Token (BYOT)</summary>
@@ -333,12 +472,12 @@ For Server/Data Center deployments, use direct variable passing:
 </details>
 
 <details>
-<summary>OAuth 2.0 Configuration (Cloud Only)</summary>
+<summary>OAuth 2.0 Configuration (Cloud and Data Center)</summary>
 <a name="oauth-20-configuration-example-cloud-only"></a>
 
-These examples show how to configure `mcp-atlassian` in your IDE (like Cursor or Claude Desktop) when using OAuth 2.0 for Atlassian Cloud.
+These examples show how to configure `mcp-atlassian` in an MCP client when using OAuth 2.0 for Atlassian Cloud or Data Center.
 
-**Example for Standard OAuth 2.0 Flow (using Setup Wizard):**
+**Cloud OAuth 2.0 Flow (using Setup Wizard):**
 
 This configuration is for when you use the server's built-in OAuth client and have completed the [OAuth setup wizard](#c-oauth-20-authentication-cloud---advanced).
 
@@ -381,6 +520,9 @@ This configuration is for when you use the server's built-in OAuth client and ha
 >   - Other `ATLASSIAN_OAUTH_*` client variables are from your OAuth app in the Atlassian Developer Console.
 >   - `JIRA_URL` and `CONFLUENCE_URL` for your Cloud instances are always required.
 >   - The volume mount (`-v .../.mcp-atlassian:/home/app/.mcp-atlassian`) is crucial for persisting the OAuth tokens obtained by the wizard, enabling automatic refresh.
+
+For Data Center, use the remote browser OAuth deployment described earlier in
+this guide. It uses `--auth-mode oauth` and does not require the setup wizard.
 
 **Example for Pre-existing Access Token (BYOT - Bring Your Own Token):**
 

@@ -128,6 +128,47 @@ class TestBitbucketClient:
             url=expected_url, session=mock_session_instance, cloud=True, verify_ssl=True
         )
 
+    @patch("mcp_atlassian.bitbucket.client.Bitbucket")
+    @patch("mcp_atlassian.bitbucket.client.configure_ssl_verification")
+    @patch("mcp_atlassian.bitbucket.client.configure_oauth_session")
+    @patch("mcp_atlassian.bitbucket.client.Session")
+    def test_init_oauth_data_center(
+        self,
+        mock_session,
+        mock_oauth_config,
+        mock_ssl_config,
+        mock_bitbucket,
+    ):
+        """Test Data Center OAuth uses the configured instance URL."""
+        oauth_conf = OAuthConfig(
+            client_id="client_id",
+            client_secret="client_secret",
+            redirect_uri="http://localhost:8000/callback",
+            scope="PROJECT_ADMIN",
+            base_url="https://bitbucket.company.com",
+            access_token="access_token",
+        )
+        config = BitbucketConfig(
+            url="https://bitbucket.company.com",
+            auth_type="oauth",
+            oauth_config=oauth_conf,
+        )
+        mock_session_instance = MagicMock()
+        mock_session.return_value = mock_session_instance
+        mock_oauth_config.return_value = True
+        mock_bitbucket.return_value._session = mock_session_instance
+
+        BitbucketClient(config)
+
+        mock_oauth_config.assert_called_once_with(mock_session_instance, oauth_conf)
+        mock_bitbucket.assert_called_once_with(
+            url="https://bitbucket.company.com",
+            session=mock_session_instance,
+            cloud=False,
+            verify_ssl=True,
+        )
+        mock_ssl_config.assert_called_once()
+
     @patch("mcp_atlassian.bitbucket.client.configure_oauth_session")
     @patch("mcp_atlassian.bitbucket.client.Session")
     def test_init_oauth_missing_cloud_id(
@@ -137,7 +178,8 @@ class TestBitbucketClient:
         oauth_config.oauth_config.cloud_id = None
 
         with pytest.raises(
-            ValueError, match="OAuth authentication requires a valid cloud_id"
+            ValueError,
+            match="OAuth authentication requires a cloud_id for Cloud or base_url for Data Center",
         ):
             BitbucketClient(oauth_config)
 

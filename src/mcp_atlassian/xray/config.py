@@ -15,7 +15,7 @@ class XrayConfig:
 
     Handles authentication for Xray Cloud and Server/Data Center:
     - Cloud: username/API token (basic auth) or OAuth 2.0 (3LO)
-    - Server/DC: personal access token or basic auth
+    - Server/DC: personal access token, basic auth, or Jira browser OAuth
     """
 
     url: str  # Base URL for Xray
@@ -85,8 +85,7 @@ class XrayConfig:
             XrayConfig that reuses Jira URL, authentication, and proxy settings.
 
         Raises:
-            ValueError: If Jira config is using unsupported auth for Xray or a
-                Cloud URL.
+            ValueError: If Jira config uses a Cloud URL.
         """
         if is_atlassian_cloud_url(jira_config.url):
             error_msg = (
@@ -97,13 +96,6 @@ class XrayConfig:
             )
             raise ValueError(error_msg)
 
-        if jira_config.auth_type == "oauth":
-            error_msg = (
-                "Xray for Jira does not support OAuth authentication. "
-                "Use Jira basic (username/API token) or PAT credentials."
-            )
-            raise ValueError(error_msg)
-
         # Reuse Jira's proxy overrides and custom headers for Xray
         return cls(
             url=jira_config.url,
@@ -111,7 +103,7 @@ class XrayConfig:
             username=jira_config.username,
             api_token=jira_config.api_token,
             personal_token=jira_config.personal_token,
-            oauth_config=None,
+            oauth_config=jira_config.oauth_config,
             ssl_verify=jira_config.ssl_verify,
             projects_filter=jira_config.projects_filter,
             http_proxy=jira_config.http_proxy,
@@ -138,7 +130,7 @@ class XrayConfig:
                         and self.oauth_config.client_secret
                         and self.oauth_config.redirect_uri
                         and self.oauth_config.scope
-                        and self.oauth_config.cloud_id
+                        and (self.oauth_config.cloud_id or self.oauth_config.base_url)
                     ):
                         return True
                     # Minimal OAuth configuration (user-provided tokens mode)
