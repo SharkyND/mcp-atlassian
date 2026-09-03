@@ -17,11 +17,27 @@ from .protocols import (
     EpicOperationsProto,
     FieldsOperationsProto,
     IssueOperationsProto,
+    LinksOperationsProto,
     ProjectsOperationsProto,
     UsersOperationsProto,
 )
 
 logger = logging.getLogger("mcp-jira")
+
+# Standard (non-custom) fields that are safe to copy verbatim from a source
+# issue's raw API response when cloning, since Jira accepts the same object
+# shape on issue creation as it returns on retrieval for these fields.
+_CLONABLE_STANDARD_FIELDS: tuple[str, ...] = (
+    "priority",
+    "labels",
+    "components",
+    "fixVersions",
+    "versions",
+    "assignee",
+    "duedate",
+    "security",
+    "environment",
+)
 
 
 class IssuesMixin(
@@ -30,6 +46,7 @@ class IssuesMixin(
     EpicOperationsProto,
     FieldsOperationsProto,
     IssueOperationsProto,
+    LinksOperationsProto,
     ProjectsOperationsProto,
     UsersOperationsProto,
 ):
@@ -651,6 +668,299 @@ class IssuesMixin(
         except Exception as e:
             self._handle_create_issue_error(e, issue_type)
             raise  # Re-raise after logging
+
+    def _get_create_screen_field_ids(
+        self, project_key: str, issue_type_name: str
+    ) -> set[str] | None:
+        """
+        Get the field IDs available on the create screen for a project and
+        issue type, used to pre-verify fields before cloning.
+
+        Args:
+            project_key: The target project key
+            issue_type_name: The issue type name to resolve to an ID
+
+        Returns:
+            Set of field IDs available for creation, or None if the create
+            screen metadata could not be determined (callers should then skip
+            filtering rather than fail the clone).
+        """
+        try:
+            issue_type_id = None
+            for issue_type in self.get_project_issue_types(project_key):
+                if issue_type.get("name", "").lower() == issue_type_name.lower():
+                    issue_type_id = issue_type.get("id")
+                    break
+            if not issue_type_id:
+                logger.warning(
+                    f"Issue type '{issue_type_name}' not found in project "
+                    f"'{project_key}'; skipping create-screen field verification"
+                )
+                return None
+
+            meta = self.jira.issue_createmeta_fieldtypes(
+                project=project_key, issue_type_id=issue_type_id
+            )
+            if (
+                not isinstance(meta, dict)
+                or not isinstance(meta.get("fields"), list)
+                and not isinstance(meta.get("values"), list)
+            ):
+                logger.warning(
+                    f"Unexpected createmeta response for project '{project_key}' "
+                    f"issue type '{issue_type_name}'; skipping field verification"
+                )
+                return None
+
+            return {
+                field_meta["fieldId"]
+                for field_meta in meta.get("fields") or meta.get("values", [])
+                if isinstance(field_meta, dict) and field_meta.get("fieldId")
+            }
+        except Exception as e:  # noqa: BLE001 - field verification is best-effort
+            logger.warning(
+                f"Could not retrieve create screen fields for project "
+                f"'{project_key}' issue type '{issue_type_name}': {e!s}"
+            )
+            return None
+
+    def clone_issue(
+        self,
+        issue_key: str,
+        project_key: str | None = None,
+        summary: str | None = None,
+        *,
+        include_custom_fields: bool = True,
+        link_to_original: bool = True,
+        additional_fields: dict[str, Any] | None = None,
+    ) -> JiraIssue:
+        """
+        Clone an existing Jira issue by copying its fields into a newly created issue.
+
+        Jira Server, Data Center, and Cloud do not expose a single "clone issue"
+        REST endpoint. The built-in Clone action in the Jira UI is implemented
+        client-side as a sequence of calls: fetch the source issue, create a new
+        issue with the copied field values, and link the two issues together with
+        a "Cloners" issue link. This method reproduces that behavior.
+
+        Standard fields copied from the source issue: summary (prefixed with
+        "CLONE - " unless overridden), description, issue type, priority, labels,
+        components, fix versions, affects versions, assignee, due date, security
+        level, and environment. All populated custom fields (``customfield_*``)
+        are also copied unless ``include_custom_fields`` is False. If the source
+        issue is a subtask, its parent is preserved when cloning into the same
+        project.
+
+        Before copying, each standard and custom field is pre-verified against
+        the target project/issue type's create screen metadata. Fields that are
+        not available on the create screen are skipped instead of failing the
+        whole clone; their IDs are returned under the
+        ``clone_excluded_fields`` key of the resulting issue's ``custom_fields``.
+        If the create screen metadata cannot be determined, pre-verification is
+        skipped and all populated fields are copied as before.
+
+        Args:
+            issue_key: The key of the issue to clone (e.g., 'PROJ-123')
+            project_key: Target project key. Defaults to the source issue's project.
+            summary: Summary for the clone. Defaults to "CLONE - <source summary>".
+            include_custom_fields: Whether to copy populated custom fields.
+            link_to_original: Whether to create a "Cloners" issue link back to the
+                source issue after the clone is created.
+            additional_fields: Optional dictionary of fields to override or add on
+                top of the fields copied from the source issue. These are applied
+                verbatim and are not subject to create-screen field verification.
+
+        Returns:
+            JiraIssue model representing the newly created clone. If any fields
+            were excluded because they are not on the target create screen,
+            their IDs are listed under
+            ``custom_fields["clone_excluded_fields"]``.
+
+        Raises:
+            ValueError: If the issue key is missing, the source issue has no
+                fields, a target project cannot be determined, or a subtask has
+                no parent to preserve
+            MCPAtlassianAuthenticationError: If authentication fails with the
+                Jira API (401/403)
+            Exception: If there is an error cloning the issue
+        """
+        if not issue_key:
+            raise ValueError("Issue key is required")
+
+        try:
+            # Obtain the projects filter from the config, same restriction
+            # applied by get_issue. This should NOT be overridden by the request.
+            filter_to_use = self.config.projects_filter
+            if filter_to_use:
+                projects = [p.strip() for p in filter_to_use.split(",")]
+                issue_key_project = issue_key.split("-")[0]
+                if issue_key_project not in projects:
+                    msg = (
+                        "Issue with project prefix "
+                        f"'{issue_key_project}' are restricted by configuration"
+                    )
+                    raise ValueError(msg)
+
+            source_response = self.jira.get_issue(issue_key, fields="*all")
+            if not isinstance(source_response, dict):
+                msg = (
+                    "Unexpected return value type from `jira.get_issue`: "
+                    f"{type(source_response)}"
+                )
+                logger.error(msg)
+                raise TypeError(msg)
+
+            source_fields = source_response.get("fields") or {}
+            if not source_fields:
+                msg = f"Issue {issue_key} has no fields to clone"
+                raise ValueError(msg)
+
+            source_project_key = (source_fields.get("project") or {}).get("key")
+            target_project_key = project_key or source_project_key
+            if not target_project_key:
+                msg = (
+                    "Could not determine a target project for cloning issue "
+                    f"{issue_key}"
+                )
+                raise ValueError(msg)
+
+            source_issue_type = (source_fields.get("issuetype") or {}).get("name")
+            if not source_issue_type:
+                msg = f"Issue {issue_key} has no issue type"
+                raise ValueError(msg)
+
+            new_fields: dict[str, Any] = {
+                "project": {"key": target_project_key},
+                "summary": summary
+                if summary
+                else f"CLONE - {source_fields.get('summary', '')}",
+                "issuetype": {"name": source_issue_type},
+            }
+
+            if source_fields.get("description") is not None:
+                new_fields["description"] = source_fields["description"]
+
+            # Pre-verify fields against the target create screen so unsupported
+            # fields are excluded individually instead of failing the clone.
+            allowed_field_ids = self._get_create_screen_field_ids(
+                target_project_key, source_issue_type
+            )
+            excluded_fields: list[str] = []
+
+            for field_key in _CLONABLE_STANDARD_FIELDS:
+                value = source_fields.get(field_key)
+                if not value:
+                    continue
+                if allowed_field_ids is not None and field_key not in allowed_field_ids:
+                    excluded_fields.append(field_key)
+                    continue
+                new_fields[field_key] = value
+
+            # Subtasks must keep their parent when cloned into the same project
+            parent = source_fields.get("parent")
+            if parent and target_project_key == source_project_key:
+                new_fields["parent"] = {"key": parent["key"]}
+            elif source_issue_type.lower() in ("subtask", "sub-task") and not parent:
+                msg = (
+                    f"Issue {issue_key} is a subtask without a parent "
+                    "and cannot be cloned"
+                )
+                raise ValueError(msg)
+
+            if include_custom_fields:
+                for field_id, value in source_fields.items():
+                    if (
+                        not field_id.startswith("customfield_")
+                        or value is None
+                        or field_id in new_fields
+                    ):
+                        continue
+                    if (
+                        allowed_field_ids is not None
+                        and field_id not in allowed_field_ids
+                    ):
+                        excluded_fields.append(field_id)
+                        continue
+                    new_fields[field_id] = value
+
+            if excluded_fields:
+                logger.warning(
+                    f"Excluded fields not on the create screen for project "
+                    f"'{target_project_key}' issue type '{source_issue_type}' "
+                    f"when cloning {issue_key}: {', '.join(sorted(excluded_fields))}"
+                )
+
+            if additional_fields:
+                new_fields.update(additional_fields)
+
+            response = self.jira.create_issue(fields=new_fields)
+            if not isinstance(response, dict):
+                msg = (
+                    "Unexpected return value type from `jira.create_issue`: "
+                    f"{type(response)}"
+                )
+                logger.error(msg)
+                raise TypeError(msg)
+
+            new_issue_key = response.get("key")
+            if not new_issue_key:
+                msg = "No issue key in response when cloning issue"
+                raise ValueError(msg)
+
+            if link_to_original:
+                try:
+                    # "Cloners" link semantics: the outward issue "clones" the
+                    # inward issue, so the new clone is the outward issue and
+                    # the source issue is the inward issue.
+                    self.create_issue_link(
+                        {
+                            "type": {"name": "Cloners"},
+                            "inwardIssue": {"key": issue_key},
+                            "outwardIssue": {"key": new_issue_key},
+                        }
+                    )
+                except Exception as link_error:  # noqa: BLE001 - linking is best-effort
+                    logger.warning(
+                        f"Cloned {issue_key} to {new_issue_key} but could not create "
+                        f"'Cloners' link: {link_error!s}"
+                    )
+
+            issue_data = self.jira.get_issue(new_issue_key)
+            if not isinstance(issue_data, dict):
+                msg = (
+                    "Unexpected return value type from `jira.get_issue`: "
+                    f"{type(issue_data)}"
+                )
+                logger.error(msg)
+                raise TypeError(msg)
+            cloned_issue = JiraIssue.from_api_response(issue_data)
+            if excluded_fields:
+                cloned_issue.custom_fields["clone_excluded_fields"] = sorted(
+                    set(excluded_fields)
+                )
+            return cloned_issue
+
+        except HTTPError as http_err:
+            if http_err.response is not None and http_err.response.status_code in [
+                401,
+                403,
+            ]:
+                error_msg = (
+                    "Authentication failed for Jira API "
+                    f"({http_err.response.status_code}). "
+                    "Token may be expired or invalid. Please verify credentials."
+                )
+                logger.error(error_msg)
+                raise MCPAtlassianAuthenticationError(error_msg) from http_err
+            logger.error(f"HTTP error while cloning issue {issue_key}: {http_err}")
+            raise
+        except (ValueError, TypeError):
+            raise
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"Error cloning issue {issue_key}: {error_msg}")
+            msg = f"Error cloning issue {issue_key}: {error_msg}"
+            raise Exception(msg) from e
 
     def _is_epic_issue_type(self, issue_type: str) -> bool:
         """

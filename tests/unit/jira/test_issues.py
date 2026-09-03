@@ -1047,6 +1047,451 @@ class TestIssuesMixin:
             update_history=False,
         )
 
+    def test_clone_issue_basic(self, issues_mixin: IssuesMixin):
+        """Test cloning an issue copies standard fields and links the clone."""
+        source_response = {
+            "id": "10001",
+            "key": "TEST-100",
+            "fields": {
+                "project": {"key": "TEST"},
+                "issuetype": {"name": "Bug"},
+                "summary": "Original bug",
+                "description": "Some description text",
+                "priority": {"id": "3", "name": "Medium"},
+                "labels": ["backend", "urgent"],
+                "components": [{"id": "10000", "name": "API"}],
+                "fixVersions": [{"id": "10010", "name": "v1.0"}],
+                "versions": [{"id": "10020", "name": "v0.9"}],
+                "assignee": {"accountId": "acc-1", "displayName": "Jane Doe"},
+                "duedate": "2024-01-01",
+                "security": {"id": "10030", "name": "Internal"},
+                "environment": "Production",
+                "customfield_10001": "custom value",
+                "customfield_10002": None,
+                "status": {"name": "Open"},
+                "reporter": {"accountId": "acc-2"},
+                "created": "2023-01-01T00:00:00.000+0000",
+                "updated": "2023-01-02T00:00:00.000+0000",
+            },
+        }
+        new_issue_data = {
+            "id": "10099",
+            "key": "TEST-101",
+            "fields": {
+                "summary": "CLONE - Original bug",
+                "issuetype": {"name": "Bug"},
+                "status": {"name": "Open"},
+            },
+        }
+        issues_mixin.jira.get_issue.side_effect = [source_response, new_issue_data]
+        issues_mixin.jira.create_issue.return_value = {
+            "id": "10099",
+            "key": "TEST-101",
+        }
+        issues_mixin.jira.create_issue_link.return_value = {}
+
+        result = issues_mixin.clone_issue("TEST-100")
+
+        # Verify the fields passed to create_issue
+        created_fields = issues_mixin.jira.create_issue.call_args.kwargs["fields"]
+        assert created_fields["project"] == {"key": "TEST"}
+        assert created_fields["summary"] == "CLONE - Original bug"
+        assert created_fields["issuetype"] == {"name": "Bug"}
+        assert created_fields["description"] == "Some description text"
+        assert created_fields["priority"] == {"id": "3", "name": "Medium"}
+        assert created_fields["labels"] == ["backend", "urgent"]
+        assert created_fields["components"] == [{"id": "10000", "name": "API"}]
+        assert created_fields["fixVersions"] == [{"id": "10010", "name": "v1.0"}]
+        assert created_fields["versions"] == [{"id": "10020", "name": "v0.9"}]
+        assert created_fields["assignee"] == {
+            "accountId": "acc-1",
+            "displayName": "Jane Doe",
+        }
+        assert created_fields["duedate"] == "2024-01-01"
+        assert created_fields["security"] == {"id": "10030", "name": "Internal"}
+        assert created_fields["environment"] == "Production"
+        assert created_fields["customfield_10001"] == "custom value"
+
+        # Fields that must never be copied
+        for excluded in (
+            "customfield_10002",
+            "status",
+            "reporter",
+            "created",
+            "updated",
+        ):
+            assert excluded not in created_fields
+
+        # Verify the "Cloners" link was created with the new issue as outward
+        issues_mixin.jira.create_issue_link.assert_called_once_with(
+            {
+                "type": {"name": "Cloners"},
+                "inwardIssue": {"key": "TEST-100"},
+                "outwardIssue": {"key": "TEST-101"},
+            }
+        )
+
+        assert isinstance(result, JiraIssue)
+        assert result.key == "TEST-101"
+
+    def test_clone_issue_excludes_fields_not_on_create_screen(
+        self, issues_mixin: IssuesMixin
+    ):
+        """Test fields absent from the create screen are excluded, not all-or-none."""
+        source_response = {
+            "id": "10001",
+            "key": "TEST-100",
+            "fields": {
+                "project": {"key": "TEST"},
+                "issuetype": {"name": "Bug"},
+                "summary": "Original bug",
+                "priority": {"id": "3", "name": "Medium"},
+                "environment": "Production",
+                "customfield_10001": "keep me",
+                "customfield_10005": "drop me",
+            },
+        }
+        new_issue_data = {
+            "id": "10099",
+            "key": "TEST-101",
+            "fields": {"summary": "CLONE - Original bug"},
+        }
+        issues_mixin.jira.get_issue.side_effect = [source_response, new_issue_data]
+        issues_mixin.jira.create_issue.return_value = {
+            "id": "10099",
+            "key": "TEST-101",
+        }
+        issues_mixin.jira.create_issue_link.return_value = {}
+        issues_mixin.jira.issue_createmeta.return_value = {
+            "projects": [{"issuetypes": [{"id": "10001", "name": "Bug"}]}]
+        }
+        issues_mixin.jira.issue_createmeta_fieldtypes.return_value = {
+            "fields": [
+                {"fieldId": "priority"},
+                {"fieldId": "customfield_10001"},
+            ]
+        }
+
+        result = issues_mixin.clone_issue("TEST-100")
+
+        created_fields = issues_mixin.jira.create_issue.call_args.kwargs["fields"]
+        assert created_fields["priority"] == {"id": "3", "name": "Medium"}
+        assert created_fields["customfield_10001"] == "keep me"
+        assert "environment" not in created_fields
+        assert "customfield_10005" not in created_fields
+
+        issues_mixin.jira.issue_createmeta_fieldtypes.assert_called_once_with(
+            project="TEST", issue_type_id="10001"
+        )
+        assert result.custom_fields["clone_excluded_fields"] == [
+            "customfield_10005",
+            "environment",
+        ]
+
+    def test_clone_issue_skips_verification_when_createmeta_unavailable(
+        self, issues_mixin: IssuesMixin
+    ):
+        """Test fields are copied as-is when the create screen can't be resolved."""
+        source_response = {
+            "id": "10001",
+            "key": "TEST-100",
+            "fields": {
+                "project": {"key": "TEST"},
+                "issuetype": {"name": "Bug"},
+                "summary": "Original bug",
+                "environment": "Production",
+                "customfield_10005": "still copied",
+            },
+        }
+        new_issue_data = {
+            "id": "10099",
+            "key": "TEST-101",
+            "fields": {"summary": "CLONE - Original bug"},
+        }
+        issues_mixin.jira.get_issue.side_effect = [source_response, new_issue_data]
+        issues_mixin.jira.create_issue.return_value = {
+            "id": "10099",
+            "key": "TEST-101",
+        }
+        issues_mixin.jira.create_issue_link.return_value = {}
+        # No matching issue type resolvable, so create-screen verification is skipped
+        issues_mixin.jira.issue_createmeta.return_value = {
+            "projects": [{"issuetypes": []}]
+        }
+
+        result = issues_mixin.clone_issue("TEST-100")
+
+        created_fields = issues_mixin.jira.create_issue.call_args.kwargs["fields"]
+        assert created_fields["environment"] == "Production"
+        assert created_fields["customfield_10005"] == "still copied"
+        assert "clone_excluded_fields" not in result.custom_fields
+
+    def test_clone_issue_custom_summary(self, issues_mixin: IssuesMixin):
+        """Test cloning an issue with an explicit summary override."""
+        source_response = {
+            "id": "10001",
+            "key": "TEST-100",
+            "fields": {
+                "project": {"key": "TEST"},
+                "issuetype": {"name": "Task"},
+                "summary": "Original task",
+            },
+        }
+        new_issue_data = {
+            "id": "10099",
+            "key": "TEST-101",
+            "fields": {"summary": "My Custom Summary", "issuetype": {"name": "Task"}},
+        }
+        issues_mixin.jira.get_issue.side_effect = [source_response, new_issue_data]
+        issues_mixin.jira.create_issue.return_value = {
+            "id": "10099",
+            "key": "TEST-101",
+        }
+        issues_mixin.jira.create_issue_link.return_value = {}
+
+        issues_mixin.clone_issue("TEST-100", summary="My Custom Summary")
+
+        created_fields = issues_mixin.jira.create_issue.call_args.kwargs["fields"]
+        assert created_fields["summary"] == "My Custom Summary"
+
+    def test_clone_issue_to_different_project_drops_parent(
+        self, issues_mixin: IssuesMixin
+    ):
+        """Test cloning a subtask to a different project does not keep the parent."""
+        source_response = {
+            "id": "10001",
+            "key": "TEST-100",
+            "fields": {
+                "project": {"key": "TEST"},
+                "issuetype": {"name": "Subtask"},
+                "summary": "Original subtask",
+                "parent": {"key": "TEST-99"},
+            },
+        }
+        new_issue_data = {
+            "id": "10099",
+            "key": "OTHER-1",
+            "fields": {"summary": "CLONE - Original subtask"},
+        }
+        issues_mixin.jira.get_issue.side_effect = [source_response, new_issue_data]
+        issues_mixin.jira.create_issue.return_value = {
+            "id": "10099",
+            "key": "OTHER-1",
+        }
+        issues_mixin.jira.create_issue_link.return_value = {}
+
+        issues_mixin.clone_issue("TEST-100", project_key="OTHER")
+
+        created_fields = issues_mixin.jira.create_issue.call_args.kwargs["fields"]
+        assert created_fields["project"] == {"key": "OTHER"}
+        assert "parent" not in created_fields
+
+    def test_clone_issue_preserves_subtask_parent_same_project(
+        self, issues_mixin: IssuesMixin
+    ):
+        """Test cloning a subtask into the same project preserves its parent."""
+        source_response = {
+            "id": "10001",
+            "key": "TEST-100",
+            "fields": {
+                "project": {"key": "TEST"},
+                "issuetype": {"name": "Subtask"},
+                "summary": "Original subtask",
+                "parent": {"key": "TEST-99"},
+            },
+        }
+        new_issue_data = {
+            "id": "10099",
+            "key": "TEST-101",
+            "fields": {"summary": "CLONE - Original subtask"},
+        }
+        issues_mixin.jira.get_issue.side_effect = [source_response, new_issue_data]
+        issues_mixin.jira.create_issue.return_value = {
+            "id": "10099",
+            "key": "TEST-101",
+        }
+        issues_mixin.jira.create_issue_link.return_value = {}
+
+        issues_mixin.clone_issue("TEST-100")
+
+        created_fields = issues_mixin.jira.create_issue.call_args.kwargs["fields"]
+        assert created_fields["parent"] == {"key": "TEST-99"}
+
+    def test_clone_issue_subtask_without_parent_raises(self, issues_mixin: IssuesMixin):
+        """Test cloning a parentless subtask raises a ValueError."""
+        source_response = {
+            "id": "10001",
+            "key": "TEST-100",
+            "fields": {
+                "project": {"key": "TEST"},
+                "issuetype": {"name": "Subtask"},
+                "summary": "Orphan subtask",
+            },
+        }
+        issues_mixin.jira.get_issue.return_value = source_response
+
+        with pytest.raises(ValueError, match="subtask without a parent"):
+            issues_mixin.clone_issue("TEST-100")
+
+        issues_mixin.jira.create_issue.assert_not_called()
+
+    def test_clone_issue_missing_issue_key_raises(self, issues_mixin: IssuesMixin):
+        """Test cloning without an issue key raises a ValueError."""
+        with pytest.raises(ValueError, match="Issue key is required"):
+            issues_mixin.clone_issue("")
+
+    def test_clone_issue_no_fields_raises(self, issues_mixin: IssuesMixin):
+        """Test cloning an issue with an empty fields payload raises a ValueError."""
+        issues_mixin.jira.get_issue.return_value = {"id": "10001", "key": "TEST-100"}
+
+        with pytest.raises(ValueError, match="has no fields to clone"):
+            issues_mixin.clone_issue("TEST-100")
+
+    def test_clone_issue_link_failure_does_not_fail_clone(
+        self, issues_mixin: IssuesMixin
+    ):
+        """Test that a failure creating the 'Cloners' link does not fail cloning."""
+        source_response = {
+            "id": "10001",
+            "key": "TEST-100",
+            "fields": {
+                "project": {"key": "TEST"},
+                "issuetype": {"name": "Task"},
+                "summary": "Original task",
+            },
+        }
+        new_issue_data = {
+            "id": "10099",
+            "key": "TEST-101",
+            "fields": {"summary": "CLONE - Original task"},
+        }
+        issues_mixin.jira.get_issue.side_effect = [source_response, new_issue_data]
+        issues_mixin.jira.create_issue.return_value = {
+            "id": "10099",
+            "key": "TEST-101",
+        }
+        issues_mixin.jira.create_issue_link.side_effect = Exception("link API down")
+
+        result = issues_mixin.clone_issue("TEST-100")
+
+        assert result.key == "TEST-101"
+
+    def test_clone_issue_link_to_original_false_skips_link(
+        self, issues_mixin: IssuesMixin
+    ):
+        """Test that link_to_original=False skips creating a 'Cloners' link."""
+        source_response = {
+            "id": "10001",
+            "key": "TEST-100",
+            "fields": {
+                "project": {"key": "TEST"},
+                "issuetype": {"name": "Task"},
+                "summary": "Original task",
+            },
+        }
+        new_issue_data = {
+            "id": "10099",
+            "key": "TEST-101",
+            "fields": {"summary": "CLONE - Original task"},
+        }
+        issues_mixin.jira.get_issue.side_effect = [source_response, new_issue_data]
+        issues_mixin.jira.create_issue.return_value = {
+            "id": "10099",
+            "key": "TEST-101",
+        }
+
+        issues_mixin.clone_issue("TEST-100", link_to_original=False)
+
+        issues_mixin.jira.create_issue_link.assert_not_called()
+
+    def test_clone_issue_include_custom_fields_false(self, issues_mixin: IssuesMixin):
+        """Test that include_custom_fields=False skips copying custom fields."""
+        source_response = {
+            "id": "10001",
+            "key": "TEST-100",
+            "fields": {
+                "project": {"key": "TEST"},
+                "issuetype": {"name": "Task"},
+                "summary": "Original task",
+                "customfield_10001": "custom value",
+            },
+        }
+        new_issue_data = {
+            "id": "10099",
+            "key": "TEST-101",
+            "fields": {"summary": "CLONE - Original task"},
+        }
+        issues_mixin.jira.get_issue.side_effect = [source_response, new_issue_data]
+        issues_mixin.jira.create_issue.return_value = {
+            "id": "10099",
+            "key": "TEST-101",
+        }
+        issues_mixin.jira.create_issue_link.return_value = {}
+
+        issues_mixin.clone_issue("TEST-100", include_custom_fields=False)
+
+        created_fields = issues_mixin.jira.create_issue.call_args.kwargs["fields"]
+        assert "customfield_10001" not in created_fields
+
+    def test_clone_issue_additional_fields_override(self, issues_mixin: IssuesMixin):
+        """Test that additional_fields overrides copied field values."""
+        source_response = {
+            "id": "10001",
+            "key": "TEST-100",
+            "fields": {
+                "project": {"key": "TEST"},
+                "issuetype": {"name": "Task"},
+                "summary": "Original task",
+                "priority": {"id": "3", "name": "Medium"},
+            },
+        }
+        new_issue_data = {
+            "id": "10099",
+            "key": "TEST-101",
+            "fields": {"summary": "CLONE - Original task"},
+        }
+        issues_mixin.jira.get_issue.side_effect = [source_response, new_issue_data]
+        issues_mixin.jira.create_issue.return_value = {
+            "id": "10099",
+            "key": "TEST-101",
+        }
+        issues_mixin.jira.create_issue_link.return_value = {}
+
+        issues_mixin.clone_issue(
+            "TEST-100",
+            additional_fields={"priority": {"name": "High"}},
+        )
+
+        created_fields = issues_mixin.jira.create_issue.call_args.kwargs["fields"]
+        assert created_fields["priority"] == {"name": "High"}
+
+    def test_clone_issue_respects_projects_filter(self, issues_mixin: IssuesMixin):
+        """Test cloning respects the configured projects filter restriction."""
+        issues_mixin.config.projects_filter = "DEV"
+
+        with pytest.raises(Exception, match="restricted by configuration"):
+            issues_mixin.clone_issue("TEST-100")
+
+        issues_mixin.jira.get_issue.assert_not_called()
+
+    def test_clone_issue_auth_error(self, issues_mixin: IssuesMixin):
+        """Test that a 401 HTTPError while cloning raises an authentication error."""
+        from unittest.mock import Mock
+
+        from requests import HTTPError as RequestsHTTPError
+        from requests import Response
+
+        from mcp_atlassian.exceptions import MCPAtlassianAuthenticationError
+
+        mock_response = Mock(spec=Response)
+        mock_response.status_code = 401
+        http_error = RequestsHTTPError("Unauthorized")
+        http_error.response = mock_response
+        issues_mixin.jira.get_issue.side_effect = http_error
+
+        with pytest.raises(MCPAtlassianAuthenticationError):
+            issues_mixin.clone_issue("TEST-100")
+
     def test_batch_create_issues_basic(self, issues_mixin: IssuesMixin):
         """Test basic functionality of batch_create_issues."""
         # Setup test data
