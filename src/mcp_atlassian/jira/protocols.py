@@ -205,3 +205,24 @@ class UsersOperationsProto(Protocol):
         Raises:
             ValueError: If the account ID could not be found
         """
+
+
+class LinksOperationsProto(Protocol):
+    """Protocol defining issue link operations interface."""
+
+    @abstractmethod
+    def create_issue_link(self, data: dict[str, Any]) -> dict[str, Any]:
+        """
+        Create a link between two issues.
+
+        Args:
+            data: A dictionary containing the link data (type, inwardIssue,
+                outwardIssue, and an optional comment)
+
+        Returns:
+            Dictionary with the created link information
+
+        Raises:
+            ValueError: If required fields are missing
+            Exception: If there is an error creating the issue link
+        """

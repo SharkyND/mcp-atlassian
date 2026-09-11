@@ -1339,6 +1339,124 @@ async def create_issue_link(
 
 @jira_mcp.tool(tags={"jira", "write"})
 @check_write_access
+async def clone_issue(
+    ctx: Context,
+    issue_key: Annotated[
+        str, Field(description="The key of the issue to clone (e.g., 'PROJ-123')")
+    ],
+    project_key: Annotated[
+        str | None,
+        Field(
+            description=(
+                "(Optional) Target project key for the clone (e.g., 'PROJ'). "
+                "Defaults to the source issue's project. If the source issue is "
+                "a subtask, its parent link is only preserved when cloning into "
+                "the same project."
+            ),
+            default=None,
+        ),
+    ] = None,
+    summary: Annotated[
+        str | None,
+        Field(
+            description=(
+                "(Optional) Summary for the cloned issue. Defaults to "
+                "'CLONE - <source summary>', matching Jira's built-in Clone action."
+            ),
+            default=None,
+        ),
+    ] = None,
+    *,
+    include_custom_fields: Annotated[
+        bool,
+        Field(
+            description=(
+                "Whether to copy all populated custom fields from the source "
+                "issue (e.g., Epic Name, Epic Link, and other customfield_* values)"
+            ),
+            default=True,
+        ),
+    ] = True,
+    link_to_original: Annotated[
+        bool,
+        Field(
+            description=(
+                "Whether to create a 'Cloners' issue link between the new clone "
+                "and the source issue, matching Jira's built-in Clone action"
+            ),
+            default=True,
+        ),
+    ] = True,
+    additional_fields: Annotated[
+        dict[str, Any] | None,
+        Field(
+            description=(
+                "(Optional) Dictionary of fields to override or add on top of "
+                "the fields copied from the source issue. "
+                "Example: {'priority': {'name': 'High'}}"
+            ),
+            default=None,
+        ),
+    ] = None,
+) -> str:
+    """Clone an existing Jira issue by copying its fields into a new issue.
+
+    Jira does not provide a single "clone issue" REST endpoint on Data Center,
+    Server, or Cloud. This tool reproduces the Jira UI's built-in Clone action:
+    it fetches the source issue's fields, creates a new issue with those fields
+    copied over (summary, description, issue type, priority, labels, components,
+    fix/affects versions, assignee, due date, security level, environment, and
+    populated custom fields), and links the new issue back to the source issue
+    with a "Cloners" issue link.
+
+    Each standard and custom field is pre-verified against the target project's
+    create screen metadata before being copied, so fields that are not available
+    for that project/issue type are excluded individually instead of failing the
+    whole clone. Any excluded fields are listed under "excluded_fields" in the
+    response.
+
+    Args:
+        ctx: The FastMCP context.
+        issue_key: The key of the issue to clone.
+        project_key: Optional target project key.
+        summary: Optional summary override for the clone.
+        include_custom_fields: Whether to copy populated custom fields.
+        link_to_original: Whether to create a "Cloners" link back to the source issue.
+        additional_fields: Optional dictionary of fields to override or add.
+
+    Returns:
+        JSON string representing the newly created clone issue. Includes an
+        "excluded_fields" list when fields were skipped because they are not
+        on the target create screen.
+
+    Raises:
+        ValueError: If in read-only mode, Jira client unavailable, or the source
+            issue/target project is invalid.
+    """
+    jira = await get_jira_fetcher(ctx)
+    issue = jira.clone_issue(
+        issue_key=issue_key,
+        project_key=project_key,
+        summary=summary,
+        include_custom_fields=include_custom_fields,
+        link_to_original=link_to_original,
+        additional_fields=additional_fields,
+    )
+    result = issue.to_simplified_dict()
+    response: dict[str, Any] = {
+        "message": f"Issue {issue_key} cloned successfully",
+        "issue": result,
+    }
+    if (
+        hasattr(issue, "custom_fields")
+        and "clone_excluded_fields" in issue.custom_fields
+    ):
+        response["excluded_fields"] = issue.custom_fields["clone_excluded_fields"]
+    return json.dumps(response, indent=2, ensure_ascii=False)
+
+
+@jira_mcp.tool(tags={"jira", "write"})
+@check_write_access
 async def create_remote_issue_link(
     ctx: Context,
     issue_key: Annotated[

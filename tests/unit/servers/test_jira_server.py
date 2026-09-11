@@ -119,6 +119,10 @@ def mock_jira_fetcher():
     mock_fetcher.link_issue_to_epic.return_value = linked_issue
 
     mock_fetcher.create_issue_link.return_value = {"status": "LINKED"}
+
+    cloned_issue = MagicMock()
+    cloned_issue.to_simplified_dict.return_value = {"key": "TEST-101"}
+    mock_fetcher.clone_issue.return_value = cloned_issue
     mock_fetcher.create_remote_issue_link.return_value = {"id": "remote-link"}
     mock_fetcher.remove_issue_link.return_value = {"removed": True}
 
@@ -432,6 +436,7 @@ class DirectJiraToolCaller:
             batch_create_issues,
             batch_create_versions,
             batch_get_changelogs,
+            clone_issue,
             construct_download_endpoint,
             create_issue,
             create_issue_link,
@@ -493,6 +498,7 @@ class DirectJiraToolCaller:
             "jira_delete_issue": delete_issue.fn,
             "jira_add_comment": add_comment.fn,
             "jira_create_issue_link": create_issue_link.fn,
+            "jira_clone_issue": clone_issue.fn,
             "jira_create_version": create_version.fn,
             "jira_batch_create_versions": batch_create_versions.fn,
             "jira_add_worklog": add_worklog.fn,
@@ -1379,6 +1385,60 @@ async def test_create_issue_link_tool(jira_client, mock_jira_fetcher):
     assert link_payload["inwardIssue"]["key"] == "PROJ-1"
     payload = json.loads(response.content[0].text)
     assert payload["status"] == "LINKED"
+
+
+@pytest.mark.anyio
+async def test_clone_issue_tool(jira_client, mock_jira_fetcher):
+    """Test jira_clone_issue forwards parameters and returns the clone."""
+    response = await jira_client.call_tool(
+        "jira_clone_issue",
+        {
+            "issue_key": "PROJ-1",
+            "project_key": "OTHER",
+            "summary": "My Clone",
+            "include_custom_fields": False,
+            "link_to_original": False,
+            "additional_fields": {"priority": {"name": "High"}},
+        },
+    )
+    mock_jira_fetcher.clone_issue.assert_called_once_with(
+        issue_key="PROJ-1",
+        project_key="OTHER",
+        summary="My Clone",
+        include_custom_fields=False,
+        link_to_original=False,
+        additional_fields={"priority": {"name": "High"}},
+    )
+    payload = json.loads(response.content[0].text)
+    assert payload["issue"]["key"] == "TEST-101"
+    assert "cloned successfully" in payload["message"]
+
+
+@pytest.mark.anyio
+async def test_clone_issue_tool_defaults(jira_client, mock_jira_fetcher):
+    """Test jira_clone_issue uses default parameter values."""
+    await jira_client.call_tool("jira_clone_issue", {"issue_key": "PROJ-1"})
+    mock_jira_fetcher.clone_issue.assert_called_once_with(
+        issue_key="PROJ-1",
+        project_key=None,
+        summary=None,
+        include_custom_fields=True,
+        link_to_original=True,
+        additional_fields=None,
+    )
+
+
+@pytest.mark.anyio
+async def test_clone_issue_tool_reports_excluded_fields(jira_client, mock_jira_fetcher):
+    """Test jira_clone_issue surfaces fields excluded by create-screen verification."""
+    mock_jira_fetcher.clone_issue.return_value.custom_fields = {
+        "clone_excluded_fields": ["customfield_10005", "environment"]
+    }
+
+    response = await jira_client.call_tool("jira_clone_issue", {"issue_key": "PROJ-1"})
+
+    payload = json.loads(response.content[0].text)
+    assert payload["excluded_fields"] == ["customfield_10005", "environment"]
 
 
 @pytest.mark.anyio

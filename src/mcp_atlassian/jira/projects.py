@@ -267,6 +267,39 @@ class ProjectsMixin(JiraClient, SearchOperationsProto):
 
         except Exception as e:
             logger.error(
+                f"Error getting issue types for project for {project_key}: {str(e)}, "
+                "falling back to alternative method."
+            )
+            return self.get_project_issue_types_alternative(project_key)
+
+    def get_project_issue_types_alternative(
+        self, project_key: str
+    ) -> list[dict[str, Any]]:
+        """
+        Get all issue types available for a project using alternative method.
+
+        Args:
+            project_key: The project key
+
+        Returns:
+            List of issue type data dictionaries
+        """
+        try:
+            meta = self.jira.issue_createmeta_issuetypes(project=project_key)
+            if not isinstance(meta, dict):
+                msg = f"Unexpected return value type from `jira.issue_createmeta`: {type(meta)}"
+                logger.error(msg)
+                raise TypeError(msg)
+
+            issue_types = []
+            # Extract issue types from createmeta response
+            if "values" in meta and meta.get("total", 0) > 0:
+                issue_types = meta.get("values", [])
+
+            return issue_types
+
+        except Exception as e:
+            logger.error(
                 f"Error getting issue types for project {project_key}: {str(e)}"
             )
             return []
