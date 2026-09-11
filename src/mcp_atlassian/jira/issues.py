@@ -1276,21 +1276,49 @@ class IssuesMixin(
             exception: The exception that occurred
             issue_type: The type of issue being created
         """
-        error_msg = str(exception)
+        error_msg = self._describe_exception(exception)
 
         # Check for specific error types
         if "epic name" in error_msg.lower() or "epicname" in error_msg.lower():
             logger.error(
                 f"Error creating {issue_type}: {error_msg}. "
-                "Try specifying an epic_name in the additional fields"
+                "Try specifying an epic_name in the additional fields",
+                exc_info=True,
             )
         elif "customfield" in error_msg.lower():
             logger.error(
                 f"Error creating {issue_type}: {error_msg}. "
-                "This may be due to a required custom field"
+                "This may be due to a required custom field",
+                exc_info=True,
             )
         else:
-            logger.error(f"Error creating {issue_type}: {error_msg}")
+            logger.error(f"Error creating {issue_type}: {error_msg}", exc_info=True)
+
+    def _describe_exception(self, exc: Exception) -> str:
+        """Build a detailed, never-blank description of an exception.
+
+        Includes the exception type and, for HTTP-based errors (e.g.
+        requests.HTTPError), the HTTP status code and response body, since
+        `str(exc)` is often empty for those.
+
+        Args:
+            exc: The exception to describe
+
+        Returns:
+            A human-readable description suitable for logs and error messages
+        """
+        parts = [f"[{type(exc).__name__}] {str(exc) or '<no message provided>'}"]
+
+        response = getattr(exc, "response", None)
+        if response is not None:
+            status_code = getattr(response, "status_code", None)
+            if status_code is not None:
+                parts.append(f"HTTP status: {status_code}")
+            body = getattr(response, "text", None)
+            if body:
+                parts.append(f"Response body: {body[:1000]}")
+
+        return " | ".join(parts)
 
     def update_issue(
         self,
@@ -1400,9 +1428,9 @@ class IssuesMixin(
             return issue
 
         except Exception as e:
-            error_msg = str(e)
-            logger.error(f"Error updating issue {issue_key}: {error_msg}")
-            msg = f"Failed to update issue {issue_key}: {error_msg}"
+            detail = self._describe_exception(e)
+            logger.error(f"Error updating issue {issue_key}: {detail}", exc_info=True)
+            msg = f"Failed to update issue {issue_key}: {detail}"
             raise ValueError(msg) from e
 
     def _update_issue_with_status(
@@ -1657,6 +1685,10 @@ class IssuesMixin(
     ) -> list[JiraIssue]:
         """Create multiple Jira issues in a batch.
 
+        Field handling mirrors create_issue: Epic/Subtask localized issue type
+        names, two-step Epic field creation, subtask/parent linking, and Markdown
+        description conversion are all supported here as well.
+
         Args:
             issues: List of issue dictionaries, each containing:
                 - project_key (str): Key of the project
@@ -1665,6 +1697,9 @@ class IssuesMixin(
                 - description (str, optional): Issue description
                 - assignee (str, optional): Username of assignee
                 - components (list[str], optional): List of component names
+                - parent (str, optional): Parent issue key (required for subtasks)
+                - additional_fields (dict, optional): Nested dict of extra fields,
+                  unpacked the same way as create_issue's **kwargs
                 - **kwargs: Additional fields specific to your Jira instance
             validate_only: If True, only validates the issues without creating them
 
@@ -1680,6 +1715,8 @@ class IssuesMixin(
 
         # Prepare issues for bulk creation
         issue_updates = []
+        # Per-issue epic kwargs (post-creation update), aligned by index with issue_updates
+        epic_post_update_kwargs: list[dict[str, Any] | None] = []
         for issue_data in issues:
             try:
                 # Extract and validate required fields
@@ -1695,16 +1732,35 @@ class IssuesMixin(
                     msg = f"Missing required fields for issue: {project_key=}, {summary=}, {issue_type=}"
                     raise ValueError(msg)
 
+                # Unpack a nested additional_fields dict, matching create_issue's flat-kwargs convention
+                additional_fields = issue_data.pop("additional_fields", None)
+                if additional_fields and isinstance(additional_fields, dict):
+                    issue_data.update(additional_fields)
+
+                # Resolve localized Epic/Subtask issue type names, same as create_issue
+                actual_issue_type = issue_type
+                if (
+                    self._is_epic_issue_type(issue_type)
+                    and issue_type.lower() == "epic"
+                ):
+                    epic_type_name = self._find_epic_issue_type_name(project_key)
+                    if epic_type_name:
+                        actual_issue_type = epic_type_name
+                elif issue_type.lower() in ["subtask", "sub-task"]:
+                    subtask_type_name = self._find_subtask_issue_type_name(project_key)
+                    if subtask_type_name:
+                        actual_issue_type = subtask_type_name
+
                 # Prepare fields dictionary
-                fields = {
+                fields: dict[str, Any] = {
                     "project": {"key": project_key},
                     "summary": summary,
-                    "issuetype": {"name": issue_type},
+                    "issuetype": {"name": actual_issue_type},
                 }
 
-                # Add optional fields
+                # Add optional fields (convert from Markdown to Jira format)
                 if description:
-                    fields["description"] = description
+                    fields["description"] = self._markdown_to_jira(description)
 
                 # Add assignee if provided
                 if assignee:
@@ -1728,8 +1784,24 @@ class IssuesMixin(
                                 {"name": comp_name} for comp_name in valid_components
                             ]
 
+                # Preserve original kwargs for additional-field processing before
+                # epic prep mutates issue_data (mirrors create_issue's kwargs_copy)
+                kwargs_copy = issue_data.copy()
+
+                # Prepare epic fields if this is an epic (stores epic-specific
+                # fields as __epic_* keys in issue_data for post-creation update)
+                if self._is_epic_issue_type(issue_type):
+                    self._prepare_epic_fields(fields, summary, issue_data)
+
+                # Prepare parent field if this is a subtask
+                if issue_type.lower() in ("subtask", "sub-task"):
+                    self._prepare_parent_fields(fields, issue_data)
+                # Allow parent field for all issue types when explicitly provided
+                elif "parent" in issue_data:
+                    self._prepare_parent_fields(fields, issue_data)
+
                 # Add any remaining custom fields
-                self._process_additional_fields(fields, issue_data)
+                self._process_additional_fields(fields, kwargs_copy)
 
                 if validate_only:
                     # For validation, just log the issue that would be created
@@ -1740,9 +1812,16 @@ class IssuesMixin(
 
                 # Add to bulk creation list
                 issue_updates.append({"fields": fields})
+                has_epic_fields = self._is_epic_issue_type(issue_type) and any(
+                    k.startswith("__epic_") for k in issue_data
+                )
+                epic_post_update_kwargs.append(issue_data if has_epic_fields else None)
 
             except Exception as e:
-                logger.error(f"Failed to prepare issue for creation: {str(e)}")
+                detail = self._describe_exception(e)
+                logger.error(
+                    f"Failed to prepare issue for creation: {detail}", exc_info=True
+                )
                 if not issue_updates:
                     raise
 
@@ -1757,42 +1836,81 @@ class IssuesMixin(
                 logger.error(msg)
                 raise TypeError(msg)
 
-            # Process results
-            created_issues = []
-            for issue_info in response.get("issues", []):
-                issue_key = issue_info.get("key")
-                if issue_key:
-                    try:
-                        # Fetch the full issue data
-                        issue_data = self.jira.get_issue(issue_key)
-                        if not isinstance(issue_data, dict):
-                            msg = f"Unexpected return value type from `jira.get_issue`: {type(issue_data)}"
-                            logger.error(msg)
-                            raise TypeError(msg)
-
-                        created_issues.append(
-                            JiraIssue.from_api_response(
-                                issue_data,
-                                base_url=self.config.url
-                                if hasattr(self, "config")
-                                else None,
-                            )
-                        )
-                    except Exception as e:
-                        logger.error(
-                            f"Error fetching created issue {issue_key}: {str(e)}"
-                        )
-
             # Log any errors from the bulk creation
-            errors = response.get("errors", [])
+            errors = response.get("errors", []) or []
             if errors:
                 for error in errors:
                     logger.error(f"Bulk creation error: {error}")
 
+            # Map each returned issue back to its original submission index so
+            # epic post-update kwargs line up correctly even if some items failed
+            failed_indices = {
+                error.get("failedElementNumber")
+                for error in errors
+                if isinstance(error, dict)
+                and error.get("failedElementNumber") is not None
+            }
+            successful_indices = [
+                i for i in range(len(issue_updates)) if i not in failed_indices
+            ]
+
+            # Process results
+            created_issues = []
+            for position, issue_info in enumerate(response.get("issues", [])):
+                issue_key = issue_info.get("key")
+                if not issue_key:
+                    continue
+                try:
+                    original_index = (
+                        successful_indices[position]
+                        if position < len(successful_indices)
+                        else None
+                    )
+                    epic_kwargs = (
+                        epic_post_update_kwargs[original_index]
+                        if original_index is not None
+                        and original_index < len(epic_post_update_kwargs)
+                        else None
+                    )
+                    if epic_kwargs:
+                        try:
+                            self.update_epic_fields(issue_key, epic_kwargs)
+                        except Exception as update_error:
+                            logger.error(
+                                f"Error during post-creation update of Epic {issue_key}: "
+                                f"{self._describe_exception(update_error)}",
+                                exc_info=True,
+                            )
+
+                        # Fetch the full issue data
+                    issue_data = self.jira.get_issue(issue_key)
+                    if not isinstance(issue_data, dict):
+                        msg = f"Unexpected return value type from `jira.get_issue`: {type(issue_data)}"
+                        logger.error(msg)
+                        raise TypeError(msg)
+
+                    created_issues.append(
+                        JiraIssue.from_api_response(
+                            issue_data,
+                            base_url=self.config.url
+                            if hasattr(self, "config")
+                            else None,
+                        )
+                    )
+                except Exception as e:
+                    detail = self._describe_exception(e)
+                    logger.error(
+                        f"Error fetching created issue {issue_key}: {detail}",
+                        exc_info=True,
+                    )
+
             return created_issues
 
         except Exception as e:
-            logger.error(f"Error in bulk issue creation: {str(e)}")
+            logger.error(
+                f"Error in bulk issue creation: {self._describe_exception(e)}",
+                exc_info=True,
+            )
             raise
 
     def batch_get_changelogs(
