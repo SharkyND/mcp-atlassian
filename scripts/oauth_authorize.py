@@ -266,12 +266,12 @@ def run_oauth_flow(args: argparse.Namespace) -> bool:
         return False
 
     if oauth_config.exchange_code_for_tokens(authorization_code):
-        logger.info("🎉 OAuth authorization flow completed successfully!")
+        logger.info("≡ƒÄë OAuth authorization flow completed successfully!")
 
         if oauth_config.cloud_id:
             logger.info(f"Retrieved Cloud ID: {oauth_config.cloud_id}")
             logger.info(
-                "\n💡 Tip: Add/update the following in your .env file or environment variables:"
+                "\n≡ƒÆí Tip: Add/update the following in your .env file or environment variables:"
             )
             logger.info(f"ATLASSIAN_OAUTH_CLIENT_ID={oauth_config.client_id}")
             logger.info(f"ATLASSIAN_OAUTH_CLIENT_SECRET={oauth_config.client_secret}")
@@ -336,7 +336,7 @@ def main() -> int:
 
     # Check for offline_access scope
     if args.scope and "offline_access" not in args.scope.split():
-        logger.warning("\n⚠️ WARNING: The 'offline_access' scope is missing!")
+        logger.warning("\nΓÜá∩╕Å WARNING: The 'offline_access' scope is missing!")
         logger.warning(
             "Without this scope, refresh tokens will not be issued and authentication will fail when tokens expire."
         )
