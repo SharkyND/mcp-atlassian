@@ -20,31 +20,54 @@ def get_available_services(
     if confluence_url:
         is_cloud = is_atlassian_cloud_url(confluence_url)
 
-        # OAuth check (highest precedence, applies to Cloud)
+        # Cloud OAuth check (needs cloud_id)
         if all(
             [
-                os.getenv("ATLASSIAN_OAUTH_CLIENT_ID"),
-                os.getenv("ATLASSIAN_OAUTH_CLIENT_SECRET"),
-                os.getenv("ATLASSIAN_OAUTH_REDIRECT_URI"),
-                os.getenv("ATLASSIAN_OAUTH_SCOPE"),
+                os.getenv("ATLASSIAN_OAUTH_CLIENT_ID")
+                or os.getenv("CONFLUENCE_OAUTH_CLIENT_ID"),
+                os.getenv("ATLASSIAN_OAUTH_CLIENT_SECRET")
+                or os.getenv("CONFLUENCE_OAUTH_CLIENT_SECRET"),
                 os.getenv(
                     "ATLASSIAN_OAUTH_CLOUD_ID"
                 ),  # CLOUD_ID is essential for OAuth client init
             ]
         ):
             confluence_is_setup = True
-            logger.info(
-                "Using Confluence OAuth 2.0 (3LO) authentication (Cloud-only features)"
+            logger.info("Using Confluence OAuth 2.0 (3LO) authentication (Cloud)")
+        # DC OAuth check (no cloud_id, but has client credentials + non-cloud URL)
+        elif (
+            not is_cloud
+            and (
+                os.getenv("ATLASSIAN_OAUTH_CLIENT_ID")
+                or os.getenv("CONFLUENCE_OAUTH_CLIENT_ID")
             )
+            and (
+                os.getenv("ATLASSIAN_OAUTH_CLIENT_SECRET")
+                or os.getenv("CONFLUENCE_OAUTH_CLIENT_SECRET")
+            )
+        ):
+            confluence_is_setup = True
+            logger.info("Using Confluence OAuth 2.0 authentication (Data Center)")
         elif all(
             [
-                os.getenv("ATLASSIAN_OAUTH_ACCESS_TOKEN"),
+                os.getenv("ATLASSIAN_OAUTH_ACCESS_TOKEN")
+                or os.getenv("CONFLUENCE_OAUTH_ACCESS_TOKEN"),
                 os.getenv("ATLASSIAN_OAUTH_CLOUD_ID"),
             ]
         ):
             confluence_is_setup = True
             logger.info(
-                "Using Confluence OAuth 2.0 (3LO) authentication (Cloud-only features) "
+                "Using Confluence OAuth 2.0 (3LO) authentication (Cloud) "
+                "with provided access token"
+            )
+        # DC BYO access token (no cloud_id, non-cloud URL)
+        elif not is_cloud and (
+            os.getenv("ATLASSIAN_OAUTH_ACCESS_TOKEN")
+            or os.getenv("CONFLUENCE_OAUTH_ACCESS_TOKEN")
+        ):
+            confluence_is_setup = True
+            logger.info(
+                "Using Confluence OAuth 2.0 authentication (Data Center) "
                 "with provided access token"
             )
         elif is_cloud:  # Cloud non-OAuth
@@ -91,28 +114,52 @@ def get_available_services(
     jira_is_setup = False
     if jira_url:
         is_cloud = is_atlassian_cloud_url(jira_url)
+        # Cloud OAuth check (needs cloud_id)
         if all(
             [
-                os.getenv("ATLASSIAN_OAUTH_CLIENT_ID"),
-                os.getenv("ATLASSIAN_OAUTH_CLIENT_SECRET"),
-                os.getenv("ATLASSIAN_OAUTH_REDIRECT_URI"),
-                os.getenv("ATLASSIAN_OAUTH_SCOPE"),
+                os.getenv("ATLASSIAN_OAUTH_CLIENT_ID")
+                or os.getenv("JIRA_OAUTH_CLIENT_ID"),
+                os.getenv("ATLASSIAN_OAUTH_CLIENT_SECRET")
+                or os.getenv("JIRA_OAUTH_CLIENT_SECRET"),
                 os.getenv("ATLASSIAN_OAUTH_CLOUD_ID"),
             ]
         ):
             jira_is_setup = True
-            logger.info(
-                "Using Jira OAuth 2.0 (3LO) authentication (Cloud-only features)"
+            logger.info("Using Jira OAuth 2.0 (3LO) authentication (Cloud)")
+        # DC OAuth check (no cloud_id, but has client credentials + non-cloud URL)
+        elif (
+            not is_cloud
+            and (
+                os.getenv("ATLASSIAN_OAUTH_CLIENT_ID")
+                or os.getenv("JIRA_OAUTH_CLIENT_ID")
             )
+            and (
+                os.getenv("ATLASSIAN_OAUTH_CLIENT_SECRET")
+                or os.getenv("JIRA_OAUTH_CLIENT_SECRET")
+            )
+        ):
+            jira_is_setup = True
+            logger.info("Using Jira OAuth 2.0 authentication (Data Center)")
         elif all(
             [
-                os.getenv("ATLASSIAN_OAUTH_ACCESS_TOKEN"),
+                os.getenv("ATLASSIAN_OAUTH_ACCESS_TOKEN")
+                or os.getenv("JIRA_OAUTH_ACCESS_TOKEN"),
                 os.getenv("ATLASSIAN_OAUTH_CLOUD_ID"),
             ]
         ):
             jira_is_setup = True
             logger.info(
-                "Using Jira OAuth 2.0 (3LO) authentication (Cloud-only features) "
+                "Using Jira OAuth 2.0 (3LO) authentication (Cloud) "
+                "with provided access token"
+            )
+        # DC BYO access token (no cloud_id, non-cloud URL)
+        elif not is_cloud and (
+            os.getenv("ATLASSIAN_OAUTH_ACCESS_TOKEN")
+            or os.getenv("JIRA_OAUTH_ACCESS_TOKEN")
+        ):
+            jira_is_setup = True
+            logger.info(
+                "Using Jira OAuth 2.0 authentication (Data Center) "
                 "with provided access token"
             )
         elif is_cloud:  # Cloud non-OAuth
@@ -169,9 +216,7 @@ def get_available_services(
             ]
         ):
             bitbucket_is_setup = True
-            logger.info(
-                "Using Bitbucket OAuth 2.0 (3LO) authentication (Cloud-only features)"
-            )
+            logger.info("Using Bitbucket OAuth 2.0 (3LO) authentication (Cloud)")
         elif all(
             [
                 os.getenv("ATLASSIAN_OAUTH_ACCESS_TOKEN"),
@@ -180,7 +225,7 @@ def get_available_services(
         ):
             bitbucket_is_setup = True
             logger.info(
-                "Using Bitbucket OAuth 2.0 (3LO) authentication (Cloud-only features) "
+                "Using Bitbucket OAuth 2.0 (3LO) authentication (Cloud) "
                 "with provided access token"
             )
         elif is_cloud:  # Cloud non-OAuth
