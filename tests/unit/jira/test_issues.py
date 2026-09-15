@@ -1492,6 +1492,163 @@ class TestIssuesMixin:
         with pytest.raises(MCPAtlassianAuthenticationError):
             issues_mixin.clone_issue("TEST-100")
 
+    def test_clone_issue_normalizes_sprint_field_string_form(
+        self, issues_mixin: IssuesMixin
+    ):
+        """Test the Server/DC stringified Sprint value is converted to int IDs."""
+        source_response = {
+            "id": "10001",
+            "key": "TEST-100",
+            "fields": {
+                "project": {"key": "TEST"},
+                "issuetype": {"name": "Story"},
+                "summary": "Original story",
+                "customfield_10004": [
+                    "com.atlassian.greenhopper.service.sprint.Sprint@6f750a40"
+                    "[id=164176,rapidViewId=47551,state=FUTURE,name=Sprint 1]"
+                ],
+            },
+        }
+        new_issue_data = {
+            "id": "10099",
+            "key": "TEST-101",
+            "fields": {"summary": "CLONE - Original story"},
+        }
+        issues_mixin.jira.get_issue.side_effect = [source_response, new_issue_data]
+        issues_mixin.jira.create_issue.return_value = {
+            "id": "10099",
+            "key": "TEST-101",
+        }
+        issues_mixin.jira.create_issue_link.return_value = {}
+        issues_mixin.jira.get_all_fields.return_value = [
+            {
+                "id": "customfield_10004",
+                "name": "Sprint",
+                "schema": {"custom": "com.pyxis.greenhopper.jira:gh-sprint"},
+            }
+        ]
+
+        issues_mixin.clone_issue("TEST-100")
+
+        created_fields = issues_mixin.jira.create_issue.call_args.kwargs["fields"]
+        assert created_fields["customfield_10004"] == [164176]
+
+    def test_clone_issue_normalizes_sprint_field_dict_form(
+        self, issues_mixin: IssuesMixin
+    ):
+        """Test the Cloud dict-shaped Sprint value is converted to int IDs."""
+        source_response = {
+            "id": "10001",
+            "key": "TEST-100",
+            "fields": {
+                "project": {"key": "TEST"},
+                "issuetype": {"name": "Story"},
+                "summary": "Original story",
+                "customfield_10004": [
+                    {"id": 164176, "name": "Sprint 1", "state": "future"}
+                ],
+            },
+        }
+        new_issue_data = {
+            "id": "10099",
+            "key": "TEST-101",
+            "fields": {"summary": "CLONE - Original story"},
+        }
+        issues_mixin.jira.get_issue.side_effect = [source_response, new_issue_data]
+        issues_mixin.jira.create_issue.return_value = {
+            "id": "10099",
+            "key": "TEST-101",
+        }
+        issues_mixin.jira.create_issue_link.return_value = {}
+        issues_mixin.jira.get_all_fields.return_value = [
+            {
+                "id": "customfield_10004",
+                "name": "Sprint",
+                "schema": {"custom": "com.pyxis.greenhopper.jira:gh-sprint"},
+            }
+        ]
+
+        issues_mixin.clone_issue("TEST-100")
+
+        created_fields = issues_mixin.jira.create_issue.call_args.kwargs["fields"]
+        assert created_fields["customfield_10004"] == [164176]
+
+    def test_clone_issue_drops_field_rejected_by_create_api(
+        self, issues_mixin: IssuesMixin
+    ):
+        """Test a field Jira rejects at create time is dropped and retried."""
+        from unittest.mock import Mock
+
+        from requests import HTTPError as RequestsHTTPError
+        from requests import Response
+
+        source_response = {
+            "id": "10001",
+            "key": "TEST-100",
+            "fields": {
+                "project": {"key": "TEST"},
+                "issuetype": {"name": "Bug"},
+                "summary": "Original bug",
+                "customfield_10004": [164176],
+            },
+        }
+        new_issue_data = {
+            "id": "10099",
+            "key": "TEST-101",
+            "fields": {"summary": "CLONE - Original bug"},
+        }
+        issues_mixin.jira.get_issue.side_effect = [source_response, new_issue_data]
+
+        mock_response = Mock(spec=Response)
+        mock_response.status_code = 400
+        mock_response.json.return_value = {
+            "errors": {"customfield_10004": "Number value expected as the Sprint id."}
+        }
+        http_error = RequestsHTTPError("Bad Request")
+        http_error.response = mock_response
+        issues_mixin.jira.create_issue.side_effect = [
+            http_error,
+            {"id": "10099", "key": "TEST-101"},
+        ]
+        issues_mixin.jira.create_issue_link.return_value = {}
+
+        result = issues_mixin.clone_issue("TEST-100")
+
+        assert issues_mixin.jira.create_issue.call_count == 2
+        second_call_fields = issues_mixin.jira.create_issue.call_args.kwargs["fields"]
+        assert "customfield_10004" not in second_call_fields
+        assert result.custom_fields["clone_excluded_fields"] == ["customfield_10004"]
+
+    def test_clone_issue_reraises_when_no_removable_field_found(
+        self, issues_mixin: IssuesMixin
+    ):
+        """Test a 400 error with no field-level detail is re-raised as-is."""
+        from unittest.mock import Mock
+
+        from requests import HTTPError as RequestsHTTPError
+        from requests import Response
+
+        source_response = {
+            "id": "10001",
+            "key": "TEST-100",
+            "fields": {
+                "project": {"key": "TEST"},
+                "issuetype": {"name": "Bug"},
+                "summary": "Original bug",
+            },
+        }
+        issues_mixin.jira.get_issue.side_effect = [source_response]
+
+        mock_response = Mock(spec=Response)
+        mock_response.status_code = 400
+        mock_response.json.return_value = {"errorMessages": ["Something went wrong"]}
+        http_error = RequestsHTTPError("Bad Request")
+        http_error.response = mock_response
+        issues_mixin.jira.create_issue.side_effect = http_error
+
+        with pytest.raises(RequestsHTTPError):
+            issues_mixin.clone_issue("TEST-100")
+
     def test_batch_create_issues_basic(self, issues_mixin: IssuesMixin):
         """Test basic functionality of batch_create_issues."""
         # Setup test data

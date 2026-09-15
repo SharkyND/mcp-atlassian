@@ -1,6 +1,7 @@
 """Module for Jira issue operations."""
 
 import logging
+import re
 from collections import defaultdict
 from typing import Any
 
@@ -38,6 +39,16 @@ _CLONABLE_STANDARD_FIELDS: tuple[str, ...] = (
     "security",
     "environment",
 )
+
+# Custom field types that are serialized differently on GET vs. what the
+# create/update API accepts, keyed by their `schema.custom` identifier, so
+# clone_issue can reshape known offenders instead of copying them verbatim.
+_SPRINT_CUSTOM_FIELD_TYPE = "com.pyxis.greenhopper.jira:gh-sprint"
+_SPRINT_ID_PATTERN = re.compile(r"id=(\d+)")
+
+# Fields that must never be dropped by the create-time fallback, since doing
+# so would either break the clone's identity or silently change its target.
+_NON_DROPPABLE_FIELDS = frozenset({"project", "summary", "issuetype"})
 
 
 class IssuesMixin(
@@ -759,6 +770,14 @@ class IssuesMixin(
         If the create screen metadata cannot be determined, pre-verification is
         skipped and all populated fields are copied as before.
 
+        Custom fields whose write shape differs from their read shape are
+        reshaped before copying; currently this covers the Sprint field
+        (``com.pyxis.greenhopper.jira:gh-sprint``), which Jira returns as
+        sprint objects/strings but only accepts as a plain integer sprint
+        ID on create. As a further safety net, if Jira still rejects a field
+        at creation time with a per-field 400 error, that field is dropped and
+        creation is retried automatically instead of failing the whole clone.
+
         Args:
             issue_key: The key of the issue to clone (e.g., 'PROJ-123')
             project_key: Target project key. Defaults to the source issue's project.
@@ -881,7 +900,13 @@ class IssuesMixin(
                     ):
                         excluded_fields.append(field_id)
                         continue
-                    new_fields[field_id] = value
+                    normalized_value = self._normalize_custom_field_for_clone(
+                        field_id, value
+                    )
+                    if normalized_value is None:
+                        excluded_fields.append(field_id)
+                        continue
+                    new_fields[field_id] = normalized_value
 
             if excluded_fields:
                 logger.warning(
@@ -893,19 +918,9 @@ class IssuesMixin(
             if additional_fields:
                 new_fields.update(additional_fields)
 
-            response = self.jira.create_issue(fields=new_fields)
-            if not isinstance(response, dict):
-                msg = (
-                    "Unexpected return value type from `jira.create_issue`: "
-                    f"{type(response)}"
-                )
-                logger.error(msg)
-                raise TypeError(msg)
-
-            new_issue_key = response.get("key")
-            if not new_issue_key:
-                msg = "No issue key in response when cloning issue"
-                raise ValueError(msg)
+            new_issue_key = self._create_issue_with_field_fallback(
+                new_fields, excluded_fields
+            )
 
             if link_to_original:
                 try:
@@ -961,6 +976,163 @@ class IssuesMixin(
             logger.error(f"Error cloning issue {issue_key}: {error_msg}")
             msg = f"Error cloning issue {issue_key}: {error_msg}"
             raise Exception(msg) from e
+
+    def _normalize_custom_field_for_clone(self, field_id: str, value: Any) -> Any:
+        """
+        Reshape a custom field's GET-response value into the shape the create
+        API expects, for field types known to differ between read and write.
+
+        The Sprint field (``com.pyxis.greenhopper.jira:gh-sprint``) is the
+        primary offender: it is returned as a list of sprint objects (Cloud)
+        or stringified Java objects (Server/Data Center), but the create API
+        only accepts a plain integer sprint ID. Fields with an unrecognized
+        or undeterminable type are returned unchanged so they continue to be
+        copied verbatim, as before.
+
+        Args:
+            field_id: The custom field ID (e.g., 'customfield_10004')
+            value: The raw field value from the source issue
+
+        Returns:
+            The value to send on create, or None if the field should be
+            skipped (e.g. because no usable value could be extracted).
+        """
+        field_def = self.get_field_by_id(field_id)
+        custom_type = (field_def or {}).get("schema", {}).get("custom")
+        if custom_type == _SPRINT_CUSTOM_FIELD_TYPE:
+            return self._extract_sprint_id(value)
+        return value
+
+    def _extract_sprint_id(self, value: Any) -> int | None:
+        """
+        Extract the numeric sprint ID from a Sprint custom field value.
+
+        Args:
+            value: The Sprint field value, which may be a single sprint or a
+                list of sprints, each represented as an int, a dict with an
+                "id" key, or a stringified Java object of the form
+                "...Sprint@...[id=123,...]". Only the first usable sprint is
+                returned, since the create/update API accepts a single
+                integer rather than a list.
+
+        Returns:
+            The integer sprint ID, or None if none could be extracted.
+        """
+        if value is None:
+            return None
+        items = value if isinstance(value, list) else [value]
+        for item in items:
+            if isinstance(item, bool):
+                continue
+            if isinstance(item, int):
+                return item
+            elif isinstance(item, dict) and item.get("id") is not None:
+                try:
+                    return int(item["id"])
+                except (TypeError, ValueError):
+                    continue
+            elif isinstance(item, str):
+                match = _SPRINT_ID_PATTERN.search(item)
+                if match:
+                    return int(match.group(1))
+                try:
+                    return int(item)
+                except ValueError:
+                    continue
+        return None
+
+    def _extract_invalid_fields_from_error(self, http_err: HTTPError) -> set[str]:
+        """
+        Parse the per-field error keys out of a Jira 400 response body.
+
+        Jira's create-issue error responses report field-level validation
+        failures as ``{"errors": {"<fieldId>": "<message>"}}``. This lets
+        callers identify exactly which field(s) caused a 400 so they can be
+        dropped and the request retried, instead of failing outright.
+
+        Args:
+            http_err: The HTTPError raised by the failed create-issue call
+
+        Returns:
+            Set of field IDs reported as invalid, or an empty set if the
+            response was not a 400 with a parseable field-error body.
+        """
+        response = http_err.response
+        if response is None or response.status_code != 400:
+            return set()
+        try:
+            payload = response.json()
+        except ValueError:
+            return set()
+        errors = payload.get("errors") if isinstance(payload, dict) else None
+        return set(errors.keys()) if isinstance(errors, dict) else set()
+
+    def _create_issue_with_field_fallback(
+        self, fields: dict[str, Any], excluded_fields: list[str]
+    ) -> str:
+        """
+        Create an issue, dropping any individual field Jira rejects and
+        retrying, as a last-resort safety net for clone_issue.
+
+        Create-screen metadata pre-verification does not catch every
+        incompatibility (e.g. a field whose value shape is valid for the
+        source project/issue type but not the target one). When Jira responds
+        with a 400 listing specific invalid fields, this removes just those
+        fields from the payload and retries, appending them to
+        ``excluded_fields`` (mutated in place) so they are reported back to
+        the caller the same way as pre-verification exclusions.
+
+        Args:
+            fields: The issue fields payload to create, mutated as fields are
+                dropped across retries
+            excluded_fields: List to append dropped field IDs to (mutated)
+
+        Returns:
+            The key of the newly created issue
+
+        Raises:
+            HTTPError: If creation still fails after removing all fields the
+                API reported as invalid, or if the failure isn't a field-level
+                400 error
+            TypeError: If the create-issue response has an unexpected shape
+            ValueError: If the create-issue response has no issue key
+        """
+        remaining_fields = dict(fields)
+        max_attempts = len(remaining_fields) + 1
+        for _ in range(max_attempts):
+            try:
+                response = self.jira.create_issue(fields=remaining_fields)
+            except HTTPError as http_err:
+                bad_fields = self._extract_invalid_fields_from_error(http_err) & (
+                    remaining_fields.keys() - _NON_DROPPABLE_FIELDS
+                )
+                if not bad_fields:
+                    raise
+                for bad_field in bad_fields:
+                    logger.warning(
+                        "Dropping field '%s' rejected by Jira during clone (value=%r)",
+                        bad_field,
+                        remaining_fields.pop(bad_field),
+                    )
+                excluded_fields.extend(bad_fields)
+                continue
+
+            if not isinstance(response, dict):
+                msg = (
+                    "Unexpected return value type from `jira.create_issue`: "
+                    f"{type(response)}"
+                )
+                logger.error(msg)
+                raise TypeError(msg)
+
+            new_issue_key = response.get("key")
+            if not new_issue_key:
+                msg = "No issue key in response when cloning issue"
+                raise ValueError(msg)
+            return new_issue_key
+
+        msg = "Could not create cloned issue after removing all invalid fields"
+        raise ValueError(msg)
 
     def _is_epic_issue_type(self, issue_type: str) -> bool:
         """
