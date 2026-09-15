@@ -1122,12 +1122,12 @@ class TestIssuesMixin:
         ):
             assert excluded not in created_fields
 
-        # Verify the "Cloners" link was created with the new issue as outward
+        # Verify the "Cloners" link was created with the new issue as inward
         issues_mixin.jira.create_issue_link.assert_called_once_with(
             {
                 "type": {"name": "Cloners"},
-                "inwardIssue": {"key": "TEST-100"},
-                "outwardIssue": {"key": "TEST-101"},
+                "inwardIssue": {"key": "TEST-101"},
+                "outwardIssue": {"key": "TEST-100"},
             }
         )
 
@@ -1404,6 +1404,164 @@ class TestIssuesMixin:
 
         issues_mixin.jira.create_issue_link.assert_not_called()
 
+    def test_clone_issue_copies_other_issue_links(self, issues_mixin: IssuesMixin):
+        """Test that pre-existing issue links on the source are copied to the clone."""
+        source_response = {
+            "id": "10001",
+            "key": "TEST-100",
+            "fields": {
+                "project": {"key": "TEST"},
+                "issuetype": {"name": "Task"},
+                "summary": "Original task",
+                "issuelinks": [
+                    {
+                        "type": {
+                            "name": "Cloners",
+                            "inward": "is cloned by",
+                            "outward": "clones",
+                        },
+                        "inwardIssue": {"key": "TEST-50"},
+                    },
+                    {
+                        "type": {
+                            "name": "Blocks",
+                            "inward": "is blocked by",
+                            "outward": "blocks",
+                        },
+                        "outwardIssue": {"key": "TEST-200"},
+                    },
+                    {
+                        "type": {
+                            "name": "Relates",
+                            "inward": "relates to",
+                            "outward": "relates to",
+                        },
+                        "inwardIssue": {"key": "TEST-300"},
+                    },
+                ],
+            },
+        }
+        new_issue_data = {
+            "id": "10099",
+            "key": "TEST-101",
+            "fields": {"summary": "CLONE - Original task"},
+        }
+        issues_mixin.jira.get_issue.side_effect = [source_response, new_issue_data]
+        issues_mixin.jira.create_issue.return_value = {
+            "id": "10099",
+            "key": "TEST-101",
+        }
+        issues_mixin.jira.create_issue_link.return_value = {}
+
+        issues_mixin.clone_issue("TEST-100")
+
+        # The pre-existing "Cloners" link entry on the source is not
+        # re-copied (only the dedicated new-clone Cloners link is created),
+        # and the "Blocks"/"Relates" links are replicated preserving direction.
+        issues_mixin.jira.create_issue_link.assert_any_call(
+            {
+                "type": {"name": "Cloners"},
+                "inwardIssue": {"key": "TEST-101"},
+                "outwardIssue": {"key": "TEST-100"},
+            }
+        )
+        issues_mixin.jira.create_issue_link.assert_any_call(
+            {
+                "type": {"name": "Blocks"},
+                "inwardIssue": {"key": "TEST-101"},
+                "outwardIssue": {"key": "TEST-200"},
+            }
+        )
+        issues_mixin.jira.create_issue_link.assert_any_call(
+            {
+                "type": {"name": "Relates"},
+                "inwardIssue": {"key": "TEST-300"},
+                "outwardIssue": {"key": "TEST-101"},
+            }
+        )
+        assert issues_mixin.jira.create_issue_link.call_count == 3
+
+    def test_clone_issue_include_links_false_skips_copying_links(
+        self, issues_mixin: IssuesMixin
+    ):
+        """Test that include_links=False skips copying the source's other links."""
+        source_response = {
+            "id": "10001",
+            "key": "TEST-100",
+            "fields": {
+                "project": {"key": "TEST"},
+                "issuetype": {"name": "Task"},
+                "summary": "Original task",
+                "issuelinks": [
+                    {
+                        "type": {"name": "Blocks"},
+                        "outwardIssue": {"key": "TEST-200"},
+                    },
+                ],
+            },
+        }
+        new_issue_data = {
+            "id": "10099",
+            "key": "TEST-101",
+            "fields": {"summary": "CLONE - Original task"},
+        }
+        issues_mixin.jira.get_issue.side_effect = [source_response, new_issue_data]
+        issues_mixin.jira.create_issue.return_value = {
+            "id": "10099",
+            "key": "TEST-101",
+        }
+        issues_mixin.jira.create_issue_link.return_value = {}
+
+        issues_mixin.clone_issue("TEST-100", include_links=False)
+
+        # Only the dedicated "Cloners" link is created; the "Blocks" link is
+        # not copied because include_links=False.
+        issues_mixin.jira.create_issue_link.assert_called_once_with(
+            {
+                "type": {"name": "Cloners"},
+                "inwardIssue": {"key": "TEST-101"},
+                "outwardIssue": {"key": "TEST-100"},
+            }
+        )
+
+    def test_clone_issue_copy_link_failure_does_not_fail_clone(
+        self, issues_mixin: IssuesMixin
+    ):
+        """Test that a failure copying one issue link does not fail the clone."""
+        source_response = {
+            "id": "10001",
+            "key": "TEST-100",
+            "fields": {
+                "project": {"key": "TEST"},
+                "issuetype": {"name": "Task"},
+                "summary": "Original task",
+                "issuelinks": [
+                    {
+                        "type": {"name": "Blocks"},
+                        "outwardIssue": {"key": "TEST-200"},
+                    },
+                ],
+            },
+        }
+        new_issue_data = {
+            "id": "10099",
+            "key": "TEST-101",
+            "fields": {"summary": "CLONE - Original task"},
+        }
+        issues_mixin.jira.get_issue.side_effect = [source_response, new_issue_data]
+        issues_mixin.jira.create_issue.return_value = {
+            "id": "10099",
+            "key": "TEST-101",
+        }
+        issues_mixin.jira.create_issue_link.side_effect = [
+            {},  # the "Cloners" link succeeds
+            Exception("link API down"),  # copying the "Blocks" link fails
+        ]
+
+        result = issues_mixin.clone_issue("TEST-100")
+
+        assert result.key == "TEST-101"
+
     def test_clone_issue_include_custom_fields_false(self, issues_mixin: IssuesMixin):
         """Test that include_custom_fields=False skips copying custom fields."""
         source_response = {
@@ -1531,7 +1689,7 @@ class TestIssuesMixin:
         issues_mixin.clone_issue("TEST-100")
 
         created_fields = issues_mixin.jira.create_issue.call_args.kwargs["fields"]
-        assert created_fields["customfield_10004"] == [164176]
+        assert created_fields["customfield_10004"] == 164176
 
     def test_clone_issue_normalizes_sprint_field_dict_form(
         self, issues_mixin: IssuesMixin
@@ -1571,7 +1729,7 @@ class TestIssuesMixin:
         issues_mixin.clone_issue("TEST-100")
 
         created_fields = issues_mixin.jira.create_issue.call_args.kwargs["fields"]
-        assert created_fields["customfield_10004"] == [164176]
+        assert created_fields["customfield_10004"] == 164176
 
     def test_clone_issue_drops_field_rejected_by_create_api(
         self, issues_mixin: IssuesMixin

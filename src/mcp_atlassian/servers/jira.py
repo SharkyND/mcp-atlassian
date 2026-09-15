@@ -1387,6 +1387,17 @@ async def clone_issue(
             default=True,
         ),
     ] = True,
+    include_links: Annotated[
+        bool,
+        Field(
+            description=(
+                "Whether to re-create the source issue's other issue links "
+                "(e.g. 'blocks', 'relates to') on the clone, preserving their "
+                "type and direction relative to each linked issue"
+            ),
+            default=True,
+        ),
+    ] = True,
     additional_fields: Annotated[
         dict[str, Any] | None,
         Field(
@@ -1422,6 +1433,7 @@ async def clone_issue(
         summary: Optional summary override for the clone.
         include_custom_fields: Whether to copy populated custom fields.
         link_to_original: Whether to create a "Cloners" link back to the source issue.
+        include_links: Whether to re-create the source issue's other issue links.
         additional_fields: Optional dictionary of fields to override or add.
 
     Returns:
@@ -1440,6 +1452,7 @@ async def clone_issue(
         summary=summary,
         include_custom_fields=include_custom_fields,
         link_to_original=link_to_original,
+        include_links=include_links,
         additional_fields=additional_fields,
     )
     result = issue.to_simplified_dict()

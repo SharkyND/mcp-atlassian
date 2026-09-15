@@ -1398,6 +1398,7 @@ async def test_clone_issue_tool(jira_client, mock_jira_fetcher):
             "summary": "My Clone",
             "include_custom_fields": False,
             "link_to_original": False,
+            "include_links": False,
             "additional_fields": {"priority": {"name": "High"}},
         },
     )
@@ -1407,6 +1408,7 @@ async def test_clone_issue_tool(jira_client, mock_jira_fetcher):
         summary="My Clone",
         include_custom_fields=False,
         link_to_original=False,
+        include_links=False,
         additional_fields={"priority": {"name": "High"}},
     )
     payload = json.loads(response.content[0].text)
@@ -1424,6 +1426,7 @@ async def test_clone_issue_tool_defaults(jira_client, mock_jira_fetcher):
         summary=None,
         include_custom_fields=True,
         link_to_original=True,
+        include_links=True,
         additional_fields=None,
     )
 

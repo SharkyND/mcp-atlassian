@@ -735,6 +735,86 @@ class IssuesMixin(
             )
             return None
 
+    def _get_cloners_link_roles(
+        self, source_issue_key: str, new_issue_key: str
+    ) -> tuple[dict[str, str], dict[str, str]]:
+        """
+        Determine which side of the "Cloners" issue link (inward vs. outward)
+        the new clone should take.
+
+        Verified directly against the Jira REST API (not just the inward/
+        outward text on the link type): the clone must be the inwardIssue
+        and the source issue the outwardIssue for the link to render
+        correctly ("Clones (out)" on the clone, "Is cloned by (in)" on the
+        source).
+
+        Args:
+            source_issue_key: The key of the original issue being cloned
+            new_issue_key: The key of the newly created clone
+
+        Returns:
+            A ``(inwardIssue, outwardIssue)`` tuple of ``{"key": ...}`` dicts
+            ready to use in the ``create_issue_link`` payload
+        """
+        return {"key": new_issue_key}, {"key": source_issue_key}
+
+    def _copy_issue_links(
+        self,
+        source_issue_key: str,
+        new_issue_key: str,
+        source_links: list[dict[str, Any]],
+    ) -> None:
+        """
+        Re-create each of the source issue's issue links (other than the
+        "Cloners" link, which is handled separately) on the newly created
+        clone, preserving link type and direction relative to the linked
+        issue.
+
+        Best-effort: a failure copying one link does not stop the others or
+        fail the clone, matching the existing "Cloners" link behavior.
+
+        Args:
+            source_issue_key: The key of the issue that was cloned
+            new_issue_key: The key of the newly created clone
+            source_links: The source issue's raw ``issuelinks`` field entries
+        """
+        for link in source_links:
+            if not isinstance(link, dict):
+                continue
+            link_type_name = (link.get("type") or {}).get("name")
+            if not link_type_name or link_type_name.lower() == "cloners":
+                continue
+
+            outward_issue = link.get("outwardIssue")
+            inward_issue = link.get("inwardIssue")
+            try:
+                if outward_issue and outward_issue.get("key"):
+                    # Source issue was the inward side; the clone takes the
+                    # same inward role relative to the other linked issue.
+                    self.create_issue_link(
+                        {
+                            "type": {"name": link_type_name},
+                            "inwardIssue": {"key": new_issue_key},
+                            "outwardIssue": {"key": outward_issue["key"]},
+                        }
+                    )
+                elif inward_issue and inward_issue.get("key"):
+                    # Source issue was the outward side; the clone takes the
+                    # same outward role relative to the other linked issue.
+                    self.create_issue_link(
+                        {
+                            "type": {"name": link_type_name},
+                            "inwardIssue": {"key": inward_issue["key"]},
+                            "outwardIssue": {"key": new_issue_key},
+                        }
+                    )
+            except Exception as link_error:  # noqa: BLE001 - link copying is best-effort
+                other_key = (outward_issue or inward_issue or {}).get("key", "unknown")
+                logger.warning(
+                    f"Cloned {source_issue_key} to {new_issue_key} but could not copy "
+                    f"'{link_type_name}' link to {other_key}: {link_error!s}"
+                )
+
     def clone_issue(
         self,
         issue_key: str,
@@ -743,6 +823,7 @@ class IssuesMixin(
         *,
         include_custom_fields: bool = True,
         link_to_original: bool = True,
+        include_links: bool = True,
         additional_fields: dict[str, Any] | None = None,
     ) -> JiraIssue:
         """
@@ -785,6 +866,9 @@ class IssuesMixin(
             include_custom_fields: Whether to copy populated custom fields.
             link_to_original: Whether to create a "Cloners" issue link back to the
                 source issue after the clone is created.
+            include_links: Whether to re-create the source issue's other issue
+                links (e.g. "blocks", "relates to") on the clone, preserving
+                their type and direction relative to each linked issue.
             additional_fields: Optional dictionary of fields to override or add on
                 top of the fields copied from the source issue. These are applied
                 verbatim and are not subject to create-screen field verification.
@@ -924,14 +1008,14 @@ class IssuesMixin(
 
             if link_to_original:
                 try:
-                    # "Cloners" link semantics: the outward issue "clones" the
-                    # inward issue, so the new clone is the outward issue and
-                    # the source issue is the inward issue.
+                    inward_issue, outward_issue = self._get_cloners_link_roles(
+                        issue_key, new_issue_key
+                    )
                     self.create_issue_link(
                         {
                             "type": {"name": "Cloners"},
-                            "inwardIssue": {"key": issue_key},
-                            "outwardIssue": {"key": new_issue_key},
+                            "inwardIssue": inward_issue,
+                            "outwardIssue": outward_issue,
                         }
                     )
                 except Exception as link_error:  # noqa: BLE001 - linking is best-effort
@@ -939,6 +1023,11 @@ class IssuesMixin(
                         f"Cloned {issue_key} to {new_issue_key} but could not create "
                         f"'Cloners' link: {link_error!s}"
                     )
+
+            if include_links:
+                self._copy_issue_links(
+                    issue_key, new_issue_key, source_fields.get("issuelinks") or []
+                )
 
             issue_data = self.jira.get_issue(new_issue_key)
             if not isinstance(issue_data, dict):
@@ -1001,6 +1090,7 @@ class IssuesMixin(
         custom_type = (field_def or {}).get("schema", {}).get("custom")
         if custom_type == _SPRINT_CUSTOM_FIELD_TYPE:
             return self._extract_sprint_id(value)
+
         return value
 
     def _extract_sprint_id(self, value: Any) -> int | None:

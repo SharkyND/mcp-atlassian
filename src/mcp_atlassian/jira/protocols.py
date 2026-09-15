@@ -3,7 +3,7 @@
 from abc import abstractmethod
 from typing import Any, Protocol, runtime_checkable
 
-from ..models.jira import JiraIssue
+from ..models.jira import JiraIssue, JiraIssueLinkType
 from ..models.jira.search import JiraSearchResult
 
 
@@ -209,6 +209,18 @@ class UsersOperationsProto(Protocol):
 
 class LinksOperationsProto(Protocol):
     """Protocol defining issue link operations interface."""
+
+    @abstractmethod
+    def get_issue_link_types(self) -> list[JiraIssueLinkType]:
+        """
+        Get all available issue link types.
+
+        Returns:
+            List of JiraIssueLinkType objects
+
+        Raises:
+            Exception: If there is an error retrieving issue link types
+        """
 
     @abstractmethod
     def create_issue_link(self, data: dict[str, Any]) -> dict[str, Any]:
