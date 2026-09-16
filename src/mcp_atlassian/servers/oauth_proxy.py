@@ -10,12 +10,17 @@ from urllib.parse import unquote, urlsplit, urlunsplit
 
 from fastmcp.server.auth.oauth_proxy import OAuthProxy
 from mcp.server.auth.provider import (
+    AuthorizationCode,
     AuthorizationParams,
     AuthorizeError,
     OAuthClientInformationFull,
+    OAuthToken,
+    RefreshToken,
     RegistrationError,
 )
 from pydantic import AnyHttpUrl, AnyUrl
+
+from mcp_atlassian.utils.token_verifier import AtlassianDataCenterTokenVerifier
 
 logger = logging.getLogger("mcp-atlassian.server.oauth_proxy")
 
@@ -151,6 +156,71 @@ class HardenedOAuthProxy(OAuthProxy):
                 error_description="Redirect URI is not registered for this client",
             )
         return await super().authorize(client, params)
+
+    async def _persist_user_info(self, access_token: str) -> None:
+        """Add the authenticated profile to the encrypted upstream token record."""
+        if not isinstance(
+            self._token_validator,
+            AtlassianDataCenterTokenVerifier,
+        ):
+            return
+
+        payload = self.jwt_issuer.verify_token(access_token)
+        access_jti = payload.get("jti")
+        if not isinstance(access_jti, str):
+            return
+        mapping = await self._jti_mapping_store.get(key=access_jti)
+        if mapping is None:
+            return
+        token_set, ttl = await self._upstream_token_store.ttl(
+            key=mapping.upstream_token_id
+        )
+        if token_set is None:
+            return
+
+        validated = await self._token_validator.verify_token(token_set.access_token)
+        user_info = validated.claims.get("user_info") if validated else None
+        if not isinstance(user_info, dict):
+            logger.warning("Could not load user information for OAuth token")
+            return
+
+        token_set.raw_token_data = {
+            **token_set.raw_token_data,
+            "user_info": user_info,
+        }
+        await self._upstream_token_store.put(
+            key=mapping.upstream_token_id,
+            value=token_set,
+            ttl=max(ttl or 0, 1),
+        )
+
+    async def exchange_authorization_code(
+        self,
+        client: OAuthClientInformationFull,
+        authorization_code: AuthorizationCode,
+    ) -> OAuthToken:
+        """Store user information after issuing tokens."""
+        token = await super().exchange_authorization_code(
+            client,
+            authorization_code,
+        )
+        await self._persist_user_info(token.access_token)
+        return token
+
+    async def exchange_refresh_token(
+        self,
+        client: OAuthClientInformationFull,
+        refresh_token: RefreshToken,
+        scopes: list[str],
+    ) -> OAuthToken:
+        """Restore user information after refreshing upstream tokens."""
+        token = await super().exchange_refresh_token(
+            client,
+            refresh_token,
+            scopes,
+        )
+        await self._persist_user_info(token.access_token)
+        return token
 
 
 __all__ = ["HardenedOAuthProxy", "parse_env_list"]

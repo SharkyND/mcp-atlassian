@@ -128,9 +128,9 @@ CONFLUENCE_OAUTH_REDIRECT_URI=https://mcp.example.com/confluence/oauth/callback
 CONFLUENCE_OAUTH_SCOPE=READ WRITE
 
 BITBUCKET_URL=https://confluence.example.com
-BITBUCKET_OAUTH_CLIENT_ID=your_confluence_client_id
-BITBUCKET_OAUTH_CLIENT_SECRET=your_confluence_client_secret
-BITBUCKET_OAUTH_REDIRECT_URI=https://mcp.example.com/confluence/oauth/callback
+BITBUCKET_OAUTH_CLIENT_ID=your_bitbucket_client_id
+BITBUCKET_OAUTH_CLIENT_SECRET=your_bitbucket_client_secret
+BITBUCKET_OAUTH_REDIRECT_URI=https://mcp.example.com/bitbucket/oauth/callback
 BITBUCKET_OAUTH_SCOPE=READ WRITE
 
 ATLASSIAN_OAUTH_ALLOWED_CLIENT_REDIRECT_URIS=http://127.0.0.1:*,http://localhost:*
@@ -196,9 +196,27 @@ Configure MCP clients without PAT or product-selection headers:
 ```
 
 The ingress must forward product paths and root `/.well-known/*` OAuth
-discovery paths to the same port without stripping product prefixes. Use one
-replica and persist `/home/app/.local/share/fastmcp`; each product has an
-independent encrypted DCR/token store.
+discovery paths to the same port without stripping product prefixes.
+
+Two OAuth storage backends are supported:
+
+- **Local disk (default):** Stores each product's encrypted DCR and token state
+  under `/home/app/.local/share/fastmcp`. Use one replica and persist this
+  directory with a volume. This mode does not provide shared state between
+  replicas.
+- **DynamoDB with KMS:** Stores all products' OAuth state in one shared DynamoDB
+  table, with product-specific collection prefixes and KMS envelope encryption.
+  Use this mode for horizontally scaled AWS deployments so every replica reads
+  and writes the same OAuth state.
+
+Configure the shared DynamoDB backend with:
+
+```env
+ATLASSIAN_OAUTH_STORAGE_BACKEND=dynamodb
+ATLASSIAN_OAUTH_DYNAMODB_TABLE=<dynamodb_table_name>
+ATLASSIAN_OAUTH_KMS_KEY_ID=<kms_key_arn>
+AWS_REGION=us-east-1
+```
 
 **Data Center OAuth setup:**
 

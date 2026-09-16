@@ -42,7 +42,6 @@ def reset_fake_client(monkeypatch):
     [
         ("jira", "/rest/api/2/myself"),
         ("confluence", "/rest/api/user/current"),
-        ("bitbucket", "/rest/api/1.0/projects?limit=1"),
     ],
 )
 @pytest.mark.asyncio
@@ -50,7 +49,7 @@ async def test_data_center_token_is_validated_by_product(product, expected_path)
     FakeAsyncClient.responses = [
         httpx.Response(
             200,
-            json={"authenticated": True},
+            json={"name": "test-user", "displayName": "Test User"},
             request=httpx.Request("GET", f"https://dc.example.com{expected_path}"),
         )
     ]
@@ -66,7 +65,10 @@ async def test_data_center_token_is_validated_by_product(product, expected_path)
     assert access_token.token == "upstream-token"
     assert access_token.scopes == ["READ"]
     assert access_token.expires_at is None
-    assert access_token.claims == {"base_url": "https://dc.example.com"}
+    assert access_token.claims == {
+        "base_url": "https://dc.example.com",
+        "user_info": {"name": "test-user", "displayName": "Test User"},
+    }
     assert FakeAsyncClient.requests == [
         (
             f"https://dc.example.com{expected_path}",
@@ -76,6 +78,65 @@ async def test_data_center_token_is_validated_by_product(product, expected_path)
             },
         )
     ]
+
+
+@pytest.mark.asyncio
+async def test_bitbucket_token_resolves_authenticated_user_profile():
+    whoami_path = "/plugins/servlet/applinks/whoami"
+    user_path = "/rest/api/1.0/users?filter=test-user"
+    FakeAsyncClient.responses = [
+        httpx.Response(
+            200,
+            text="test-user",
+            request=httpx.Request("GET", f"https://dc.example.com{whoami_path}"),
+        ),
+        httpx.Response(
+            200,
+            json={
+                "values": [
+                    {"name": "other-user", "displayName": "Other User"},
+                    {"name": "test-user", "displayName": "Test User"},
+                ]
+            },
+            request=httpx.Request("GET", f"https://dc.example.com{user_path}"),
+        ),
+    ]
+    verifier = AtlassianDataCenterTokenVerifier(
+        instance_url="https://dc.example.com",
+        product="bitbucket",
+        required_scopes=["REPO_READ"],
+    )
+
+    access_token = await verifier.verify_token("upstream-token")
+
+    assert access_token is not None
+    assert access_token.claims["user_info"] == {
+        "name": "test-user",
+        "displayName": "Test User",
+    }
+    assert [request[0] for request in FakeAsyncClient.requests] == [
+        f"https://dc.example.com{whoami_path}",
+        f"https://dc.example.com{user_path}",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_bitbucket_token_rejects_anonymous_whoami():
+    whoami_url = "https://dc.example.com/plugins/servlet/applinks/whoami"
+    FakeAsyncClient.responses = [
+        httpx.Response(
+            200,
+            text="anonymous",
+            request=httpx.Request("GET", whoami_url),
+        )
+    ]
+    verifier = AtlassianDataCenterTokenVerifier(
+        instance_url="https://dc.example.com",
+        product="bitbucket",
+    )
+
+    assert await verifier.verify_token("anonymous-token") is None
+    assert [request[0] for request in FakeAsyncClient.requests] == [whoami_url]
 
 
 @pytest.mark.asyncio

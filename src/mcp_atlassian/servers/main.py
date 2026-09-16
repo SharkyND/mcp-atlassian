@@ -1484,30 +1484,79 @@ def _product_public_base_url(product: str) -> str:
 def _build_product_oauth_storage(
     product: str, client_secret: str
 ) -> tuple[object, bytes]:
-    """Create an encrypted, product-isolated FastMCP OAuth store."""
-    from cryptography.fernet import Fernet
+    """Create the configured encrypted, product-isolated OAuth store."""
     from fastmcp.server.auth.jwt_issuer import derive_jwt_key
-    from key_value.aio.stores.disk import DiskStore
-    from key_value.aio.wrappers.encryption import FernetEncryptionWrapper
 
     jwt_signing_key = derive_jwt_key(
         high_entropy_material=client_secret,
         salt="fastmcp-jwt-signing-key",
     )
-    storage_encryption_key = derive_jwt_key(
-        high_entropy_material=jwt_signing_key.decode(),
-        salt="fastmcp-storage-encryption-key",
-    )
-    storage_directory = settings.home / "oauth-proxy" / product
-    storage_directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-    if os.name != "nt":
-        storage_directory.chmod(0o700)
-    storage = FernetEncryptionWrapper(
-        key_value=DiskStore(
-            directory=storage_directory,
-        ),
-        fernet=Fernet(key=storage_encryption_key),
-    )
+    backend = os.getenv("ATLASSIAN_OAUTH_STORAGE_BACKEND", "disk").strip().lower()
+    if backend == "disk":
+        from cryptography.fernet import Fernet
+        from key_value.aio.stores.disk import DiskStore
+        from key_value.aio.wrappers.encryption import FernetEncryptionWrapper
+
+        storage_encryption_key = derive_jwt_key(
+            high_entropy_material=jwt_signing_key.decode(),
+            salt="fastmcp-storage-encryption-key",
+        )
+        storage_directory = settings.home / "oauth-proxy" / product
+        storage_directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if os.name != "nt":
+            storage_directory.chmod(0o700)
+        storage = FernetEncryptionWrapper(
+            key_value=DiskStore(directory=storage_directory),
+            fernet=Fernet(key=storage_encryption_key),
+        )
+    elif backend == "dynamodb":
+        table_name = os.getenv("ATLASSIAN_OAUTH_DYNAMODB_TABLE")
+        kms_key_id = os.getenv("ATLASSIAN_OAUTH_KMS_KEY_ID")
+        missing = [
+            name
+            for name, value in (
+                ("ATLASSIAN_OAUTH_DYNAMODB_TABLE", table_name),
+                ("ATLASSIAN_OAUTH_KMS_KEY_ID", kms_key_id),
+            )
+            if not value
+        ]
+        if missing:
+            message = "DynamoDB OAuth storage requires: " + ", ".join(missing)
+            raise ValueError(message)
+
+        from key_value.aio.stores.dynamodb import DynamoDBStore
+        from key_value.aio.wrappers.prefix_collections import (
+            PrefixCollectionsWrapper,
+        )
+
+        from mcp_atlassian.utils.oauth_storage import (
+            KmsEnvelopeEncryptionWrapper,
+        )
+
+        region_name = os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION")
+        dynamodb_store = DynamoDBStore(
+            table_name=table_name,
+            region_name=region_name,
+            endpoint_url=os.getenv("ATLASSIAN_OAUTH_DYNAMODB_ENDPOINT_URL"),
+        )
+        product_store = PrefixCollectionsWrapper(
+            key_value=dynamodb_store,
+            prefix=f"mcp-atlassian-{product}",
+        )
+        storage = KmsEnvelopeEncryptionWrapper(
+            product_store,
+            kms_key_id=kms_key_id,
+            product=product,
+            region_name=region_name,
+            endpoint_url=os.getenv("ATLASSIAN_OAUTH_KMS_ENDPOINT_URL"),
+        )
+    else:
+        message = (
+            "Unsupported ATLASSIAN_OAUTH_STORAGE_BACKEND "
+            f"'{backend}'; expected 'disk' or 'dynamodb'"
+        )
+        raise ValueError(message)
+
     return storage, jwt_signing_key
 
 
