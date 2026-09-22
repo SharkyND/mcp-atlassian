@@ -53,6 +53,16 @@ def mock_jira_fetcher():
     mock_fetcher.get_available_transitions.return_value = [
         {"id": "11", "name": "Start Progress"}
     ]
+    mock_fetcher.get_issue_related_pull_requests.return_value = {
+        "detail": [
+            {
+                "pullRequests": [
+                    {"id": "1", "status": "OPEN"},
+                    {"id": "2", "status": "DECLINED"},
+                ]
+            }
+        ]
+    }
     mock_fetcher.get_worklogs.return_value = [
         {"author": {"displayName": "Test User"}, "timeSpent": "1h"}
     ]
@@ -449,6 +459,7 @@ class DirectJiraToolCaller:
             get_all_projects,
             get_board_issues,
             get_issue,
+            get_issue_related_pull_requests,
             get_link_types,
             get_project_issues,
             get_project_versions,
@@ -496,6 +507,7 @@ class DirectJiraToolCaller:
             "jira_batch_create_issues": batch_create_issues.fn,
             "jira_update_issue": update_issue.fn,
             "jira_delete_issue": delete_issue.fn,
+            "jira_get_issue_related_pull_requests": get_issue_related_pull_requests.fn,
             "jira_add_comment": add_comment.fn,
             "jira_create_issue_link": create_issue_link.fn,
             "jira_clone_issue": clone_issue.fn,
@@ -595,6 +607,22 @@ async def test_get_issue(jira_client, mock_jira_fetcher):
     assert isinstance(actual_fields, list)
     for field in ("summary", "status", "assignee", "priority"):
         assert field in actual_fields
+
+
+@pytest.mark.anyio
+async def test_get_issue_related_pull_requests(jira_client, mock_jira_fetcher):
+    """Test the Jira Bitbucket pull request discovery tool."""
+    response = await jira_client.call_tool(
+        "jira_get_issue_related_pull_requests",
+        {"issue_key": "TEST-123", "exclude_statuses": ["DECLINED"]},
+    )
+
+    data = json.loads(response.content[0].text)
+    assert data["detail"][0]["pullRequests"][0]["status"] == "OPEN"
+    mock_jira_fetcher.get_issue_related_pull_requests.assert_called_once_with(
+        issue_key="TEST-123",
+        exclude_statuses=["DECLINED"],
+    )
 
 
 @pytest.mark.anyio
