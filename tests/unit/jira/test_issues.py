@@ -1,9 +1,10 @@
 """Tests for the Jira Issues mixin."""
 
 from typing import Any
-from unittest.mock import ANY, MagicMock, patch
+from unittest.mock import ANY, MagicMock, Mock, call, patch
 
 import pytest
+from requests.exceptions import HTTPError
 
 from mcp_atlassian.jira import JiraFetcher
 from mcp_atlassian.jira.issues import IssuesMixin, logger
@@ -724,6 +725,54 @@ class TestIssuesMixin:
         assert document.key == "TEST-123"
         assert document.summary == "Updated Summary"
 
+    def test_update_issue_with_operations(self, issues_mixin: IssuesMixin):
+        """Test updating an issue with both fields and 'update' operations."""
+        issue_data = {
+            "id": "12345",
+            "key": "TEST-123",
+            "fields": {
+                "summary": "Test Issue",
+                "description": "This is a test",
+                "status": {"name": "Open"},
+                "issuetype": {"name": "Bug"},
+            },
+        }
+        issues_mixin.jira.get_issue.return_value = issue_data
+        issues_mixin.jira.issue_get_comments.return_value = {"comments": []}
+
+        document = issues_mixin.update_issue(
+            issue_key="TEST-123",
+            fields={"summary": "Updated Summary"},
+            update={
+                "issuelinks": [
+                    {
+                        "add": {
+                            "type": {"name": "Tests"},
+                            "inwardIssue": {"key": "AADL-4270"},
+                        }
+                    }
+                ]
+            },
+        )
+
+        issues_mixin.jira.update_issue.assert_called_once_with(
+            issue_key="TEST-123",
+            update={
+                "fields": {"summary": "Updated Summary"},
+                "update": {
+                    "issuelinks": [
+                        {
+                            "add": {
+                                "type": {"name": "Tests"},
+                                "inwardIssue": {"key": "AADL-4270"},
+                            }
+                        }
+                    ]
+                },
+            },
+        )
+        assert document.key == "TEST-123"
+
     def test_update_issue_with_status(self, issues_mixin: IssuesMixin):
         """Test updating an issue with a status change."""
         # Mock get_issue response
@@ -1405,7 +1454,7 @@ class TestIssuesMixin:
         issues_mixin.jira.create_issue_link.assert_not_called()
 
     def test_clone_issue_copies_other_issue_links(self, issues_mixin: IssuesMixin):
-        """Test that pre-existing issue links on the source are copied to the clone."""
+        """Test that all source issue links are copied regardless of status."""
         source_response = {
             "id": "10001",
             "key": "TEST-100",
@@ -1428,7 +1477,10 @@ class TestIssuesMixin:
                             "inward": "is blocked by",
                             "outward": "blocks",
                         },
-                        "outwardIssue": {"key": "TEST-200"},
+                        "outwardIssue": {
+                            "key": "TEST-200",
+                            "fields": {"status": {"name": "Done"}},
+                        },
                     },
                     {
                         "type": {
@@ -1436,7 +1488,10 @@ class TestIssuesMixin:
                             "inward": "relates to",
                             "outward": "relates to",
                         },
-                        "inwardIssue": {"key": "TEST-300"},
+                        "inwardIssue": {
+                            "key": "TEST-300",
+                            "fields": {"status": {"name": "In Progress"}},
+                        },
                     },
                 ],
             },
@@ -1454,6 +1509,10 @@ class TestIssuesMixin:
         issues_mixin.jira.create_issue_link.return_value = {}
 
         issues_mixin.clone_issue("TEST-100")
+
+        issues_mixin.jira.get_issue.assert_any_call(
+            "TEST-100", fields="*all,issuelinks"
+        )
 
         # The pre-existing "Cloners" link entry on the source is not
         # re-copied (only the dedicated new-clone Cloners link is created),
@@ -1480,6 +1539,296 @@ class TestIssuesMixin:
             }
         )
         assert issues_mixin.jira.create_issue_link.call_count == 3
+
+    def test_clone_issue_copies_link_via_update_fallback_on_permission_error(
+        self, issues_mixin: IssuesMixin
+    ):
+        """Test a "No Link Issue Permission" error falls back to update_issue."""
+        source_response = {
+            "id": "10001",
+            "key": "TEST-100",
+            "fields": {
+                "project": {"key": "TEST"},
+                "issuetype": {"name": "Task"},
+                "summary": "Original task",
+                "issuelinks": [
+                    {
+                        "type": {
+                            "name": "Tests",
+                            "inward": "tested by",
+                            "outward": "tests",
+                        },
+                        "inwardIssue": {"key": "AADL-4270"},
+                    }
+                ],
+            },
+        }
+        new_issue_data = {
+            "id": "10099",
+            "key": "TEST-101",
+            "fields": {"summary": "CLONE - Original task"},
+        }
+        issues_mixin.jira.get_issue.side_effect = [source_response, new_issue_data]
+        issues_mixin.jira.create_issue.return_value = {
+            "id": "10099",
+            "key": "TEST-101",
+        }
+        permission_response = Mock(status_code=401)
+        permission_response.json.return_value = {
+            "errorMessages": ["No Link Issue Permission for issue 'AADL-4270'"],
+            "errors": {},
+        }
+        issues_mixin.jira.create_issue_link.side_effect = [
+            {},  # "Cloners" link succeeds
+            HTTPError(response=permission_response),  # "Tests" link is denied
+        ]
+
+        result = issues_mixin.clone_issue("TEST-100")
+
+        assert result.key == "TEST-101"
+        issues_mixin.jira.update_issue.assert_called_once_with(
+            "TEST-101",
+            {
+                "update": {
+                    "issuelinks": [
+                        {
+                            "add": {
+                                "type": {"name": "Tests"},
+                                "inwardIssue": {"key": "AADL-4270"},
+                            }
+                        }
+                    ]
+                }
+            },
+        )
+
+    def test_clone_issue_link_fallback_failure_does_not_fail_clone(
+        self, issues_mixin: IssuesMixin
+    ):
+        """Test that a failed update_issue fallback still does not fail cloning."""
+        source_response = {
+            "id": "10001",
+            "key": "TEST-100",
+            "fields": {
+                "project": {"key": "TEST"},
+                "issuetype": {"name": "Task"},
+                "summary": "Original task",
+                "issuelinks": [
+                    {
+                        "type": {"name": "Tests"},
+                        "inwardIssue": {"key": "AADL-4270"},
+                    }
+                ],
+            },
+        }
+        new_issue_data = {
+            "id": "10099",
+            "key": "TEST-101",
+            "fields": {"summary": "CLONE - Original task"},
+        }
+        issues_mixin.jira.get_issue.side_effect = [source_response, new_issue_data]
+        issues_mixin.jira.create_issue.return_value = {
+            "id": "10099",
+            "key": "TEST-101",
+        }
+        permission_response = Mock(status_code=401)
+        permission_response.json.return_value = {
+            "errorMessages": ["No Link Issue Permission for issue 'AADL-4270'"],
+            "errors": {},
+        }
+        issues_mixin.jira.create_issue_link.side_effect = [
+            {},
+            HTTPError(response=permission_response),
+        ]
+        issues_mixin.jira.update_issue.side_effect = Exception("update failed")
+
+        result = issues_mixin.clone_issue("TEST-100")
+
+        assert result.key == "TEST-101"
+
+    def test_clone_test_issue_creates_xray_test_runs(self, issues_mixin: IssuesMixin):
+        """Test cloning an Xray Test adds the clone to every source execution."""
+        source_response = {
+            "id": "10001",
+            "key": "TEST-100",
+            "fields": {
+                "project": {"key": "TEST"},
+                "issuetype": {"name": "Test"},
+                "summary": "Original test",
+            },
+        }
+        new_issue_data = {
+            "id": "10099",
+            "key": "TEST-101",
+            "fields": {"summary": "CLONE - Original test"},
+        }
+        issues_mixin.jira.get_issue.side_effect = [source_response, new_issue_data]
+        issues_mixin.jira.create_issue.return_value = {
+            "id": "10099",
+            "key": "TEST-101",
+        }
+        issues_mixin.jira.create_issue_link.return_value = {}
+
+        with (
+            patch("mcp_atlassian.jira.issues.XrayConfig.from_jira_config"),
+            patch("mcp_atlassian.jira.issues.XrayClient") as mock_xray_client,
+        ):
+            mock_xray_client.return_value.xray.get_test_executions.return_value = [
+                {"key": "EXEC-1"},
+                {"key": "EXEC-2"},
+            ]
+
+            issues_mixin.clone_issue("TEST-100")
+
+        mock_xray_client.return_value.xray.get_test_executions.assert_called_once_with(
+            "TEST-100"
+        )
+        assert (
+            mock_xray_client.return_value.xray.update_test_execution.call_args_list
+            == [
+                call("EXEC-1", add=["TEST-101"]),
+                call("EXEC-2", add=["TEST-101"]),
+            ]
+        )
+
+    def test_clone_test_execution_recreates_xray_test_runs(
+        self, issues_mixin: IssuesMixin
+    ):
+        """Test cloning a Test Execution creates fresh runs for its Tests."""
+        source_response = {
+            "id": "10001",
+            "key": "EXEC-100",
+            "fields": {
+                "project": {"key": "TEST"},
+                "issuetype": {"name": "Test Execution"},
+                "summary": "Original execution",
+            },
+        }
+        new_issue_data = {
+            "id": "10099",
+            "key": "EXEC-101",
+            "fields": {"summary": "CLONE - Original execution"},
+        }
+        source_run = {
+            "id": 101,
+            "testKey": "TEST-1",
+            "testExecKey": "EXEC-100",
+            "testEnvironments": ["Dev"],
+            "status": "PASS",
+            "steps": [{"id": 1001, "index": 1, "status": "PASS"}],
+        }
+        new_run = {
+            "id": 201,
+            "testKey": "TEST-1",
+            "testExecKey": "EXEC-101",
+            "testEnvironments": ["Dev"],
+            "status": "TODO",
+            "steps": [{"id": 2001, "index": 1, "status": "TODO"}],
+        }
+        issues_mixin.jira.get_issue.side_effect = [source_response, new_issue_data]
+        issues_mixin.jira.create_issue.return_value = {
+            "id": "10099",
+            "key": "EXEC-101",
+        }
+        issues_mixin.jira.create_issue_link.return_value = {}
+
+        with (
+            patch("mcp_atlassian.jira.issues.XrayConfig.from_jira_config"),
+            patch("mcp_atlassian.jira.issues.XrayClient") as mock_xray_client,
+            patch.object(issues_mixin, "_copy_xray_test_run_data") as copy_run_data,
+        ):
+            xray_client = mock_xray_client.return_value
+            xray_client.get_test_runs_in_context.side_effect = [
+                [source_run],
+                [new_run],
+            ]
+            xray_client.xray.get_test_run.side_effect = [source_run, new_run]
+            xray_client.xray.get_test_statuses.return_value = [
+                {"name": "PASS", "final": True},
+                {"name": "FAIL", "final": True},
+            ]
+
+            issues_mixin.clone_issue("EXEC-100")
+
+        xray_client.xray.update_test_execution.assert_called_once_with(
+            "EXEC-101", add=["TEST-1"]
+        )
+        assert xray_client.get_test_runs_in_context.call_args_list == [
+            call(test_exec_key="EXEC-100", limit=100, page=1),
+            call(test_exec_key="EXEC-101", limit=100, page=1),
+        ]
+        assert xray_client.xray.get_test_run.call_args_list == [call(101), call(201)]
+        copy_run_data.assert_called_once_with(
+            xray_client, source_run, new_run, {"PASS", "FAIL"}
+        )
+
+    def test_get_xray_test_runs_in_execution_paginates(self, issues_mixin: IssuesMixin):
+        """Test all pages of an execution's Test Runs are returned."""
+        xray_client = MagicMock()
+        first_page = [
+            {"id": run_id, "testKey": f"TEST-{run_id}"} for run_id in range(1, 101)
+        ]
+        last_page = [{"id": 101, "testKey": "TEST-101"}]
+        xray_client.get_test_runs_in_context.side_effect = [
+            first_page,
+            last_page,
+        ]
+
+        result = issues_mixin._get_xray_test_runs_in_execution(xray_client, "EXEC-100")
+
+        assert result == first_page + last_page
+        assert xray_client.get_test_runs_in_context.call_args_list == [
+            call(test_exec_key="EXEC-100", limit=100, page=1),
+            call(test_exec_key="EXEC-100", limit=100, page=2),
+        ]
+
+    def test_copy_xray_test_run_data_copies_writable_fields_and_steps(
+        self, issues_mixin: IssuesMixin
+    ):
+        """Test copying writable run fields and non-TODO step results."""
+        xray_client = MagicMock()
+        source_run = {
+            "comment": "Source run comment",
+            "defects": ["TEST-500"],
+            "assignee": "PYadav39",
+            "status": "EXECUTING",
+            "executedBy": "PYadav39",
+            "steps": [
+                {
+                    "index": 1,
+                    "status": "PASS",
+                    "comment": {"raw": "Step comment"},
+                    "actualResult": {"raw": "Observed result"},
+                },
+                {"index": 2, "status": "TODO"},
+            ],
+        }
+        new_run = {
+            "id": 200,
+            "steps": [{"id": 201, "index": 1}, {"id": 202, "index": 2}],
+        }
+
+        issues_mixin._copy_xray_test_run_data(
+            xray_client, source_run, new_run, {"PASS", "FAIL"}
+        )
+
+        xray_client.xray.update_test_run_comment.assert_called_once_with(
+            200, "Source run comment"
+        )
+        xray_client.xray.update_test_run_defects.assert_called_once_with(
+            200, add=["TEST-500"]
+        )
+        xray_client.xray.update_test_run_assignee.assert_called_once_with(
+            200, "PYadav39"
+        )
+        xray_client.update_test_run_step.assert_called_once_with(
+            200,
+            201,
+            status="PASS",
+            comment="Step comment",
+            actual_result="Observed result",
+        )
+        xray_client.xray.update_test_run_status.assert_not_called()
 
     def test_clone_issue_include_links_false_skips_copying_links(
         self, issues_mixin: IssuesMixin
@@ -1730,6 +2079,101 @@ class TestIssuesMixin:
 
         created_fields = issues_mixin.jira.create_issue.call_args.kwargs["fields"]
         assert created_fields["customfield_10004"] == 164176
+
+    def test_clone_issue_excludes_xray_managed_test_run_field(
+        self, issues_mixin: IssuesMixin
+    ):
+        """Test Xray-managed Test Run references are not sent on create."""
+        source_response = {
+            "id": "10001",
+            "key": "TEST-100",
+            "fields": {
+                "project": {"key": "TEST"},
+                "issuetype": {"name": "Test Execution"},
+                "summary": "Original execution",
+                "customfield_10001": "keep me",
+                "customfield_11414": [{"testKey": "TEST-200", "testRunId": 3793509}],
+            },
+        }
+        new_issue_data = {
+            "id": "10099",
+            "key": "TEST-101",
+            "fields": {"summary": "CLONE - Original execution"},
+        }
+        issues_mixin.jira.get_issue.side_effect = [source_response, new_issue_data]
+        issues_mixin.jira.create_issue.return_value = {
+            "id": "10099",
+            "key": "TEST-101",
+        }
+        issues_mixin.jira.create_issue_link.return_value = {}
+        issues_mixin.jira.get_all_fields.return_value = [
+            {
+                "id": "customfield_10001",
+                "name": "Ordinary custom field",
+                "schema": {"custom": "example:ordinary-field"},
+            },
+            {
+                "id": "customfield_11414",
+                "name": "Tests association with a Test Execution",
+                "schema": {
+                    "custom": ("com.xpandit.plugins.xray:testexec-tests-custom-field")
+                },
+            },
+        ]
+
+        result = issues_mixin.clone_issue("TEST-100")
+
+        created_fields = issues_mixin.jira.create_issue.call_args.kwargs["fields"]
+        assert created_fields["customfield_10001"] == "keep me"
+        assert "customfield_11414" not in created_fields
+        assert result.custom_fields["clone_excluded_fields"] == ["customfield_11414"]
+
+    def test_clone_issue_excludes_xray_managed_additional_field(
+        self, issues_mixin: IssuesMixin
+    ):
+        """Test additional fields cannot restore managed Test Run references."""
+        source_response = {
+            "id": "10001",
+            "key": "TEST-100",
+            "fields": {
+                "project": {"key": "TEST"},
+                "issuetype": {"name": "Test Execution"},
+                "summary": "Original execution",
+            },
+        }
+        new_issue_data = {
+            "id": "10099",
+            "key": "TEST-101",
+            "fields": {"summary": "CLONE - Original execution"},
+        }
+        issues_mixin.jira.get_issue.side_effect = [source_response, new_issue_data]
+        issues_mixin.jira.create_issue.return_value = {
+            "id": "10099",
+            "key": "TEST-101",
+        }
+        issues_mixin.jira.create_issue_link.return_value = {}
+        issues_mixin.jira.get_all_fields.return_value = [
+            {
+                "id": "customfield_11414",
+                "name": "Tests association with a Test Execution",
+                "schema": {
+                    "custom": ("com.xpandit.plugins.xray:testexec-tests-custom-field")
+                },
+            }
+        ]
+
+        result = issues_mixin.clone_issue(
+            "TEST-100",
+            additional_fields={
+                "labels": ["clone"],
+                "customfield_11414": [{"testKey": "TEST-200", "testRunId": 3793509}],
+            },
+        )
+
+        created_fields = issues_mixin.jira.create_issue.call_args.kwargs["fields"]
+        assert created_fields["labels"] == ["clone"]
+        assert "customfield_11414" not in created_fields
+        assert result.custom_fields["clone_excluded_fields"] == ["customfield_11414"]
 
     def test_clone_issue_drops_field_rejected_by_create_api(
         self, issues_mixin: IssuesMixin

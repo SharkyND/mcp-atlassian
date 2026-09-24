@@ -1299,12 +1299,49 @@ async def test_update_issue_with_attachments(jira_client, mock_jira_fetcher):
     )
     mock_jira_fetcher.update_issue.assert_called_once_with(
         issue_key="PROJ-1",
+        update=None,
         summary="Updated summary",
         customfield_1="value",
         attachments=["/tmp/file.txt"],
     )
     payload = json.loads(response.content[0].text)
     assert payload["issue"]["attachment_results"][0]["file"] == "doc.txt"
+
+
+@pytest.mark.anyio
+async def test_update_issue_with_update_operations(jira_client, mock_jira_fetcher):
+    """Test jira_update_issue passes 'update' operations through separately."""
+    await jira_client.call_tool(
+        "jira_update_issue",
+        {
+            "issue_key": "PROJ-1",
+            "fields": {"summary": "Updated summary"},
+            "update": {
+                "issuelinks": [
+                    {
+                        "add": {
+                            "type": {"name": "Tests"},
+                            "inwardIssue": {"key": "PROJ-2"},
+                        }
+                    }
+                ]
+            },
+        },
+    )
+    mock_jira_fetcher.update_issue.assert_called_once_with(
+        issue_key="PROJ-1",
+        update={
+            "issuelinks": [
+                {
+                    "add": {
+                        "type": {"name": "Tests"},
+                        "inwardIssue": {"key": "PROJ-2"},
+                    }
+                }
+            ]
+        },
+        summary="Updated summary",
+    )
 
 
 @pytest.mark.anyio

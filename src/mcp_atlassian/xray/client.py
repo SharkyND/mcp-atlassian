@@ -168,3 +168,42 @@ class XrayClient:
 
         url = self.xray.resource_url("testruns", api_version="2.0")
         return self.xray.get(url, params=params)
+
+    def update_test_run_step(
+        self,
+        test_run_id: int,
+        step_id: int,
+        *,
+        status: str | None = None,
+        comment: str | None = None,
+        actual_result: str | None = None,
+    ) -> Any:
+        """Update writable fields on a Test Run step using Xray REST API v2.
+
+        Args:
+            test_run_id: ID of the Test Run.
+            step_id: ID of the step result within that Test Run.
+            status: Optional step status (e.g. "PASS", "FAIL").
+            comment: Optional step comment.
+            actual_result: Optional actual result text.
+
+        Returns:
+            The response returned by the Xray step-result endpoint.
+
+        Raises:
+            ValueError: If no writable fields are supplied.
+        """
+        update: dict[str, str] = {}
+        if status is not None:
+            update["status"] = status
+        if comment is not None:
+            update["comment"] = comment
+        if actual_result is not None:
+            update["actualResult"] = actual_result
+        if not update:
+            raise ValueError("At least one Test Run step field must be provided")
+
+        url = self.xray.resource_url(
+            f"testrun/{test_run_id}/step/{step_id}", api_version="2.0"
+        )
+        return self.xray.put(url, update)
