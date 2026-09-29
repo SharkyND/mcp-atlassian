@@ -41,8 +41,24 @@ class BitbucketClient:
 
         # Initialize the Bitbucket client based on auth type
         if self.config.auth_type == "oauth":
-            if not self.config.oauth_config or not self.config.oauth_config.cloud_id:
-                error_msg = "OAuth authentication requires a valid cloud_id"
+            if not self.config.oauth_config:
+                error_msg = "OAuth authentication requires a valid configuration"
+                raise ValueError(error_msg)
+
+            if self.config.oauth_config.is_data_center:
+                api_url = self.config.oauth_config.base_url or self.config.url
+                is_cloud = False
+            elif self.config.oauth_config.cloud_id:
+                api_url = (
+                    "https://api.atlassian.com/ex/bitbucket/"
+                    f"{self.config.oauth_config.cloud_id}"
+                )
+                is_cloud = True
+            else:
+                error_msg = (
+                    "OAuth authentication requires a cloud_id for Cloud or "
+                    "base_url for Data Center"
+                )
                 raise ValueError(error_msg)
 
             # Create a session for OAuth
@@ -53,14 +69,11 @@ class BitbucketClient:
                 error_msg = "Failed to configure OAuth session"
                 raise MCPAtlassianAuthenticationError(error_msg)
 
-            # The Bitbucket API URL with OAuth is different
-            api_url = f"https://api.atlassian.com/ex/bitbucket/{self.config.oauth_config.cloud_id}"
-
             # Initialize Bitbucket with the session
             self.bitbucket = Bitbucket(
                 url=api_url,
                 session=session,
-                cloud=True,  # OAuth is only for Cloud
+                cloud=is_cloud,
                 verify_ssl=self.config.ssl_verify,
             )
         elif self.config.auth_type == "pat":

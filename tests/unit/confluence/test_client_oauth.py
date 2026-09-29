@@ -82,6 +82,74 @@ class TestConfluenceClientOAuth:
             # Verify preprocessor was initialized
             assert client.preprocessor == mock_preprocessor.return_value
 
+    def test_init_with_data_center_oauth_config(self):
+        """Data Center OAuth should use its instance URL and user session."""
+        oauth_config = OAuthConfig(
+            client_id="confluence-client",
+            client_secret="confluence-secret",
+            redirect_uri="https://mcp.example.com/confluence/oauth/callback",
+            scope="READ WRITE",
+            access_token="user-access-token",
+            base_url="https://confluence.example.com",
+        )
+        config = ConfluenceConfig(
+            url="https://confluence.example.com",
+            auth_type="oauth",
+            oauth_config=oauth_config,
+            ssl_verify=False,
+        )
+
+        with (
+            patch("mcp_atlassian.confluence.client.Confluence") as mock_confluence,
+            patch(
+                "mcp_atlassian.confluence.client.configure_oauth_session"
+            ) as mock_configure_oauth,
+            patch(
+                "mcp_atlassian.confluence.client.configure_ssl_verification"
+            ) as mock_configure_ssl,
+            patch("mcp_atlassian.preprocessing.confluence.ConfluencePreprocessor"),
+        ):
+            mock_configure_oauth.return_value = True
+
+            ConfluenceClient(config=config)
+
+        mock_configure_oauth.assert_called_once()
+        oauth_session = mock_configure_oauth.call_args.args[0]
+        mock_configure_oauth.assert_called_once_with(oauth_session, oauth_config)
+        mock_confluence.assert_called_once_with(
+            url="https://confluence.example.com",
+            session=oauth_session,
+            cloud=False,
+            verify_ssl=False,
+        )
+        mock_configure_ssl.assert_called_once_with(
+            service_name="Confluence",
+            url="https://confluence.example.com",
+            session=mock_confluence.return_value._session,
+            ssl_verify=False,
+        )
+
+    def test_init_rejects_cloud_base_url_without_cloud_id(self):
+        """A Cloud base URL cannot replace the API gateway cloud ID."""
+        oauth_config = OAuthConfig(
+            client_id="confluence-client",
+            client_secret="confluence-secret",
+            redirect_uri="https://example.com/callback",
+            scope="read:confluence-content.all",
+            base_url="https://test.atlassian.net/wiki",
+            access_token="test-access-token",
+        )
+        config = ConfluenceConfig(
+            url="https://test.atlassian.net/wiki",
+            auth_type="oauth",
+            oauth_config=oauth_config,
+        )
+
+        with pytest.raises(
+            ValueError, match="OAuth authentication requires a cloud_id"
+        ):
+            ConfluenceClient(config=config)
+
     def test_init_with_byo_access_token_oauth_config(self):
         """Test initializing the client with BYOAccessTokenOAuthConfig."""
         # Create a mock BYO OAuth config
@@ -152,7 +220,7 @@ class TestConfluenceClientOAuth:
 
         # Verify error is raised by ConfluenceClient's validation
         with pytest.raises(
-            ValueError, match="OAuth authentication requires a valid cloud_id"
+            ValueError, match="OAuth authentication requires a cloud_id"
         ):
             ConfluenceClient(config=config)
 
@@ -238,7 +306,7 @@ class TestConfluenceClientOAuth:
 
         # Verify error is raised
         with pytest.raises(
-            ValueError, match="OAuth authentication requires a valid cloud_id"
+            ValueError, match="OAuth authentication requires a cloud_id"
         ):
             ConfluenceClient(config=config)
 

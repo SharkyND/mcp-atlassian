@@ -20,7 +20,7 @@ class JiraConfig:
 
     Handles authentication for Jira Cloud and Server/Data Center:
     - Cloud: username/API token (basic auth) or OAuth 2.0 (3LO)
-    - Server/DC: personal access token or basic auth
+    - Server/DC: personal access token, basic auth, or OAuth 2.0
     """
 
     url: str  # Base URL for Jira
@@ -87,7 +87,7 @@ class JiraConfig:
         personal_token = os.getenv("JIRA_PERSONAL_TOKEN")
 
         # Check for OAuth configuration
-        oauth_config = get_oauth_config_from_env()
+        oauth_config = get_oauth_config_from_env(service_url=url, service_type="jira")
         auth_type = None
 
         # Use the shared utility function directly
@@ -160,7 +160,7 @@ class JiraConfig:
                         and self.oauth_config.client_secret
                         and self.oauth_config.redirect_uri
                         and self.oauth_config.scope
-                        and self.oauth_config.cloud_id
+                        and (self.oauth_config.cloud_id or self.oauth_config.base_url)
                     ):
                         return True
                     # Minimal OAuth configuration (user-provided tokens mode)

@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, call, patch
 import pytest
 
 from mcp_atlassian.exceptions import MCPAtlassianAuthenticationError
+from mcp_atlassian.utils.oauth import OAuthConfig
 from mcp_atlassian.xray.client import XrayClient
 from mcp_atlassian.xray.config import XrayConfig
 
@@ -175,6 +176,55 @@ def test_init_with_oauth():
         assert client.config == config
 
 
+def test_init_with_data_center_oauth():
+    """Xray should call the Jira Data Center API with the user's OAuth session."""
+    with (
+        patch("mcp_atlassian.xray.client.Xray") as mock_xray,
+        patch(
+            "mcp_atlassian.xray.client.configure_ssl_verification"
+        ) as mock_configure_ssl,
+        patch(
+            "mcp_atlassian.xray.client.configure_oauth_session"
+        ) as mock_configure_oauth,
+        patch("mcp_atlassian.xray.client.Session") as mock_session,
+    ):
+        mock_configure_oauth.return_value = True
+        oauth_config = OAuthConfig(
+            client_id="jira-client",
+            client_secret="jira-secret",
+            redirect_uri="https://mcp.example.com/jira/oauth/callback",
+            scope="READ WRITE",
+            access_token="user-access-token",
+            base_url="https://jira.example.com",
+        )
+        config = XrayConfig(
+            url="https://jira.example.com",
+            auth_type="oauth",
+            oauth_config=oauth_config,
+            ssl_verify=False,
+        )
+
+        client = XrayClient(config=config)
+
+        mock_configure_oauth.assert_called_once_with(
+            mock_session.return_value,
+            oauth_config,
+        )
+        mock_xray.assert_called_once_with(
+            url="https://jira.example.com",
+            session=mock_session.return_value,
+            cloud=False,
+            verify_ssl=False,
+        )
+        mock_configure_ssl.assert_called_once_with(
+            service_name="Xray",
+            url="https://jira.example.com",
+            session=mock_xray.return_value._session,
+            ssl_verify=False,
+        )
+        assert client.config == config
+
+
 def test_init_from_env():
     """Test initializing the client from environment variables."""
     with (
@@ -316,7 +366,11 @@ def test_init_oauth_missing_cloud_id():
     )
 
     with pytest.raises(
-        ValueError, match="OAuth authentication requires a valid cloud_id"
+        ValueError,
+        match=(
+            "OAuth authentication requires a cloud_id for Cloud or "
+            "base_url for Data Center"
+        ),
     ):
         XrayClient(config=config)
 
@@ -330,7 +384,11 @@ def test_init_oauth_missing_config():
     )
 
     with pytest.raises(
-        ValueError, match="OAuth authentication requires a valid cloud_id"
+        ValueError,
+        match=(
+            "OAuth authentication requires a cloud_id for Cloud or "
+            "base_url for Data Center"
+        ),
     ):
         XrayClient(config=config)
 

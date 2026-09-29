@@ -924,28 +924,6 @@ class TestGetXrayFetcher:
             assert called_config.personal_token == scenario["token"]
 
     @patch("mcp_atlassian.servers.dependencies.get_http_request")
-    async def test_user_specific_fetcher_rejects_oauth(
-        self,
-        mock_get_http_request,
-        mock_context,
-        mock_request,
-        config_factory,
-        auth_scenarios,
-    ):
-        """OAuth user auth should be rejected for Xray."""
-        scenario = auth_scenarios["oauth"]
-        _setup_mock_request_state(mock_request, scenario)
-        mock_get_http_request.return_value = mock_request
-
-        app_context = config_factory.create_app_context()
-        _setup_mock_context(mock_context, app_context)
-
-        with pytest.raises(
-            ValueError, match="Xray for Jira does not support OAuth authentication."
-        ):
-            await get_xray_fetcher(mock_context)
-
-    @patch("mcp_atlassian.servers.dependencies.get_http_request")
     @patch("mcp_atlassian.servers.dependencies.XrayFetcher")
     async def test_header_based_fetcher_creation(
         self,

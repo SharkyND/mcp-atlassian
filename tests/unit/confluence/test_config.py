@@ -6,6 +6,7 @@ from unittest.mock import patch
 import pytest
 
 from mcp_atlassian.confluence.config import ConfluenceConfig
+from mcp_atlassian.utils.oauth import OAuthConfig
 
 
 def test_from_env_success():
@@ -71,6 +72,34 @@ def test_from_env_missing_server_auth():
             match="Server/Data Center authentication requires CONFLUENCE_PERSONAL_TOKEN",
         ):
             ConfluenceConfig.from_env()
+
+
+def test_from_env_uses_data_center_browser_oauth():
+    """Data Center browser OAuth should use product-specific configuration."""
+    with patch.dict(
+        os.environ,
+        {
+            "ATLASSIAN_OAUTH_PROXY_ENABLE": "true",
+            "CONFLUENCE_URL": "https://confluence.example.com",
+            "CONFLUENCE_OAUTH_CLIENT_ID": "confluence-client",
+            "CONFLUENCE_OAUTH_CLIENT_SECRET": "confluence-secret",
+            "CONFLUENCE_OAUTH_REDIRECT_URI": (
+                "https://mcp.example.com/confluence/oauth/callback"
+            ),
+            "CONFLUENCE_OAUTH_SCOPE": "READ WRITE",
+        },
+        clear=True,
+    ):
+        config = ConfluenceConfig.from_env()
+
+    assert config.auth_type == "oauth"
+    assert isinstance(config.oauth_config, OAuthConfig)
+    assert config.oauth_config.base_url == "https://confluence.example.com"
+    assert config.oauth_config.cloud_id is None
+    assert config.oauth_config.scope == "READ WRITE"
+    assert config.oauth_config.is_data_center is True
+    assert config.is_cloud is False
+    assert config.is_auth_configured() is True
 
 
 def test_is_cloud():
