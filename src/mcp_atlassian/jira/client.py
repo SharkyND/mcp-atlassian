@@ -6,6 +6,7 @@ from typing import Any, Literal
 
 from atlassian import Jira
 from requests import Session
+from requests.exceptions import HTTPError
 
 from mcp_atlassian.exceptions import MCPAtlassianAuthenticationError
 from mcp_atlassian.preprocessing import JiraPreprocessor
@@ -318,3 +319,31 @@ class JiraClient:
             error_message = f"Unexpected response from Jira API: {result}"
             raise ValueError(error_message)
         return result
+
+    @staticmethod
+    def _extract_error_detail(http_err: HTTPError) -> str:
+        """
+        Pull the actual error detail out of a Jira HTTP error response body,
+        since the generic "authentication failed" message alone doesn't
+        distinguish a real auth/token problem from other causes (e.g. a
+        permission restriction or an unrecognized link type) that some Jira
+        Server/Data Center deployments also report as 401/403.
+
+        Args:
+            http_err: The HTTPError raised for the failed request
+
+        Returns:
+            The response body (JSON errorMessages/errors if present, else raw
+            text truncated to 500 characters), or "<no response body>" if the
+            response has no content.
+        """
+        response = http_err.response
+        if response is None:
+            return "<no response body>"
+        try:
+            body = response.json()
+            if body:
+                return str(body)
+        except ValueError:
+            pass
+        return response.text[:500] if response.text else "<empty response body>"

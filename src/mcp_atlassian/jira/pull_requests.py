@@ -30,7 +30,11 @@ class PullRequestsMixin(JiraClient):
             Jira development status response containing filtered pull requests
 
         Raises:
-            MCPAtlassianAuthenticationError: If authentication fails with the Jira API
+            ValueError: If the issue does not exist
+            TypeError: If the development status API returns an unexpected type
+            MCPAtlassianAuthenticationError: If Jira rejects the request with a
+                401 (bad credentials) or 403 (missing "View Development Tools"
+                permission)
             Exception: If there is an error retrieving pull requests
         """
         try:
@@ -83,15 +87,32 @@ class PullRequestsMixin(JiraClient):
                 401,
                 403,
             ):
-                error_msg = (
-                    f"Authentication failed for Jira API "
-                    f"({http_err.response.status_code}). "
-                    "Token may be expired or invalid. Please verify credentials."
-                )
+                status_code = http_err.response.status_code
+                detail = self._extract_error_detail(http_err)
+                # The dev-status API returns 403 when the account lacks the
+                # "View Development Tools" permission, which is this endpoint's
+                # most common failure and is not a credential problem.
+                if status_code == 403 or "permission" in detail.lower():
+                    error_msg = (
+                        f"Permission denied for Jira API ({status_code}). This "
+                        "usually means the account lacks the 'View Development "
+                        "Tools' permission required to read linked pull requests. "
+                        f"Server response: {detail}"
+                    )
+                else:
+                    error_msg = (
+                        f"Authentication failed for Jira API ({status_code}). "
+                        "Token may be expired or invalid. Please verify "
+                        f"credentials. Server response: {detail}"
+                    )
                 logger.error(error_msg)
                 raise MCPAtlassianAuthenticationError(error_msg) from http_err
             logger.error(f"HTTP error during API call: {http_err}", exc_info=False)
             raise http_err
+        except (ValueError, TypeError, MCPAtlassianAuthenticationError):
+            # Already specific and logged at the raise site; re-raise as-is so
+            # callers can distinguish them from unexpected failures below.
+            raise
         except Exception as e:
             logger.error(
                 f"Error getting pull requests for Jira issue '{issue_key}': {str(e)}"
