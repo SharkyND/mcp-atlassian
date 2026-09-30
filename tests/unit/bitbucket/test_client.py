@@ -70,6 +70,7 @@ class TestBitbucketClient:
             password="app_password",
             cloud=True,
             verify_ssl=True,
+            timeout=30,
         )
         mock_ssl_config.assert_called_once()
 
@@ -90,6 +91,7 @@ class TestBitbucketClient:
             url="https://bitbucket.company.com",
             cloud=False,
             verify_ssl=True,
+            timeout=30,
             token="pat_token",  # PAT goes in token field
         )
         mock_ssl_config.assert_called_once()
@@ -125,7 +127,11 @@ class TestBitbucketClient:
 
         expected_url = "https://api.atlassian.com/ex/bitbucket/cloud_id"
         mock_bitbucket.assert_called_once_with(
-            url=expected_url, session=mock_session_instance, cloud=True, verify_ssl=True
+            url=expected_url,
+            session=mock_session_instance,
+            cloud=True,
+            verify_ssl=True,
+            timeout=30,
         )
 
     @patch("mcp_atlassian.bitbucket.client.configure_oauth_session")
@@ -207,6 +213,7 @@ class TestBitbucketClient:
             password="password",
             cloud=True,
             verify_ssl=False,
+            timeout=30,
         )
 
     @patch("mcp_atlassian.bitbucket.client.Bitbucket")

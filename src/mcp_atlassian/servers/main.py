@@ -5,6 +5,7 @@ import json
 import logging
 import os
 from collections.abc import AsyncIterator, Callable
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from typing import Any, Literal, Optional
 from urllib.parse import quote
@@ -27,6 +28,7 @@ from mcp_atlassian.jira import JiraFetcher
 from mcp_atlassian.jira.attachment_cache import get_attachment_cache
 from mcp_atlassian.jira.config import JiraConfig
 from mcp_atlassian.jira.upload_staging import get_upload_staging
+from mcp_atlassian.utils.env import get_max_worker_threads
 from mcp_atlassian.utils.environment import get_available_services
 from mcp_atlassian.utils.io import (
     get_cli_bitbucket_read_only_flag,
@@ -259,6 +261,18 @@ async def _run_staging_cleanup(interval_seconds: int) -> None:
 @asynccontextmanager
 async def main_lifespan(app: FastMCP[MainAppContext]) -> AsyncIterator[dict]:
     logger.info("Main Atlassian MCP server lifespan starting...")
+
+    # Blocking Atlassian SDK calls are offloaded with asyncio.to_thread, which
+    # uses the loop's default executor. Left implicit, that pool is sized from
+    # os.cpu_count() -- the *node's* CPU count inside a container on Python
+    # <3.13 -- so otherwise-identical pods end up with very different request
+    # capacity depending on where they are scheduled. Pin it instead.
+    max_workers = get_max_worker_threads()
+    asyncio.get_running_loop().set_default_executor(
+        ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="atlassian")
+    )
+    logger.info(f"Blocking-call worker threads: {max_workers}")
+
     services = get_available_services()
     cli_read_only = get_cli_read_only_flag()
     env_read_only = get_env_read_only_flag()

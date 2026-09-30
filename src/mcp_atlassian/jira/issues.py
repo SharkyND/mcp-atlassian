@@ -3,6 +3,7 @@
 import logging
 import re
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 from requests.exceptions import HTTPError
@@ -62,6 +63,14 @@ _NON_DROPPABLE_FIELDS = frozenset({"project", "summary", "issuetype"})
 # other linked issue's state (e.g. closed) restricts linking, even for users
 # who otherwise have the "Link Issues" permission.
 _NO_LINK_ISSUE_PERMISSION = "no link issue permission"
+
+# Issue links must be created one API call at a time: Jira rejects a batched
+# update with "Too many operations (N) provided for field 'issuelinks'. We
+# support at most 1 operation for this field." Cloning an issue with many links
+# therefore needs concurrency rather than batching. Kept deliberately modest so
+# a clone does not flood Jira Server/Data Center, and because each worker holds
+# a connection from the shared session pool for the call's duration.
+_LINK_COPY_MAX_WORKERS = 4
 
 
 class IssuesMixin(
@@ -255,9 +264,13 @@ class IssuesMixin(
                 401,
                 403,
             ]:
+                detail = self._extract_error_detail(http_err)
                 error_msg = (
-                    f"Authentication failed for Jira API ({http_err.response.status_code}). "
-                    "Token may be expired or invalid. Please verify credentials."
+                    f"Authentication failed for Jira API "
+                    f"({http_err.response.status_code}). "
+                    "Token may be expired or invalid, or the account may lack "
+                    "permission for this issue. "
+                    f"Server response: {detail}"
                 )
                 logger.error(error_msg)
                 raise MCPAtlassianAuthenticationError(error_msg) from http_err
@@ -783,6 +796,11 @@ class IssuesMixin(
         clone, preserving link type and direction relative to the linked
         issue.
 
+        Jira accepts at most one ``issuelinks`` operation per request, so the
+        links cannot be batched into a single call. They are instead created
+        over a small thread pool, which keeps a clone with many links from
+        taking one round trip per link end to end.
+
         Best-effort: a failure copying one link does not stop the others or
         fail the clone, matching the existing "Cloners" link behavior.
 
@@ -791,6 +809,54 @@ class IssuesMixin(
             new_issue_key: The key of the newly created clone
             source_links: The source issue's raw ``issuelinks`` field entries
         """
+        planned_links = self._plan_issue_link_copies(new_issue_key, source_links)
+        if not planned_links:
+            return
+
+        max_workers = min(_LINK_COPY_MAX_WORKERS, len(planned_links))
+        with ThreadPoolExecutor(
+            max_workers=max_workers, thread_name_prefix="clone-link"
+        ) as executor:
+            futures = [
+                executor.submit(
+                    self._copy_single_issue_link,
+                    source_issue_key,
+                    new_issue_key,
+                    *planned_link,
+                )
+                for planned_link in planned_links
+            ]
+            for future in as_completed(futures):
+                try:
+                    future.result()
+                except Exception as unexpected:  # noqa: BLE001 - best-effort
+                    # _copy_single_issue_link handles its own errors, so this
+                    # only trips on an unexpected bug; never fail the clone.
+                    logger.warning(
+                        f"Cloned {source_issue_key} to {new_issue_key} but an issue "
+                        f"link copy failed unexpectedly: {unexpected!s}"
+                    )
+
+    def _plan_issue_link_copies(
+        self, new_issue_key: str, source_links: list[dict[str, Any]]
+    ) -> list[tuple[str, str, str, dict[str, Any]]]:
+        """
+        Work out which issue links to re-create on the clone, and with what
+        payload, without performing any API calls.
+
+        Separated from the copying itself so the ordering-sensitive parsing
+        stays sequential and deterministic while only the network calls run
+        concurrently.
+
+        Args:
+            new_issue_key: The key of the newly created clone
+            source_links: The source issue's raw ``issuelinks`` field entries
+
+        Returns:
+            A list of ``(link_type_name, other_field, other_key, link_data)``
+            tuples ready to pass to ``_copy_single_issue_link``
+        """
+        planned_links: list[tuple[str, str, str, dict[str, Any]]] = []
         for link in source_links:
             if not isinstance(link, dict):
                 continue
@@ -820,21 +886,50 @@ class IssuesMixin(
                     "key": other_key if other_field == "outwardIssue" else new_issue_key
                 },
             }
-            try:
-                self.create_issue_link(link_data)
-            except Exception as link_error:  # noqa: BLE001 - link copying is best-effort
-                if _NO_LINK_ISSUE_PERMISSION in str(link_error).lower():
-                    try:
-                        self.add_issue_link_via_update(
-                            new_issue_key, link_type_name, other_field, other_key
-                        )
-                        continue
-                    except Exception as fallback_error:  # noqa: BLE001 - best-effort
-                        link_error = fallback_error
-                logger.warning(
-                    f"Cloned {source_issue_key} to {new_issue_key} but could not copy "
-                    f"'{link_type_name}' link to {other_key}: {link_error!s}"
-                )
+            planned_links.append((link_type_name, other_field, other_key, link_data))
+        return planned_links
+
+    def _copy_single_issue_link(
+        self,
+        source_issue_key: str,
+        new_issue_key: str,
+        link_type_name: str,
+        other_field: str,
+        other_key: str,
+        link_data: dict[str, Any],
+    ) -> None:
+        """
+        Create one of the clone's copied issue links, falling back to the
+        update-issue endpoint when Jira reports an issue-level "Link Issue"
+        permission restriction.
+
+        Never raises: each link is best-effort so one failure neither stops
+        the other links nor fails the clone.
+
+        Args:
+            source_issue_key: The key of the issue that was cloned
+            new_issue_key: The key of the newly created clone
+            link_type_name: The issue link type's name (e.g. "Blocks")
+            other_field: Either "inwardIssue" or "outwardIssue" -- whichever
+                field holds the *other* linked issue
+            other_key: The other linked issue's key
+            link_data: The ``create_issue_link`` payload for this link
+        """
+        try:
+            self.create_issue_link(link_data)
+        except Exception as link_error:  # noqa: BLE001 - link copying is best-effort
+            if _NO_LINK_ISSUE_PERMISSION in str(link_error).lower():
+                try:
+                    self.add_issue_link_via_update(
+                        new_issue_key, link_type_name, other_field, other_key
+                    )
+                    return
+                except Exception as fallback_error:  # noqa: BLE001 - best-effort
+                    link_error = fallback_error
+            logger.warning(
+                f"Cloned {source_issue_key} to {new_issue_key} but could not copy "
+                f"'{link_type_name}' link to {other_key}: {link_error!s}"
+            )
 
     def add_issue_link_via_update(
         self,
@@ -1581,10 +1676,13 @@ class IssuesMixin(
                 401,
                 403,
             ]:
+                detail = self._extract_error_detail(http_err)
                 error_msg = (
                     "Authentication failed for Jira API "
                     f"({http_err.response.status_code}). "
-                    "Token may be expired or invalid. Please verify credentials."
+                    "Token may be expired or invalid, or the account may lack "
+                    "permission for this issue. "
+                    f"Server response: {detail}"
                 )
                 logger.error(error_msg)
                 raise MCPAtlassianAuthenticationError(error_msg) from http_err

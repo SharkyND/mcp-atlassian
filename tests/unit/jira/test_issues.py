@@ -3126,3 +3126,218 @@ class TestIssuesMixin:
                 ValueError("customfield_10010 missing"), "Story"
             )
         assert "custom field" in caplog.text
+
+
+class TestCopyIssueLinksConcurrency:
+    """Tests for bounded-parallel issue link copying during a clone.
+
+    Jira rejects batched ``issuelinks`` updates ("Too many operations (N)
+    provided for field 'issuelinks'. We support at most 1 operation for this
+    field."), so links must be created one call each. These tests pin the
+    concurrency down: it must actually overlap calls, stay within the worker
+    bound, and keep each link's failure isolated.
+    """
+
+    @staticmethod
+    def _links(count: int) -> list[dict[str, Any]]:
+        return [
+            {
+                "type": {"name": "Blocks"},
+                "outwardIssue": {"key": f"TEST-{200 + index}"},
+            }
+            for index in range(count)
+        ]
+
+    @pytest.fixture
+    def issues_mixin(self, jira_fetcher: JiraFetcher) -> IssuesMixin:
+        """Create an IssuesMixin instance with mocked dependencies."""
+        return jira_fetcher
+
+    def test_links_are_created_concurrently_within_the_worker_bound(
+        self, issues_mixin: IssuesMixin
+    ) -> None:
+        import threading
+        import time
+
+        from mcp_atlassian.jira.issues import _LINK_COPY_MAX_WORKERS
+
+        lock = threading.Lock()
+        active = 0
+        peak = 0
+        created: list[str] = []
+
+        def slow_create(link_data: dict[str, Any]) -> dict[str, Any]:
+            nonlocal active, peak
+            with lock:
+                active += 1
+                peak = max(peak, active)
+                created.append(link_data["outwardIssue"]["key"])
+            time.sleep(0.05)
+            with lock:
+                active -= 1
+            return {}
+
+        issues_mixin.create_issue_link = MagicMock(side_effect=slow_create)
+
+        link_count = 12
+        start = time.time()
+        issues_mixin._copy_issue_links("TEST-100", "TEST-101", self._links(link_count))
+        elapsed = time.time() - start
+
+        assert issues_mixin.create_issue_link.call_count == link_count
+        assert len(created) == link_count
+        assert peak > 1, "links were still created sequentially"
+        assert peak <= _LINK_COPY_MAX_WORKERS, (
+            f"exceeded the worker bound: {peak} > {_LINK_COPY_MAX_WORKERS}"
+        )
+        # Sequential would be >= 12 * 0.05 = 0.6s; bounded parallel is far less.
+        assert elapsed < link_count * 0.05
+
+    def test_worker_count_never_exceeds_the_number_of_links(
+        self, issues_mixin: IssuesMixin
+    ) -> None:
+        """A single link must not spin up a full pool."""
+        import threading
+
+        seen_threads: set[int] = set()
+
+        def record(link_data: dict[str, Any]) -> dict[str, Any]:
+            seen_threads.add(threading.get_ident())
+            return {}
+
+        issues_mixin.create_issue_link = MagicMock(side_effect=record)
+        issues_mixin._copy_issue_links("TEST-100", "TEST-101", self._links(1))
+
+        assert issues_mixin.create_issue_link.call_count == 1
+        assert len(seen_threads) == 1
+
+    def test_one_failing_link_does_not_stop_the_others(
+        self, issues_mixin: IssuesMixin
+    ) -> None:
+        """Per-link error isolation must survive parallelisation."""
+
+        def flaky(link_data: dict[str, Any]) -> dict[str, Any]:
+            if link_data["outwardIssue"]["key"] == "TEST-203":
+                raise ValueError("boom")
+            return {}
+
+        issues_mixin.create_issue_link = MagicMock(side_effect=flaky)
+
+        issues_mixin._copy_issue_links("TEST-100", "TEST-101", self._links(8))
+
+        assert issues_mixin.create_issue_link.call_count == 8
+
+    def test_permission_fallback_still_applies_per_link(
+        self, issues_mixin: IssuesMixin
+    ) -> None:
+        """The 'No Link Issue Permission' fallback must run inside workers."""
+
+        def denied(link_data: dict[str, Any]) -> dict[str, Any]:
+            if link_data["outwardIssue"]["key"] == "TEST-202":
+                raise ValueError("No Link Issue Permission for issue 'TEST-202'")
+            return {}
+
+        issues_mixin.create_issue_link = MagicMock(side_effect=denied)
+        issues_mixin.add_issue_link_via_update = MagicMock(return_value=None)
+
+        issues_mixin._copy_issue_links("TEST-100", "TEST-101", self._links(5))
+
+        assert issues_mixin.create_issue_link.call_count == 5
+        issues_mixin.add_issue_link_via_update.assert_called_once_with(
+            "TEST-101", "Blocks", "outwardIssue", "TEST-202"
+        )
+
+    def test_no_links_creates_no_pool(self, issues_mixin: IssuesMixin) -> None:
+        issues_mixin.create_issue_link = MagicMock()
+        issues_mixin._copy_issue_links("TEST-100", "TEST-101", [])
+        issues_mixin.create_issue_link.assert_not_called()
+
+    def test_cloners_links_are_still_skipped(self, issues_mixin: IssuesMixin) -> None:
+        issues_mixin.create_issue_link = MagicMock(return_value={})
+        issues_mixin._copy_issue_links(
+            "TEST-100",
+            "TEST-101",
+            [
+                {"type": {"name": "Cloners"}, "inwardIssue": {"key": "TEST-50"}},
+                {"type": {"name": "Blocks"}, "outwardIssue": {"key": "TEST-201"}},
+            ],
+        )
+        assert issues_mixin.create_issue_link.call_count == 1
+
+    def test_real_http_path_is_concurrent_bounded_and_falls_back(self) -> None:
+        """Drive the real code path over HTTP, not mocked methods.
+
+        Method-level mocks never exercise ``create_issue_link`` ->
+        ``self.jira.post`` -> ``requests.Session``, which is where concurrent
+        use of the shared session would break. This runs a local fake Jira so
+        the whole chain, including the 403 permission fallback, is covered.
+        """
+        import json
+        import threading
+        import time
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+        from mcp_atlassian.jira import JiraFetcher
+        from mcp_atlassian.jira.config import JiraConfig
+        from mcp_atlassian.jira.issues import _LINK_COPY_MAX_WORKERS
+
+        state: dict[str, Any] = {"active": 0, "peak": 0, "posts": [], "fallbacks": 0}
+        lock = threading.Lock()
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *args: Any) -> None:  # silence test output
+                pass
+
+            def do_POST(self) -> None:  # noqa: N802 - name fixed by BaseHTTPRequestHandler
+                raw = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+                payload = json.loads(raw or b"{}")
+                target = payload.get("outwardIssue", {}).get("key")
+                with lock:
+                    state["active"] += 1
+                    state["peak"] = max(state["peak"], state["active"])
+                    state["posts"].append(target)
+                time.sleep(0.05)
+                with lock:
+                    state["active"] -= 1
+                if target == "TEST-205":  # stands in for a restricted issue
+                    self.send_response(403)
+                    self.end_headers()
+                    self.wfile.write(
+                        b'{"errorMessages":["No Link Issue Permission for issue"]}'
+                    )
+                    return
+                self.send_response(201)
+                self.end_headers()
+                self.wfile.write(b"{}")
+
+            def do_PUT(self) -> None:  # noqa: N802 - name fixed by BaseHTTPRequestHandler
+                self.rfile.read(int(self.headers.get("Content-Length", 0)))
+                with lock:
+                    state["fallbacks"] += 1
+                self.send_response(204)
+                self.end_headers()
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            fetcher = JiraFetcher(
+                config=JiraConfig(
+                    url=f"http://127.0.0.1:{server.server_address[1]}",
+                    auth_type="pat",
+                    personal_token="fake",
+                    ssl_verify=False,
+                )
+            )
+            link_count = 12
+            started = time.time()
+            fetcher._copy_issue_links("TEST-100", "TEST-101", self._links(link_count))
+            elapsed = time.time() - started
+        finally:
+            server.shutdown()
+
+        assert len(state["posts"]) == link_count
+        assert len(set(state["posts"])) == link_count, "a link was lost or duplicated"
+        assert state["peak"] > 1, "links were still created sequentially"
+        assert state["peak"] <= _LINK_COPY_MAX_WORKERS
+        assert state["fallbacks"] == 1, "403 permission fallback did not fire"
+        assert elapsed < link_count * 0.05

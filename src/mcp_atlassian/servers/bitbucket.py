@@ -1,5 +1,6 @@
 """Bitbucket FastMCP server instance and tool definitions."""
 
+import asyncio
 import json
 import logging
 import re
@@ -31,7 +32,7 @@ async def list_workspaces_or_projects(ctx: Context) -> str:
     """
     try:
         bitbucket = await get_bitbucket_fetcher(ctx)
-        workspaces = bitbucket.get_all_workspaces()
+        workspaces = await asyncio.to_thread(bitbucket.get_all_workspaces)
         workspace_dicts = [
             ws.model_dump(mode="json", serialize_as_any=True) for ws in workspaces
         ]
@@ -84,7 +85,10 @@ async def list_repositories(
     """
     try:
         bitbucket = await get_bitbucket_fetcher(ctx)
-        repositories = bitbucket.get_repositories(workspace)
+        repositories = await asyncio.to_thread(
+            bitbucket.get_repositories,
+            workspace,
+        )
         repositories = [
             r.model_dump(mode="json", serialize_as_any=True) for r in repositories
         ]
@@ -138,7 +142,11 @@ async def get_repository_info(
     """
     try:
         bitbucket = await get_bitbucket_fetcher(ctx)
-        repo_info = bitbucket.get_repository_info(workspace, repository)
+        repo_info = await asyncio.to_thread(
+            bitbucket.get_repository_info,
+            workspace,
+            repository,
+        )
         return json.dumps(
             repo_info.model_dump(mode="json", serialize_as_any=True), indent=2
         )
@@ -202,8 +210,12 @@ async def create_repository(
     """
     try:
         bitbucket = await get_bitbucket_fetcher(ctx)
-        repo = bitbucket.create_repository(
-            workspace, repo_slug, is_private=is_private, forkable=forkable
+        repo = await asyncio.to_thread(
+            bitbucket.create_repository,
+            workspace,
+            repo_slug,
+            is_private=is_private,
+            forkable=forkable,
         )
         return json.dumps(
             {
@@ -280,8 +292,14 @@ async def list_branches(
     """
     try:
         bitbucket = await get_bitbucket_fetcher(ctx)
-        branches = bitbucket.get_branches(
-            workspace, repository, base, branch_filter, start, limit
+        branches = await asyncio.to_thread(
+            bitbucket.get_branches,
+            workspace,
+            repository,
+            base,
+            branch_filter,
+            start,
+            limit,
         )
         # Convert model objects to dictionaries for JSON serialization
         branch_dicts = [
@@ -336,7 +354,11 @@ async def get_default_branch(
     """
     try:
         bitbucket = await get_bitbucket_fetcher(ctx)
-        default_branch = bitbucket.get_default_branch(workspace, repository)
+        default_branch = await asyncio.to_thread(
+            bitbucket.get_default_branch,
+            workspace,
+            repository,
+        )
         if default_branch:
             return json.dumps(
                 default_branch.model_dump(mode="json", serialize_as_any=True), indent=2
@@ -408,7 +430,13 @@ async def get_file_content(
     """
     try:
         bitbucket = await get_bitbucket_fetcher(ctx)
-        content = bitbucket.get_file_content(workspace, repository, file_path, branch)
+        content = await asyncio.to_thread(
+            bitbucket.get_file_content,
+            workspace,
+            repository,
+            file_path,
+            branch,
+        )
         content = content.decode("utf-8")
         if sample and sample > 0:
             content = "\n".join(content.splitlines()[:sample])
@@ -481,7 +509,13 @@ async def list_directory(
     try:
         bitbucket = await get_bitbucket_fetcher(ctx)
         contents = list(
-            bitbucket.get_directory_content(workspace, repository, path, branch)
+            await asyncio.to_thread(
+                bitbucket.get_directory_content,
+                workspace,
+                repository,
+                path,
+                branch,
+            )
         )
         return json.dumps(contents, indent=2)
     except Exception as e:
@@ -537,7 +571,12 @@ async def list_pull_requests(
     """
     try:
         bitbucket = await get_bitbucket_fetcher(ctx)
-        pull_requests = bitbucket.get_pull_requests(workspace, repository, state)
+        pull_requests = await asyncio.to_thread(
+            bitbucket.get_pull_requests,
+            workspace,
+            repository,
+            state,
+        )
         pr_dicts = list(pull_requests)
         return json.dumps(pr_dicts, indent=2)
     except Exception as e:
@@ -592,8 +631,11 @@ async def pull_request_activities(
     """
     try:
         bitbucket = await get_bitbucket_fetcher(ctx)
-        pull_requests = bitbucket.get_pull_request_activities(
-            workspace, repository, pull_request_id
+        pull_requests = await asyncio.to_thread(
+            bitbucket.get_pull_request_activities,
+            workspace,
+            repository,
+            pull_request_id,
         )
         return json.dumps(pull_requests, indent=2)
     except Exception as e:
@@ -648,8 +690,11 @@ async def get_pull_request(
     """
     try:
         bitbucket = await get_bitbucket_fetcher(ctx)
-        pull_request = bitbucket.get_pull_request(
-            workspace, repository, pull_request_id
+        pull_request = await asyncio.to_thread(
+            bitbucket.get_pull_request,
+            workspace,
+            repository,
+            pull_request_id,
         )
         return json.dumps(
             pull_request.model_dump(mode="json", serialize_as_any=True), indent=2
@@ -718,8 +763,13 @@ async def get_commit_changes(
     """
     try:
         bitbucket = await get_bitbucket_fetcher(ctx)
-        commits = bitbucket.get_commit_changes(
-            workspace, repository, commit_id, merges, hash_newest
+        commits = await asyncio.to_thread(
+            bitbucket.get_commit_changes,
+            workspace,
+            repository,
+            commit_id,
+            merges,
+            hash_newest,
         )
         return json.dumps(
             commits.model_dump(mode="json", serialize_as_any=True), indent=2
@@ -790,8 +840,13 @@ async def get_commits(
     """
     try:
         bitbucket = await get_bitbucket_fetcher(ctx)
-        commits = bitbucket.get_commits(
-            workspace, repository, limit=limit, until=until, since=since
+        commits = await asyncio.to_thread(
+            bitbucket.get_commits,
+            workspace,
+            repository,
+            limit=limit,
+            until=until,
+            since=since,
         )
 
         commit_dicts = [
@@ -893,7 +948,12 @@ async def create_pull_request(
             "reviewers": [],
         }
 
-        result = bitbucket.create_pull_request(workspace, repository, pr_data)
+        result = await asyncio.to_thread(
+            bitbucket.create_pull_request,
+            workspace,
+            repository,
+            pr_data,
+        )
 
         return json.dumps(
             {
@@ -966,7 +1026,12 @@ async def create_branch(
             "target": {"branch": {"name": source_branch}},
         }
 
-        result = bitbucket.create_branch(workspace, repository, branch_data)
+        result = await asyncio.to_thread(
+            bitbucket.create_branch,
+            workspace,
+            repository,
+            branch_data,
+        )
 
         return json.dumps(
             {
@@ -1040,8 +1105,13 @@ async def add_pull_request_blocker_comment(
     try:
         bitbucket = await get_bitbucket_fetcher(ctx)
 
-        result = bitbucket.add_pull_request_blocker_comment(
-            workspace, repository, pull_request_id, comment, severity
+        result = await asyncio.to_thread(
+            bitbucket.add_pull_request_blocker_comment,
+            workspace,
+            repository,
+            pull_request_id,
+            comment,
+            severity,
         )
 
         return json.dumps(
@@ -1116,8 +1186,12 @@ async def add_pull_request_comment(
     try:
         bitbucket = await get_bitbucket_fetcher(ctx)
 
-        result = bitbucket.add_pull_request_comment(
-            workspace, repository, pull_request_id, comment
+        result = await asyncio.to_thread(
+            bitbucket.add_pull_request_comment,
+            workspace,
+            repository,
+            pull_request_id,
+            comment,
         )
 
         return json.dumps(
@@ -1210,8 +1284,15 @@ async def add_pull_request_inline_comment(
     try:
         bitbucket = await get_bitbucket_fetcher(ctx)
 
-        result = bitbucket.add_pull_request_inline_comment(
-            workspace, repository, pull_request_id, comment, file_path, line, line_type
+        result = await asyncio.to_thread(
+            bitbucket.add_pull_request_inline_comment,
+            workspace,
+            repository,
+            pull_request_id,
+            comment,
+            file_path,
+            line,
+            line_type,
         )
 
         inline_info = result.get("inline") if isinstance(result, dict) else None
@@ -1393,8 +1474,11 @@ async def analyze_pr_review_status(
 
     try:
         bitbucket = await get_bitbucket_fetcher(ctx)
-        activities = bitbucket.get_pull_request_activities(
-            workspace, repository, pull_request_id
+        activities = await asyncio.to_thread(
+            bitbucket.get_pull_request_activities,
+            workspace,
+            repository,
+            pull_request_id,
         )
 
         addressed = []
@@ -1496,8 +1580,11 @@ async def get_pull_request_diff(
     """
     try:
         bitbucket = await get_bitbucket_fetcher(ctx)
-        diff_content = bitbucket.get_pull_request_diff(
-            workspace, repository, pull_request_id
+        diff_content = await asyncio.to_thread(
+            bitbucket.get_pull_request_diff,
+            workspace,
+            repository,
+            pull_request_id,
         )
         return json.dumps(
             {
@@ -1572,8 +1659,12 @@ async def get_pull_request_commits(
     """
     try:
         bitbucket = await get_bitbucket_fetcher(ctx)
-        commits = bitbucket.get_pull_request_commits(
-            workspace, repository, pull_request_id, limit=limit
+        commits = await asyncio.to_thread(
+            bitbucket.get_pull_request_commits,
+            workspace,
+            repository,
+            pull_request_id,
+            limit=limit,
         )
         return json.dumps(
             {
@@ -1654,8 +1745,12 @@ async def get_commit_builds(
     """
     try:
         bitbucket = await get_bitbucket_fetcher(ctx)
-        builds = bitbucket.get_commit_builds(
-            workspace, repository, commit_id, limit=limit
+        builds = await asyncio.to_thread(
+            bitbucket.get_commit_builds,
+            workspace,
+            repository,
+            commit_id,
+            limit=limit,
         )
         return json.dumps(
             {

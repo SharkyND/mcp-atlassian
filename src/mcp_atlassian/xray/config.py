@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from ..jira.config import JiraConfig
+from ..utils.env import DEFAULT_HTTP_TIMEOUT_SECONDS
 from ..utils.oauth import BYOAccessTokenOAuthConfig, OAuthConfig
 from ..utils.urls import is_atlassian_cloud_url
 
@@ -25,6 +26,7 @@ class XrayConfig:
     personal_token: str | None = None  # Personal access token (Server/DC)
     oauth_config: OAuthConfig | BYOAccessTokenOAuthConfig | None = None
     ssl_verify: bool = True  # Whether to verify SSL certificates
+    timeout: int = DEFAULT_HTTP_TIMEOUT_SECONDS  # HTTP timeout in seconds
     projects_filter: str | None = None  # List of project keys to filter searches
     http_proxy: str | None = None  # HTTP proxy URL
     https_proxy: str | None = None  # HTTPS proxy URL
@@ -113,6 +115,7 @@ class XrayConfig:
             personal_token=jira_config.personal_token,
             oauth_config=None,
             ssl_verify=jira_config.ssl_verify,
+            timeout=jira_config.timeout,
             projects_filter=jira_config.projects_filter,
             http_proxy=jira_config.http_proxy,
             https_proxy=jira_config.https_proxy,

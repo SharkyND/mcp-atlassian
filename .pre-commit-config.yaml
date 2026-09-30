@@ -53,6 +53,10 @@ repos:
             'types-urllib3',
             'types-cachetools',
             'atlassian-python-api',
+            # Pinned to match uv.lock. Deprecated 3.x uses PEP 695 `type`
+            # statements, which mypy cannot parse under python_version=3.10
+            # and which abort the run before it reaches our own source.
+            'Deprecated<3',
             'beautifulsoup4',
             'httpx',
             'python-dotenv',
