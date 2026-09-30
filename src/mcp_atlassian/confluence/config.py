@@ -5,7 +5,12 @@ import os
 from dataclasses import dataclass
 from typing import Literal
 
-from ..utils.env import get_custom_headers, is_env_ssl_verify
+from ..utils.env import (
+    DEFAULT_HTTP_TIMEOUT_SECONDS,
+    get_custom_headers,
+    get_env_timeout,
+    is_env_ssl_verify,
+)
 from ..utils.oauth import (
     BYOAccessTokenOAuthConfig,
     OAuthConfig,
@@ -30,6 +35,7 @@ class ConfluenceConfig:
     personal_token: str | None = None  # Personal access token (Server/DC)
     oauth_config: OAuthConfig | BYOAccessTokenOAuthConfig | None = None
     ssl_verify: bool = True  # Whether to verify SSL certificates
+    timeout: int = DEFAULT_HTTP_TIMEOUT_SECONDS  # HTTP timeout in seconds
     spaces_filter: str | None = None  # List of space keys to filter searches
     http_proxy: str | None = None  # HTTP proxy URL
     https_proxy: str | None = None  # HTTPS proxy URL
@@ -114,6 +120,7 @@ class ConfluenceConfig:
 
         # SSL verification (for Server/DC)
         ssl_verify = is_env_ssl_verify("CONFLUENCE_SSL_VERIFY")
+        timeout = get_env_timeout("CONFLUENCE_TIMEOUT")
 
         # Get the spaces filter if provided
         spaces_filter = os.getenv("CONFLUENCE_SPACES_FILTER")
@@ -135,6 +142,7 @@ class ConfluenceConfig:
             personal_token=personal_token,
             oauth_config=oauth_config,
             ssl_verify=ssl_verify,
+            timeout=timeout,
             spaces_filter=spaces_filter,
             http_proxy=http_proxy,
             https_proxy=https_proxy,

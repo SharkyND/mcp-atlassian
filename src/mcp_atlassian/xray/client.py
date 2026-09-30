@@ -66,6 +66,7 @@ class XrayClient:
                 session=session,
                 cloud=self.config.is_cloud,  # Use consistent config value
                 verify_ssl=self.config.ssl_verify,
+                timeout=self.config.timeout,
             )
         elif self.config.auth_type == "pat":
             logger.debug(
@@ -78,6 +79,7 @@ class XrayClient:
                 token=self.config.personal_token,
                 cloud=self.config.is_cloud,
                 verify_ssl=self.config.ssl_verify,
+                timeout=self.config.timeout,
             )
         else:  # basic auth
             logger.debug(
@@ -92,6 +94,7 @@ class XrayClient:
                 password=self.config.api_token,
                 cloud=self.config.is_cloud,
                 verify_ssl=self.config.ssl_verify,
+                timeout=self.config.timeout,
             )
             logger.debug(
                 f"Xray client initialized. Session headers (Authorization masked): "

@@ -62,6 +62,7 @@ class BitbucketClient:
                 session=session,
                 cloud=True,  # OAuth is only for Cloud
                 verify_ssl=self.config.ssl_verify,
+                timeout=self.config.timeout,
             )
         elif self.config.auth_type == "pat":
             logger.debug(
@@ -73,6 +74,7 @@ class BitbucketClient:
                 url=self.config.url,
                 cloud=self.config.is_cloud,
                 verify_ssl=self.config.ssl_verify,
+                timeout=self.config.timeout,
                 token=self.config.personal_token,
             )
 
@@ -89,6 +91,7 @@ class BitbucketClient:
                 password=self.config.app_password,
                 cloud=self.config.is_cloud,
                 verify_ssl=self.config.ssl_verify,
+                timeout=self.config.timeout,
             )
             logger.debug(
                 f"Bitbucket client initialized. Session headers (Authorization masked): "

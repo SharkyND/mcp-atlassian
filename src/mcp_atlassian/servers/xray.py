@@ -1,5 +1,6 @@
 """Xray FastMCP server instance and tool definitions."""
 
+import asyncio
 import json
 import logging
 from typing import Annotated
@@ -46,7 +47,10 @@ async def get_tests(
     xray = await get_xray_fetcher(ctx)
     try:
         test_list = [key.strip() for key in test_keys.split(",")]
-        result = xray.xray.get_tests(test_list)
+        result = await asyncio.to_thread(
+            xray.xray.get_tests,
+            test_list,
+        )
         return json.dumps(result, indent=2, default=str)
     except Exception as e:
         logger.error(f"Error retrieving tests {test_keys}: {e}")
@@ -69,7 +73,7 @@ async def get_test_statuses(ctx: Context) -> str:
     """
     xray = await get_xray_fetcher(ctx)
     try:
-        result = xray.xray.get_test_statuses()
+        result = await asyncio.to_thread(xray.xray.get_test_statuses)
         return json.dumps(result, indent=2, default=str)
     except Exception as e:
         logger.error(f"Error retrieving test statuses: {e}")
@@ -99,7 +103,10 @@ async def get_test_runs(
     """
     xray = await get_xray_fetcher(ctx)
     try:
-        result = xray.xray.get_test_runs(test_key)
+        result = await asyncio.to_thread(
+            xray.xray.get_test_runs,
+            test_key,
+        )
         return json.dumps(result, indent=2, default=str)
     except Exception as e:
         logger.error(f"Error retrieving test runs for {test_key}: {e}")
@@ -136,7 +143,11 @@ async def get_test_runs_with_environment(
     """
     xray = await get_xray_fetcher(ctx)
     try:
-        result = xray.xray.get_test_runs_with_environment(test_key, environments)
+        result = await asyncio.to_thread(
+            xray.xray.get_test_runs_with_environment,
+            test_key,
+            environments,
+        )
         return json.dumps(result, indent=2, default=str)
     except Exception as e:
         logger.error(
@@ -206,7 +217,8 @@ async def get_test_runs_in_context(
     """
     xray = await get_xray_fetcher(ctx)
     try:
-        result = xray.get_test_runs_in_context(
+        result = await asyncio.to_thread(
+            xray.get_test_runs_in_context,
             test_exec_key=test_exec_key,
             test_key=test_key,
             include_test_fields=include_test_fields,
@@ -246,7 +258,10 @@ async def get_test_preconditions(
     """
     xray = await get_xray_fetcher(ctx)
     try:
-        result = xray.xray.get_test_preconditions(test_key)
+        result = await asyncio.to_thread(
+            xray.xray.get_test_preconditions,
+            test_key,
+        )
         return json.dumps(result, indent=2, default=str)
     except Exception as e:
         logger.error(f"Error retrieving preconditions for {test_key}: {e}")
@@ -276,7 +291,10 @@ async def get_test_sets(
     """
     xray = await get_xray_fetcher(ctx)
     try:
-        result = xray.xray.get_test_sets(test_key)
+        result = await asyncio.to_thread(
+            xray.xray.get_test_sets,
+            test_key,
+        )
         return json.dumps(result, indent=2, default=str)
     except Exception as e:
         logger.error(f"Error retrieving test sets for {test_key}: {e}")
@@ -308,7 +326,10 @@ async def get_test_executions(
     """
     xray = await get_xray_fetcher(ctx)
     try:
-        result = xray.xray.get_test_executions(test_key)
+        result = await asyncio.to_thread(
+            xray.xray.get_test_executions,
+            test_key,
+        )
         return json.dumps(result, indent=2, default=str)
     except Exception as e:
         logger.error(f"Error retrieving test executions for {test_key}: {e}")
@@ -338,7 +359,10 @@ async def get_test_plans(
     """
     xray = await get_xray_fetcher(ctx)
     try:
-        result = xray.xray.get_test_plans(test_key)
+        result = await asyncio.to_thread(
+            xray.xray.get_test_plans,
+            test_key,
+        )
         return json.dumps(result, indent=2, default=str)
     except Exception as e:
         logger.error(f"Error retrieving test plans for {test_key}: {e}")
@@ -364,7 +388,7 @@ async def get_test_step_statuses(ctx: Context) -> str:
     """
     xray = await get_xray_fetcher(ctx)
     try:
-        result = xray.xray.get_test_step_statuses()
+        result = await asyncio.to_thread(xray.xray.get_test_step_statuses)
         return json.dumps(result, indent=2, default=str)
     except Exception as e:
         logger.error(f"Error retrieving test step statuses: {e}")
@@ -399,7 +423,11 @@ async def get_test_step(
     """
     xray = await get_xray_fetcher(ctx)
     try:
-        result = xray.xray.get_test_step(test_key, step_key)
+        result = await asyncio.to_thread(
+            xray.xray.get_test_step,
+            test_key,
+            step_key,
+        )
         return json.dumps(result, indent=2, default=str)
     except Exception as e:
         logger.error(f"Error retrieving test step {step_key} for test {test_key}: {e}")
@@ -429,7 +457,10 @@ async def get_test_steps(
     """
     xray = await get_xray_fetcher(ctx)
     try:
-        result = xray.xray.get_test_steps(test_key)
+        result = await asyncio.to_thread(
+            xray.xray.get_test_steps,
+            test_key,
+        )
         return json.dumps(result, indent=2, default=str)
     except Exception as e:
         logger.error(f"Error retrieving test steps for {test_key}: {e}")
@@ -475,7 +506,13 @@ async def create_test_step(
     """
     xray = await get_xray_fetcher(ctx)
     try:
-        result_data = xray.xray.create_test_step(test_key, step, data, result)
+        result_data = await asyncio.to_thread(
+            xray.xray.create_test_step,
+            test_key,
+            step,
+            data,
+            result,
+        )
         return json.dumps(result_data, indent=2, default=str)
     except Exception as e:
         logger.error(f"Error creating test step for {test_key}: {e}")
@@ -526,7 +563,14 @@ async def update_test_step(
     """
     xray = await get_xray_fetcher(ctx)
     try:
-        result_data = xray.xray.update_test_step(test_key, step_id, step, data, result)
+        result_data = await asyncio.to_thread(
+            xray.xray.update_test_step,
+            test_key,
+            step_id,
+            step,
+            data,
+            result,
+        )
         return json.dumps(result_data, indent=2, default=str)
     except Exception as e:
         logger.error(f"Error updating test step {step_id} for test {test_key}: {e}")
@@ -562,7 +606,11 @@ async def delete_test_step(
     """
     xray = await get_xray_fetcher(ctx)
     try:
-        result = xray.xray.delete_test_step(test_key, step_id)
+        result = await asyncio.to_thread(
+            xray.xray.delete_test_step,
+            test_key,
+            step_id,
+        )
         return json.dumps(
             {
                 "success": True,
@@ -602,7 +650,10 @@ async def get_tests_with_precondition(
     """
     xray = await get_xray_fetcher(ctx)
     try:
-        result = xray.xray.get_tests_with_precondition(precondition_key)
+        result = await asyncio.to_thread(
+            xray.xray.get_tests_with_precondition,
+            precondition_key,
+        )
         return json.dumps(result, indent=2, default=str)
     except Exception as e:
         logger.error(
@@ -656,8 +707,11 @@ async def update_precondition(
             [key.strip() for key in remove_tests.split(",")] if remove_tests else []
         )
 
-        result = xray.xray.update_precondition(
-            precondition_key, add=add_list, remove=remove_list
+        result = await asyncio.to_thread(
+            xray.xray.update_precondition,
+            precondition_key,
+            add=add_list,
+            remove=remove_list,
         )
         return json.dumps({"success": True, "data": result}, indent=2, default=str)
     except Exception as e:
@@ -694,7 +748,11 @@ async def delete_test_from_precondition(
     """
     xray = await get_xray_fetcher(ctx)
     try:
-        result = xray.xray.delete_test_from_precondition(precondition_key, test_key)
+        result = await asyncio.to_thread(
+            xray.xray.delete_test_from_precondition,
+            precondition_key,
+            test_key,
+        )
         return json.dumps(
             {
                 "success": True,
@@ -748,7 +806,12 @@ async def get_tests_with_test_set(
     """
     xray = await get_xray_fetcher(ctx)
     try:
-        result = xray.xray.get_tests_with_test_set(test_set_key, page=page, limit=limit)
+        result = await asyncio.to_thread(
+            xray.xray.get_tests_with_test_set,
+            test_set_key,
+            page=page,
+            limit=limit,
+        )
         return json.dumps(result, indent=2, default=str)
     except Exception as e:
         logger.error(f"Error retrieving tests with test set {test_set_key}: {e}")
@@ -800,8 +863,11 @@ async def update_test_set(
             [key.strip() for key in remove_tests.split(",")] if remove_tests else []
         )
 
-        result = xray.xray.update_test_set(
-            test_set_key, add=add_list, remove=remove_list
+        result = await asyncio.to_thread(
+            xray.xray.update_test_set,
+            test_set_key,
+            add=add_list,
+            remove=remove_list,
         )
         return json.dumps({"success": True, "data": result}, indent=2, default=str)
     except Exception as e:
@@ -838,7 +904,11 @@ async def delete_test_from_test_set(
     """
     xray = await get_xray_fetcher(ctx)
     try:
-        result = xray.xray.delete_test_from_test_set(test_set_key, test_key)
+        result = await asyncio.to_thread(
+            xray.xray.delete_test_from_test_set,
+            test_set_key,
+            test_key,
+        )
         return json.dumps(
             {
                 "success": True,
@@ -880,7 +950,10 @@ async def get_tests_with_test_plan(
     """
     xray = await get_xray_fetcher(ctx)
     try:
-        result = xray.xray.get_tests_with_test_plan(test_plan_key)
+        result = await asyncio.to_thread(
+            xray.xray.get_tests_with_test_plan,
+            test_plan_key,
+        )
         return json.dumps(result, indent=2, default=str)
     except Exception as e:
         logger.error(f"Error retrieving tests with test plan {test_plan_key}: {e}")
@@ -932,8 +1005,11 @@ async def update_test_plan(
             [key.strip() for key in remove_tests.split(",")] if remove_tests else []
         )
 
-        result = xray.xray.update_test_plan(
-            test_plan_key, add=add_list, remove=remove_list
+        result = await asyncio.to_thread(
+            xray.xray.update_test_plan,
+            test_plan_key,
+            add=add_list,
+            remove=remove_list,
         )
         return json.dumps({"success": True, "data": result}, indent=2, default=str)
     except Exception as e:
@@ -970,7 +1046,11 @@ async def delete_test_from_test_plan(
     """
     xray = await get_xray_fetcher(ctx)
     try:
-        result = xray.xray.delete_test_from_test_plan(test_plan_key, test_key)
+        result = await asyncio.to_thread(
+            xray.xray.delete_test_from_test_plan,
+            test_plan_key,
+            test_key,
+        )
         return json.dumps(
             {
                 "success": True,
@@ -1009,7 +1089,10 @@ async def get_test_executions_with_test_plan(
     """
     xray = await get_xray_fetcher(ctx)
     try:
-        result = xray.xray.get_test_executions_with_test_plan(test_plan_key)
+        result = await asyncio.to_thread(
+            xray.xray.get_test_executions_with_test_plan,
+            test_plan_key,
+        )
         return json.dumps(result, indent=2, default=str)
     except Exception as e:
         logger.error(
@@ -1067,8 +1150,11 @@ async def update_test_plan_test_executions(
             else []
         )
 
-        result = xray.xray.update_test_plan_test_executions(
-            test_plan_key, add=add_list, remove=remove_list
+        result = await asyncio.to_thread(
+            xray.xray.update_test_plan_test_executions,
+            test_plan_key,
+            add=add_list,
+            remove=remove_list,
         )
         return json.dumps({"success": True, "data": result}, indent=2, default=str)
     except Exception as e:
@@ -1105,8 +1191,10 @@ async def delete_test_execution_from_test_plan(
     """
     xray = await get_xray_fetcher(ctx)
     try:
-        result = xray.xray.delete_test_execution_from_test_plan(
-            test_plan_key, execution_key
+        result = await asyncio.to_thread(
+            xray.xray.delete_test_execution_from_test_plan,
+            test_plan_key,
+            execution_key,
         )
         return json.dumps(
             {
@@ -1169,8 +1257,12 @@ async def get_tests_with_test_execution(
     """
     xray = await get_xray_fetcher(ctx)
     try:
-        result = xray.xray.get_tests_with_test_execution(
-            execution_key, detailed=detailed, page=page, limit=limit
+        result = await asyncio.to_thread(
+            xray.xray.get_tests_with_test_execution,
+            execution_key,
+            detailed=detailed,
+            page=page,
+            limit=limit,
         )
         return json.dumps(result, indent=2, default=str)
     except Exception as e:
@@ -1223,8 +1315,11 @@ async def update_test_execution(
             [key.strip() for key in remove_tests.split(",")] if remove_tests else []
         )
 
-        result = xray.xray.update_test_execution(
-            execution_key, add=add_list, remove=remove_list
+        result = await asyncio.to_thread(
+            xray.xray.update_test_execution,
+            execution_key,
+            add=add_list,
+            remove=remove_list,
         )
         return json.dumps({"success": True, "data": result}, indent=2, default=str)
     except Exception as e:
@@ -1261,7 +1356,11 @@ async def delete_test_from_test_execution(
     """
     xray = await get_xray_fetcher(ctx)
     try:
-        result = xray.xray.delete_test_from_test_execution(execution_key, test_key)
+        result = await asyncio.to_thread(
+            xray.xray.delete_test_from_test_execution,
+            execution_key,
+            test_key,
+        )
         return json.dumps(
             {
                 "success": True,
@@ -1303,7 +1402,10 @@ async def get_test_run(
     """
     xray = await get_xray_fetcher(ctx)
     try:
-        result = xray.xray.get_test_run(test_run_id)
+        result = await asyncio.to_thread(
+            xray.xray.get_test_run,
+            test_run_id,
+        )
         return json.dumps(result, indent=2, default=str)
     except Exception as e:
         logger.error(f"Error retrieving test run {test_run_id}: {e}")
@@ -1333,7 +1435,10 @@ async def get_test_run_assignee(
     """
     xray = await get_xray_fetcher(ctx)
     try:
-        result = xray.xray.get_test_run_assignee(test_run_id)
+        result = await asyncio.to_thread(
+            xray.xray.get_test_run_assignee,
+            test_run_id,
+        )
         return json.dumps(result, indent=2, default=str)
     except Exception as e:
         logger.error(f"Error retrieving assignee for test run {test_run_id}: {e}")
@@ -1369,7 +1474,11 @@ async def update_test_run_assignee(
     """
     xray = await get_xray_fetcher(ctx)
     try:
-        result = xray.xray.update_test_run_assignee(test_run_id, assignee)
+        result = await asyncio.to_thread(
+            xray.xray.update_test_run_assignee,
+            test_run_id,
+            assignee,
+        )
         return json.dumps(
             {
                 "success": True,
@@ -1411,7 +1520,11 @@ async def get_test_run_iteration(
     """
     xray = await get_xray_fetcher(ctx)
     try:
-        result = xray.xray.get_test_run_iteration(test_run_id, iteration_id)
+        result = await asyncio.to_thread(
+            xray.xray.get_test_run_iteration,
+            test_run_id,
+            iteration_id,
+        )
         return json.dumps(result, indent=2, default=str)
     except Exception as e:
         logger.error(
@@ -1443,7 +1556,10 @@ async def get_test_run_status(
     """
     xray = await get_xray_fetcher(ctx)
     try:
-        result = xray.xray.get_test_run_status(test_run_id)
+        result = await asyncio.to_thread(
+            xray.xray.get_test_run_status,
+            test_run_id,
+        )
         return json.dumps(result, indent=2, default=str)
     except Exception as e:
         logger.error(f"Error retrieving status for test run {test_run_id}: {e}")
@@ -1479,7 +1595,11 @@ async def update_test_run_status(
     """
     xray = await get_xray_fetcher(ctx)
     try:
-        result = xray.xray.update_test_run_status(test_run_id, status)
+        result = await asyncio.to_thread(
+            xray.xray.update_test_run_status,
+            test_run_id,
+            status,
+        )
         return json.dumps(
             {
                 "success": True,
@@ -1516,7 +1636,10 @@ async def get_test_run_defects(
     """
     xray = await get_xray_fetcher(ctx)
     try:
-        result = xray.xray.get_test_run_defects(test_run_id)
+        result = await asyncio.to_thread(
+            xray.xray.get_test_run_defects,
+            test_run_id,
+        )
         return json.dumps(result, indent=2, default=str)
     except Exception as e:
         logger.error(f"Error retrieving defects for test run {test_run_id}: {e}")
@@ -1570,8 +1693,11 @@ async def update_test_run_defects(
             [key.strip() for key in remove_defects.split(",")] if remove_defects else []
         )
 
-        result = xray.xray.update_test_run_defects(
-            test_run_id, add=add_list, remove=remove_list
+        result = await asyncio.to_thread(
+            xray.xray.update_test_run_defects,
+            test_run_id,
+            add=add_list,
+            remove=remove_list,
         )
         return json.dumps({"success": True, "data": result}, indent=2, default=str)
     except Exception as e:
@@ -1602,7 +1728,10 @@ async def get_test_run_comment(
     """
     xray = await get_xray_fetcher(ctx)
     try:
-        result = xray.xray.get_test_run_comment(test_run_id)
+        result = await asyncio.to_thread(
+            xray.xray.get_test_run_comment,
+            test_run_id,
+        )
         return json.dumps(result, indent=2, default=str)
     except Exception as e:
         logger.error(f"Error retrieving comment for test run {test_run_id}: {e}")
@@ -1638,7 +1767,11 @@ async def update_test_run_comment(
     """
     xray = await get_xray_fetcher(ctx)
     try:
-        result = xray.xray.update_test_run_comment(test_run_id, comment)
+        result = await asyncio.to_thread(
+            xray.xray.update_test_run_comment,
+            test_run_id,
+            comment,
+        )
         return json.dumps(
             {"success": True, "message": f"Test run {test_run_id} comment updated"},
             indent=2,
@@ -1672,7 +1805,10 @@ async def get_test_run_steps(
     """
     xray = await get_xray_fetcher(ctx)
     try:
-        result = xray.xray.get_test_run_steps(test_run_id)
+        result = await asyncio.to_thread(
+            xray.xray.get_test_run_steps,
+            test_run_id,
+        )
         return json.dumps(result, indent=2, default=str)
     except Exception as e:
         logger.error(f"Error retrieving steps for test run {test_run_id}: {e}")

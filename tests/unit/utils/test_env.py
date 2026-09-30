@@ -1,10 +1,42 @@
 """Tests for environment variable utility functions."""
 
 from mcp_atlassian.utils.env import (
+    DEFAULT_HTTP_TIMEOUT_SECONDS,
+    get_env_timeout,
+    get_max_worker_threads,
     is_env_extended_truthy,
     is_env_ssl_verify,
     is_env_truthy,
 )
+
+
+class TestGetEnvTimeout:
+    """Test the get_env_timeout function."""
+
+    def test_returns_default_when_unset(self):
+        assert get_env_timeout("UNSET_TIMEOUT_VAR") == DEFAULT_HTTP_TIMEOUT_SECONDS
+
+    def test_reads_valid_integer(self, monkeypatch):
+        monkeypatch.setenv("TEST_TIMEOUT", "45")
+        assert get_env_timeout("TEST_TIMEOUT") == 45
+
+    def test_respects_explicit_default(self, monkeypatch):
+        monkeypatch.delenv("TEST_TIMEOUT", raising=False)
+        assert get_env_timeout("TEST_TIMEOUT", default=90) == 90
+
+    def test_blank_value_falls_back_to_default(self, monkeypatch):
+        monkeypatch.setenv("TEST_TIMEOUT", "   ")
+        assert get_env_timeout("TEST_TIMEOUT") == DEFAULT_HTTP_TIMEOUT_SECONDS
+
+    def test_non_numeric_falls_back_to_default(self, monkeypatch):
+        monkeypatch.setenv("TEST_TIMEOUT", "not-a-number")
+        assert get_env_timeout("TEST_TIMEOUT") == DEFAULT_HTTP_TIMEOUT_SECONDS
+
+    def test_non_positive_falls_back_to_default(self, monkeypatch):
+        """A zero/negative timeout would disable it, reintroducing the hang."""
+        for value in ("0", "-1"):
+            monkeypatch.setenv("TEST_TIMEOUT", value)
+            assert get_env_timeout("TEST_TIMEOUT") == DEFAULT_HTTP_TIMEOUT_SECONDS
 
 
 class TestIsEnvTruthy:
@@ -215,3 +247,35 @@ class TestEdgeCases:
                 assert is_env_truthy("TEST_VAR") is False
                 assert is_env_extended_truthy("TEST_VAR") is False
             assert is_env_ssl_verify("TEST_VAR") is True  # Not in false values
+
+
+class TestGetMaxWorkerThreads:
+    """Test worker-pool sizing.
+
+    Python's default executor derives its size from os.cpu_count(), which in a
+    container reports the node's CPUs rather than the cgroup quota, so
+    identical pods get different capacity depending on scheduling. The pool
+    size must therefore come from configuration, not inference.
+    """
+
+    def test_default_is_deterministic_and_not_cpu_derived(self, monkeypatch):
+        import os as _os
+
+        from mcp_atlassian.utils.env import DEFAULT_MAX_WORKER_THREADS
+
+        monkeypatch.delenv("MCP_MAX_WORKER_THREADS", raising=False)
+        monkeypatch.setattr(_os, "cpu_count", lambda: 2)
+        assert get_max_worker_threads() == DEFAULT_MAX_WORKER_THREADS
+        monkeypatch.setattr(_os, "cpu_count", lambda: 64)
+        assert get_max_worker_threads() == DEFAULT_MAX_WORKER_THREADS
+
+    def test_reads_override(self, monkeypatch):
+        monkeypatch.setenv("MCP_MAX_WORKER_THREADS", "8")
+        assert get_max_worker_threads() == 8
+
+    def test_invalid_values_fall_back(self, monkeypatch):
+        from mcp_atlassian.utils.env import DEFAULT_MAX_WORKER_THREADS
+
+        for bad in ("0", "-4", "many", "  "):
+            monkeypatch.setenv("MCP_MAX_WORKER_THREADS", bad)
+            assert get_max_worker_threads() == DEFAULT_MAX_WORKER_THREADS
