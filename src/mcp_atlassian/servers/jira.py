@@ -271,6 +271,38 @@ async def get_issue(
     return json.dumps(result, indent=2, ensure_ascii=False)
 
 
+@jira_mcp.tool(tags={"jira", "read", "development"})
+async def get_issue_related_pull_requests(
+    ctx: Context,
+    issue_key: Annotated[str, Field(description="Jira issue key (e.g., 'PROJ-123')")],
+    exclude_statuses: Annotated[
+        list[str],
+        Field(
+            description=(
+                "Bitbucket pull request statuses to exclude. Defaults to ['DECLINED']."
+            ),
+            default_factory=lambda: ["DECLINED"],
+        ),
+    ],
+) -> str:
+    """Get Bitbucket pull requests related to a Jira issue.
+
+    Args:
+        ctx: The FastMCP context.
+        issue_key: Jira issue key.
+        exclude_statuses: Pull request statuses to omit. Defaults to DECLINED.
+
+    Returns:
+        JSON string containing Jira's development status response.
+    """
+    jira = await get_jira_fetcher(ctx)
+    result = jira.get_issue_related_pull_requests(
+        issue_key=issue_key,
+        exclude_statuses=exclude_statuses,
+    )
+    return json.dumps(result, indent=2, ensure_ascii=False)
+
+
 @jira_mcp.tool(tags={"jira", "read"})
 async def search(
     ctx: Context,
