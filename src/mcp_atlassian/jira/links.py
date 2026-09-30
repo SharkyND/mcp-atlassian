@@ -120,11 +120,23 @@ class LinksMixin(JiraClient):
                 401,
                 403,
             ]:
-                error_msg = (
-                    f"Authentication failed for Jira API "
-                    f"({http_err.response.status_code}). "
-                    "Token may be expired or invalid. Please verify credentials."
-                )
+                detail = self._extract_error_detail(http_err)
+                # Jira reports issue-level "Link Issue" permission restrictions
+                # (e.g. a security scheme on a Test Execution) as 401/403 too,
+                # which is not an actual auth/token problem.
+                if "permission" in detail.lower():
+                    error_msg = (
+                        f"Permission denied for Jira API "
+                        f"({http_err.response.status_code}). "
+                        f"Server response: {detail}"
+                    )
+                else:
+                    error_msg = (
+                        f"Authentication failed for Jira API "
+                        f"({http_err.response.status_code}). "
+                        "Token may be expired or invalid. Please verify credentials. "
+                        f"Server response: {detail}"
+                    )
                 logger.error(error_msg)
                 raise MCPAtlassianAuthenticationError(error_msg) from http_err
             else:
@@ -136,6 +148,34 @@ class LinksMixin(JiraClient):
             logger.error(f"Error creating issue link: {error_msg}", exc_info=True)
             msg = f"Error creating issue link: {error_msg}"
             raise Exception(msg) from e
+
+    @staticmethod
+    def _extract_error_detail(http_err: HTTPError) -> str:
+        """
+        Pull the actual error detail out of a Jira HTTP error response body,
+        since the generic "authentication failed" message alone doesn't
+        distinguish a real auth/token problem from other causes (e.g. a
+        permission restriction or an unrecognized link type) that some Jira
+        Server/Data Center deployments also report as 401/403.
+
+        Args:
+            http_err: The HTTPError raised for the failed request
+
+        Returns:
+            The response body (JSON errorMessages/errors if present, else raw
+            text truncated to 500 characters), or "<no response body>" if the
+            response has no content.
+        """
+        response = http_err.response
+        if response is None:
+            return "<no response body>"
+        try:
+            body = response.json()
+            if body:
+                return str(body)
+        except ValueError:
+            pass
+        return response.text[:500] if response.text else "<empty response body>"
 
     def create_remote_issue_link(
         self, issue_key: str, link_data: dict[str, Any]

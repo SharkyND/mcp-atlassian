@@ -54,6 +54,8 @@ _IMAGE_EXTENSIONS: frozenset[str] = frozenset(
     {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".tif", ".webp"}
 )
 
+_NO_LINK_ISSUE_PERMISSION = "no link issue permission"
+
 # Image file extension -> format string accepted by MCP ImageContent / vision models.
 _IMAGE_FORMAT_MAP: dict[str, str] = {
     ".jpg": "jpeg",
@@ -1037,6 +1039,19 @@ async def update_issue(
             default=None,
         ),
     ] = None,
+    update: Annotated[
+        dict[str, list[dict[str, Any]]] | None,
+        Field(
+            description=(
+                "(Optional) Dictionary of Jira 'update' operations for fields that "
+                "require add/remove/set semantics instead of a direct overwrite "
+                "(e.g. issuelinks, labels, components). Each key maps to a list "
+                "of operation dicts. Example: `{'issuelinks': [{'add': "
+                "{'type': {'name': 'Tests'}, 'inwardIssue': {'key': 'PROJ-123'}}}]}`"
+            ),
+            default=None,
+        ),
+    ] = None,
     attachments: Annotated[
         str | None,
         Field(
@@ -1055,6 +1070,8 @@ async def update_issue(
         issue_key: Jira issue key.
         fields: Dictionary of fields to update.
         additional_fields: Optional dictionary of additional fields.
+        update: Optional dictionary of Jira "update" operations (add/remove/set)
+            for fields that cannot be set via a direct overwrite.
         attachments: Optional JSON array string or comma-separated list of file paths.
 
     Returns:
@@ -1073,6 +1090,9 @@ async def update_issue(
     extra_fields = additional_fields or {}
     if not isinstance(extra_fields, dict):
         raise ValueError("additional_fields must be a dictionary.")
+
+    if update is not None and not isinstance(update, dict):
+        raise ValueError("update must be a dictionary.")
 
     # Parse attachments
     attachment_paths = []
@@ -1100,7 +1120,7 @@ async def update_issue(
         all_updates["attachments"] = attachment_paths
 
     try:
-        issue = jira.update_issue(issue_key=issue_key, **all_updates)
+        issue = jira.update_issue(issue_key=issue_key, update=update, **all_updates)
         result = issue.to_simplified_dict()
         if (
             hasattr(issue, "custom_fields")
@@ -1333,7 +1353,20 @@ async def create_issue_link(
                 logger.warning("Invalid comment_visibility dictionary structure.")
         link_data["comment"] = comment_obj
 
-    result = jira.create_issue_link(link_data)
+    try:
+        result = jira.create_issue_link(link_data)
+    except Exception as link_error:  # noqa: BLE001 - link copying is best-effort
+        if _NO_LINK_ISSUE_PERMISSION in str(link_error).lower():
+            try:
+                result = jira.add_issue_link_via_update(
+                    outward_issue_key, link_type, "inwardIssue", inward_issue_key
+                )
+            except Exception as fallback_error:  # noqa: BLE001 - best-effort
+                link_error = fallback_error
+        logger.warning(
+            f"Could not create link '{link_type}' from {outward_issue_key} to {inward_issue_key}: {link_error!s}"
+        )
+
     return json.dumps(result, indent=2, ensure_ascii=False)
 
 
@@ -1387,6 +1420,17 @@ async def clone_issue(
             default=True,
         ),
     ] = True,
+    include_links: Annotated[
+        bool,
+        Field(
+            description=(
+                "Whether to re-create the source issue's other issue links "
+                "(e.g. 'blocks', 'relates to') on the clone, preserving their "
+                "type and direction relative to each linked issue"
+            ),
+            default=True,
+        ),
+    ] = True,
     additional_fields: Annotated[
         dict[str, Any] | None,
         Field(
@@ -1422,6 +1466,7 @@ async def clone_issue(
         summary: Optional summary override for the clone.
         include_custom_fields: Whether to copy populated custom fields.
         link_to_original: Whether to create a "Cloners" link back to the source issue.
+        include_links: Whether to re-create the source issue's other issue links.
         additional_fields: Optional dictionary of fields to override or add.
 
     Returns:
@@ -1440,6 +1485,7 @@ async def clone_issue(
         summary=summary,
         include_custom_fields=include_custom_fields,
         link_to_original=link_to_original,
+        include_links=include_links,
         additional_fields=additional_fields,
     )
     result = issue.to_simplified_dict()
