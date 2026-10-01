@@ -64,20 +64,30 @@ DEFAULT_HTTP_TIMEOUT_SECONDS = 30
 # they land on, so the size is pinned explicitly instead.
 DEFAULT_MAX_WORKER_THREADS = 32
 
+# Transient connection drops and stalls against Atlassian Server/Data Center
+# behind corporate proxies surface as one-off tool failures that would succeed
+# on a replay. Retries are applied asymmetrically by method; see
+# ``mcp_atlassian.utils.retry`` for the safety rules.
+DEFAULT_HTTP_RETRIES = 3
 
-def _get_positive_int_env(env_var_name: str, default: int, unit: str) -> int:
-    """Read a positive integer from an environment variable.
 
-    Values that are unset, blank, non-numeric, or non-positive fall back to the
-    default rather than silently disabling the setting.
+def _get_positive_int_env(
+    env_var_name: str, default: int, unit: str, minimum: int = 1
+) -> int:
+    """Read a bounded integer from an environment variable.
+
+    Values that are unset, blank, non-numeric, or below ``minimum`` fall back to
+    the default rather than silently disabling the setting.
 
     Args:
         env_var_name: Name of the environment variable to read
         default: Value to use when the variable is unset or invalid
         unit: Human-readable unit used in warning messages (e.g. "seconds")
+        minimum: Smallest accepted value; use ``0`` where zero is meaningful
+            (for example, to disable retries)
 
     Returns:
-        A positive integer
+        An integer greater than or equal to ``minimum``
     """
     raw_value = os.getenv(env_var_name)
     if raw_value is None or not raw_value.strip():
@@ -93,11 +103,12 @@ def _get_positive_int_env(env_var_name: str, default: int, unit: str) -> int:
             default,
         )
         return default
-    if value <= 0:
+    if value < minimum:
         logger.warning(
-            "Invalid %s=%r; value must be positive. Using %s.",
+            "Invalid %s=%r; value must be >= %s. Using %s.",
             env_var_name,
             raw_value,
+            minimum,
             default,
         )
         return default
@@ -138,6 +149,21 @@ def get_max_worker_threads(
         A positive worker count
     """
     return _get_positive_int_env(env_var_name, default, "threads")
+
+
+def get_env_retries(
+    env_var_name: str = "MCP_HTTP_RETRIES", default: int = DEFAULT_HTTP_RETRIES
+) -> int:
+    """Read how many times a transient HTTP failure may be replayed.
+
+    Args:
+        env_var_name: Name of the environment variable to read
+        default: Retry count to use when the variable is unset or invalid
+
+    Returns:
+        A retry count; ``0`` disables retrying
+    """
+    return _get_positive_int_env(env_var_name, default, "attempts", minimum=0)
 
 
 def get_custom_headers(env_var_name: str) -> dict[str, str]:

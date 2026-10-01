@@ -2595,3 +2595,114 @@ async def test_get_attachment_images_issue_not_found(mock_jira_fetcher):
 
     assert result.structured_content["success"] is False
     assert "MISSING-1" in result.structured_content["error"]
+
+
+class TestCreateIssueLinkErrorHandling:
+    """Regression tests for the create_issue_link error handler.
+
+    The handler previously left `result` unbound whenever the failure was not an
+    issue-level permission restriction, so any other error (a nonexistent issue,
+    an unknown link type, a read timeout) surfaced to the caller as
+    `UnboundLocalError: cannot access local variable 'result'` instead of Jira's
+    real message. It also warned on a successful fallback and returned `null`.
+    """
+
+    @staticmethod
+    def _fetcher():
+        fetcher = MagicMock()
+        fetcher.add_issue_link_via_update.return_value = None
+        return fetcher
+
+    async def _call(self, fetcher):
+        from mcp_atlassian.servers.jira import create_issue_link
+
+        with patch(
+            "mcp_atlassian.servers.jira.get_jira_fetcher",
+            AsyncMock(return_value=fetcher),
+        ):
+            return await create_issue_link.fn(
+                MagicMock(),
+                link_type="Dependent",
+                inward_issue_key="PROJ-2",
+                outward_issue_key="PROJ-1",
+            )
+
+    @pytest.mark.anyio
+    async def test_nonexistent_issue_surfaces_jira_message(self):
+        """The most common masked cause in production."""
+        fetcher = self._fetcher()
+        fetcher.create_issue_link.side_effect = Exception(
+            "Error creating issue link: Issue Does Not Exist"
+        )
+
+        with pytest.raises(Exception) as exc_info:
+            await self._call(fetcher)
+
+        assert "Issue Does Not Exist" in str(exc_info.value)
+        assert not isinstance(exc_info.value, UnboundLocalError)
+        fetcher.add_issue_link_via_update.assert_not_called()
+
+    @pytest.mark.anyio
+    async def test_read_timeout_surfaces_instead_of_unbound_local_error(self):
+        from requests.exceptions import ReadTimeout
+
+        fetcher = self._fetcher()
+        fetcher.create_issue_link.side_effect = ReadTimeout("Read timed out.")
+
+        with pytest.raises(ReadTimeout):
+            await self._call(fetcher)
+
+    @pytest.mark.anyio
+    async def test_permission_error_falls_back_and_returns_real_payload(self):
+        fetcher = self._fetcher()
+        fetcher.create_issue_link.side_effect = Exception(
+            "Permission denied for Jira API (401). Server response: "
+            "{'errorMessages': [\"No Link Issue Permission for issue 'PROJ-2'\"]}"
+        )
+
+        payload = json.loads(await self._call(fetcher))
+
+        assert payload["success"] is True
+        assert payload["method"] == "issue_update_fallback"
+        assert payload["inward_issue"] == "PROJ-2"
+        assert payload["outward_issue"] == "PROJ-1"
+        fetcher.add_issue_link_via_update.assert_called_once_with(
+            "PROJ-1", "Dependent", "inwardIssue", "PROJ-2"
+        )
+
+    @pytest.mark.anyio
+    async def test_successful_fallback_does_not_log_a_failure_warning(self, caplog):
+        fetcher = self._fetcher()
+        fetcher.create_issue_link.side_effect = Exception(
+            "No Link Issue Permission for issue 'PROJ-2'"
+        )
+
+        with caplog.at_level(logging.WARNING):
+            await self._call(fetcher)
+
+        assert "Could not create link" not in caplog.text
+
+    @pytest.mark.anyio
+    async def test_failed_fallback_surfaces_the_fallback_error(self):
+        fetcher = self._fetcher()
+        fetcher.create_issue_link.side_effect = Exception(
+            "No Link Issue Permission for issue 'PROJ-2'"
+        )
+        fetcher.add_issue_link_via_update.side_effect = Exception(
+            "Jira rejected the update: workflow state"
+        )
+
+        with pytest.raises(Exception) as exc_info:
+            await self._call(fetcher)
+
+        assert "workflow state" in str(exc_info.value)
+
+    @pytest.mark.anyio
+    async def test_success_path_is_unchanged(self):
+        fetcher = self._fetcher()
+        fetcher.create_issue_link.return_value = {"success": True, "id": "123"}
+
+        payload = json.loads(await self._call(fetcher))
+
+        assert payload == {"success": True, "id": "123"}
+        fetcher.add_issue_link_via_update.assert_not_called()

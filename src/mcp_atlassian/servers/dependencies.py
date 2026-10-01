@@ -17,6 +17,7 @@ from mcp_atlassian.bitbucket import BitbucketConfig, BitbucketFetcher
 from mcp_atlassian.confluence import ConfluenceConfig, ConfluenceFetcher
 from mcp_atlassian.jira import JiraConfig, JiraFetcher
 from mcp_atlassian.servers.context import MainAppContext
+from mcp_atlassian.utils.env import get_env_timeout
 from mcp_atlassian.utils.oauth import OAuthConfig
 from mcp_atlassian.utils.urls import is_atlassian_cloud_url
 from mcp_atlassian.xray import XrayConfig, XrayFetcher
@@ -234,6 +235,7 @@ async def get_jira_fetcher(ctx: Context) -> JiraFetcher:
                 auth_type="pat",
                 personal_token=jira_token_header,
                 ssl_verify=True,
+                timeout=get_env_timeout("JIRA_TIMEOUT"),
                 projects_filter=None,
                 http_proxy=None,
                 https_proxy=None,
@@ -386,6 +388,7 @@ async def get_confluence_fetcher(ctx: Context) -> ConfluenceFetcher:
                 auth_type="pat",
                 personal_token=confluence_token_header,
                 ssl_verify=True,
+                timeout=get_env_timeout("CONFLUENCE_TIMEOUT"),
                 spaces_filter=None,
                 http_proxy=None,
                 https_proxy=None,
@@ -572,6 +575,7 @@ async def get_bitbucket_fetcher(ctx: Context) -> BitbucketFetcher:
                 username=None,
                 personal_token=bitbucket_token_header,
                 ssl_verify=True,
+                timeout=get_env_timeout("BITBUCKET_TIMEOUT"),
                 http_proxy=None,
                 https_proxy=None,
                 no_proxy=None,
@@ -760,6 +764,7 @@ async def get_xray_fetcher(ctx: Context) -> XrayFetcher:
                     auth_type="pat",
                     personal_token=xray_token_header,
                     ssl_verify=True,
+                    timeout=get_env_timeout("JIRA_TIMEOUT"),
                     projects_filter=None,
                     http_proxy=None,
                     https_proxy=None,

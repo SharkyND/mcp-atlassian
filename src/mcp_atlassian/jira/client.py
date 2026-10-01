@@ -10,12 +10,14 @@ from requests.exceptions import HTTPError
 
 from mcp_atlassian.exceptions import MCPAtlassianAuthenticationError
 from mcp_atlassian.preprocessing import JiraPreprocessor
+from mcp_atlassian.utils.env import get_env_retries
 from mcp_atlassian.utils.logging import (
     get_masked_session_headers,
     log_config_param,
     mask_sensitive,
 )
 from mcp_atlassian.utils.oauth import configure_oauth_session
+from mcp_atlassian.utils.retry import configure_retries
 from mcp_atlassian.utils.ssl import configure_ssl_verification
 
 from .config import JiraConfig
@@ -112,6 +114,14 @@ class JiraClient:
             url=self.config.url,
             session=self.jira._session,
             ssl_verify=self.config.ssl_verify,
+        )
+
+        # Applied after SSL so the retry policy attaches to the adapters
+        # that configuration may have mounted.
+        configure_retries(
+            service_name="Jira",
+            session=self.jira._session,
+            retries=get_env_retries(),
         )
 
         # Proxy configuration

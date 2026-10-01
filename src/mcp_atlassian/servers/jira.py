@@ -1445,21 +1445,42 @@ async def create_issue_link(
             jira.create_issue_link,
             link_data,
         )
-    except Exception as link_error:  # noqa: BLE001 - link copying is best-effort
-        if _NO_LINK_ISSUE_PERMISSION in str(link_error).lower():
-            try:
-                result = await asyncio.to_thread(
-                    jira.add_issue_link_via_update,
-                    outward_issue_key,
-                    link_type,
-                    "inwardIssue",
-                    inward_issue_key,
-                )
-            except Exception as fallback_error:  # noqa: BLE001 - best-effort
-                link_error = fallback_error
-        logger.warning(
-            f"Could not create link '{link_type}' from {outward_issue_key} to {inward_issue_key}: {link_error!s}"
+    except Exception as link_error:
+        if _NO_LINK_ISSUE_PERMISSION not in str(link_error).lower():
+            # The update-issue fallback only works around Jira's issue-level
+            # "Link Issues" restriction. Anything else (a nonexistent issue, an
+            # unknown link type, a timeout) is a real failure, so surface Jira's
+            # actual message instead of hiding it behind a generic response.
+            logger.error(
+                f"Could not create link '{link_type}' from {outward_issue_key} "
+                f"to {inward_issue_key}: {link_error!s}"
+            )
+            raise
+        # Jira enforces "Link Issues" against both issues on the dedicated
+        # endpoint, but only against the issue being updated on the update
+        # endpoint, so linking from the other side can still succeed. If this
+        # also fails, the error propagates with Jira's real message.
+        logger.info(
+            f"Direct creation of link '{link_type}' from {outward_issue_key} to "
+            f"{inward_issue_key} was denied; retrying via the update endpoint"
         )
+        await asyncio.to_thread(
+            jira.add_issue_link_via_update,
+            outward_issue_key,
+            link_type,
+            "inwardIssue",
+            inward_issue_key,
+        )
+        result = {
+            "success": True,
+            "message": (
+                f"Link created between {inward_issue_key} and {outward_issue_key}"
+            ),
+            "link_type": link_type,
+            "inward_issue": inward_issue_key,
+            "outward_issue": outward_issue_key,
+            "method": "issue_update_fallback",
+        }
 
     return json.dumps(result, indent=2, ensure_ascii=False)
 

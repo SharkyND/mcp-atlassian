@@ -1180,3 +1180,49 @@ class TestGetXrayFetcher:
 
         with pytest.raises(ValueError, match=expected_error_match):
             await get_xray_fetcher(mock_context)
+
+
+class TestHeaderConfigHonoursTimeout:
+    """Header-auth configs must not bypass the timeout setting.
+
+    These paths build their Config objects directly instead of via from_env(),
+    so an omitted `timeout=` silently falls back to the dataclass default and
+    makes JIRA_TIMEOUT / CONFLUENCE_TIMEOUT / BITBUCKET_TIMEOUT dead config for
+    every header-authenticated request.
+    """
+
+    def test_every_header_config_passes_timeout(self):
+        import re
+        from pathlib import Path
+
+        source = (
+            Path(__file__).resolve().parents[3]
+            / "src"
+            / "mcp_atlassian"
+            / "servers"
+            / "dependencies.py"
+        ).read_text(encoding="utf-8")
+
+        blocks = re.findall(
+            r"header_config = (\w+Config)\((.*?)\n\s*\)", source, re.DOTALL
+        )
+        assert blocks, "no header_config constructions found"
+        missing = [name for name, body in blocks if "timeout=" not in body]
+        assert not missing, (
+            "header-auth configs must pass timeout= explicitly, otherwise the "
+            f"configured timeout is ignored: {missing}"
+        )
+
+    def test_header_jira_config_uses_env_timeout(self, monkeypatch):
+        from mcp_atlassian.jira.config import JiraConfig
+        from mcp_atlassian.utils.env import get_env_timeout
+
+        monkeypatch.setenv("JIRA_TIMEOUT", "1234")
+        config = JiraConfig(
+            url="https://jira.example.com",
+            auth_type="pat",
+            personal_token="tok",
+            ssl_verify=True,
+            timeout=get_env_timeout("JIRA_TIMEOUT"),
+        )
+        assert config.timeout == 1234
