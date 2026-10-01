@@ -279,3 +279,33 @@ class TestGetMaxWorkerThreads:
         for bad in ("0", "-4", "many", "  "):
             monkeypatch.setenv("MCP_MAX_WORKER_THREADS", bad)
             assert get_max_worker_threads() == DEFAULT_MAX_WORKER_THREADS
+
+
+class TestGetEnvRetries:
+    """Retry count must be readable and explicitly disable-able."""
+
+    def test_default(self, monkeypatch):
+        from mcp_atlassian.utils.env import DEFAULT_HTTP_RETRIES, get_env_retries
+
+        monkeypatch.delenv("MCP_HTTP_RETRIES", raising=False)
+        assert get_env_retries() == DEFAULT_HTTP_RETRIES
+
+    def test_reads_override(self, monkeypatch):
+        from mcp_atlassian.utils.env import get_env_retries
+
+        monkeypatch.setenv("MCP_HTTP_RETRIES", "5")
+        assert get_env_retries() == 5
+
+    def test_zero_is_valid_and_disables_retries(self, monkeypatch):
+        """Unlike timeouts, 0 is a meaningful value here."""
+        from mcp_atlassian.utils.env import get_env_retries
+
+        monkeypatch.setenv("MCP_HTTP_RETRIES", "0")
+        assert get_env_retries() == 0
+
+    def test_negative_and_invalid_fall_back(self, monkeypatch):
+        from mcp_atlassian.utils.env import DEFAULT_HTTP_RETRIES, get_env_retries
+
+        for bad in ("-1", "lots", "  "):
+            monkeypatch.setenv("MCP_HTTP_RETRIES", bad)
+            assert get_env_retries() == DEFAULT_HTTP_RETRIES

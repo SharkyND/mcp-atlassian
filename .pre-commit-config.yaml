@@ -50,7 +50,10 @@ repos:
             'types-beautifulsoup4',
             'types-requests',
             'types-setuptools',
-            'types-urllib3',
+            # NOTE: types-urllib3 is deliberately absent. It provides stubs for
+            # urllib3 1.x and shadows the inline types shipped by urllib3 2.x,
+            # causing false "unexpected keyword argument" errors for 2.x-only
+            # parameters such as Retry(backoff_jitter=...).
             'types-cachetools',
             'atlassian-python-api',
             # Pinned to match uv.lock. Deprecated 3.x uses PEP 695 `type`
