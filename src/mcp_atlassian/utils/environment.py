@@ -115,6 +115,22 @@ def get_available_services(
                 "Using Jira OAuth 2.0 (3LO) authentication (Cloud-only features) "
                 "with provided access token"
             )
+        elif (
+            not is_cloud
+            and os.getenv("JIRA_OAUTH_CLIENT_ID")
+            and os.getenv("JIRA_OAUTH_CLIENT_SECRET")
+        ):
+            # Data Center OAuth 2.0 (service-specific env vars)
+            jira_is_setup = True
+            logger.info("Using Jira Data Center OAuth 2.0 authentication")
+        elif (
+            not is_cloud
+            and os.getenv("ATLASSIAN_OAUTH_CLIENT_ID")
+            and os.getenv("ATLASSIAN_OAUTH_CLIENT_SECRET")
+        ):
+            # Data Center OAuth 2.0 (shared env vars)
+            jira_is_setup = True
+            logger.info("Using Jira Data Center OAuth 2.0 authentication")
         elif is_cloud:  # Cloud non-OAuth
             if all(
                 [
