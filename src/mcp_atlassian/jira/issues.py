@@ -1925,11 +1925,21 @@ class IssuesMixin(
         """
         try:
             issue_types = self.get_project_issue_types(project_key)
-            for issue_type in issue_types:
-                # Check the subtask field - this is the most reliable way
-                if issue_type.get("subtask", False):
-                    return issue_type.get("name")
-            return None
+            subtask_type_names = [
+                issue_type.get("name")
+                for issue_type in issue_types
+                if issue_type.get("subtask", False) and issue_type.get("name")
+            ]
+            if not subtask_type_names:
+                return None
+            # Some projects have more than one subtask-flagged issue type
+            # (e.g. Xray's "Sub Test Execution" alongside the plain
+            # "Sub-task"); prefer the generic name instead of whichever one
+            # happens to come first in the project's issue type list.
+            for name in subtask_type_names:
+                if name.lower() in ("subtask", "sub-task"):
+                    return name
+            return subtask_type_names[0]
         except Exception as e:
             logger.warning(f"Could not get issue types for project {project_key}: {e}")
             return None
