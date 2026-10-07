@@ -148,6 +148,30 @@ class TestEpicsMixin:
         # Verify fields dict remains empty
         assert fields == {}
 
+    def test_prepare_epic_fields_with_direct_field_id(self, epics_mixin: EpicsMixin):
+        """Test prepare_epic_fields prefers a value passed under the raw field ID.
+
+        Regression test: additional_fields commonly sets the Epic Name via its
+        actual custom field ID (e.g. "customfield_10005") rather than the
+        "epic_name"/"epicName" aliases. That value must win over the summary
+        default, including for the post-creation update path.
+        """
+        epics_mixin.get_field_ids_to_epic = MagicMock(
+            return_value={"epic_name": "customfield_10005"}
+        )
+
+        fields = {}
+        summary = "Sample Epic for Testing Purposes"
+        kwargs = {"customfield_10005": "MAK-TBC"}
+
+        epics_mixin.prepare_epic_fields(fields, summary, kwargs)
+
+        assert kwargs["__epic_name_value"] == "MAK-TBC"
+        assert kwargs["__epic_name_field"] == "customfield_10005"
+        # The raw field-ID kwarg must be consumed, not left for reprocessing
+        assert "customfield_10005" not in kwargs
+        assert fields == {}
+
     def test_prepare_epic_fields_missing_epic_name(self, epics_mixin: EpicsMixin):
         """Test prepare_epic_fields with missing epic_name field."""
         # Mock get_field_ids_to_epic
