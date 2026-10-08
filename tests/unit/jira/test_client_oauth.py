@@ -416,3 +416,70 @@ class TestJiraClientOAuth:
                 match=r"Cloud authentication requires JIRA_USERNAME and JIRA_API_TOKEN, or OAuth configuration.*",
             ):
                 JiraClient()
+
+
+class TestJiraClientDCOAuth:
+    """Tests for JiraClient with Data Center OAuth."""
+
+    def test_dc_oauth_uses_base_url(self):
+        """Test JiraClient with DC OAuth uses base_url and cloud=False."""
+        dc_oauth_config = OAuthConfig(
+            client_id="dc-client",
+            client_secret="dc-secret",
+            redirect_uri="http://localhost:8080/callback",
+            scope="WRITE",
+            base_url="https://jira.corp.example.com",
+            access_token="dc-access-token",
+        )
+        config = JiraConfig(
+            url="https://jira.corp.example.com",
+            auth_type="oauth",
+            oauth_config=dc_oauth_config,
+        )
+
+        with (
+            patch("mcp_atlassian.jira.client.Jira") as mock_jira,
+            patch(
+                "mcp_atlassian.jira.client.configure_oauth_session",
+                return_value=True,
+            ),
+            patch("mcp_atlassian.jira.client.configure_ssl_verification"),
+        ):
+            client = JiraClient(config=config)
+
+        # DC OAuth: URL should be the instance URL, cloud=False
+        mock_jira.assert_called_once()
+        call_kwargs = mock_jira.call_args[1]
+        assert call_kwargs["url"] == "https://jira.corp.example.com"
+        assert call_kwargs["cloud"] is False
+
+    def test_dc_oauth_missing_oauth_config_raises(self):
+        """Test JiraClient with OAuth but no oauth_config raises ValueError."""
+        config = JiraConfig(
+            url="https://jira.corp.example.com",
+            auth_type="oauth",
+            oauth_config=None,
+        )
+
+        with pytest.raises(
+            ValueError, match="OAuth authentication requires oauth_config"
+        ):
+            JiraClient(config=config)
+
+    def test_cloud_oauth_missing_cloud_id_raises(self):
+        """Test JiraClient with OAuth but no cloud_id or base_url raises ValueError."""
+        oauth_config = OAuthConfig(
+            client_id="c",
+            client_secret="s",
+            redirect_uri="r",
+            scope="sc",
+            access_token="token",
+        )
+        config = JiraConfig(
+            url="https://jira.corp.example.com",
+            auth_type="oauth",
+            oauth_config=oauth_config,
+        )
+
+        with pytest.raises(ValueError, match="Cloud OAuth authentication requires"):
+            JiraClient(config=config)

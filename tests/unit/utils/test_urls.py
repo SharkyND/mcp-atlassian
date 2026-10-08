@@ -1,6 +1,8 @@
 """Tests for the URL utilities module."""
 
-from mcp_atlassian.utils.urls import is_atlassian_cloud_url
+from mcp_atlassian.utils.urls import (
+    is_atlassian_cloud_url,
+)
 
 
 def test_is_atlassian_cloud_url_empty():
