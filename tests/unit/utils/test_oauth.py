@@ -357,7 +357,7 @@ class TestOAuthConfig:
         token_json = mock_set_password.call_args[0][2]
 
         assert service_name == KEYRING_SERVICE_NAME
-        assert username == "oauth-test-client-id"
+        assert username == "oauth-test-client-id-cloud-test-cloud-id"
         assert "test-refresh-token" in token_json
         assert "test-access-token" in token_json
 
@@ -801,8 +801,8 @@ def test_configure_oauth_session_success_with_byo_config():
 
 
 @patch("mcp_atlassian.utils.oauth.logger")
-def test_configure_oauth_session_byo_config_empty_token_logs_error(mock_logger):
-    """Test configure_oauth_session with BYO config and empty token logs error."""
+def test_configure_oauth_session_byo_config_empty_token_logs_warning(mock_logger):
+    """Test configure_oauth_session with BYO config and empty token returns False."""
     session = requests.Session()
     # BYO config with an effectively invalid (empty) access token
     byo_config = BYOAccessTokenOAuthConfig(cloud_id="byo-cloud-id", access_token="")
@@ -811,9 +811,8 @@ def test_configure_oauth_session_byo_config_empty_token_logs_error(mock_logger):
 
     assert result is False
     assert "Authorization" not in session.headers
-    mock_logger.error.assert_called_once_with(
-        "configure_oauth_session: oauth access token configuration provided as empty string."
-    )
+    # Empty access_token hits the early return (#858) with a warning
+    mock_logger.warning.assert_called_once()
 
 
 @patch("mcp_atlassian.utils.oauth.logger")

@@ -85,7 +85,7 @@ def _assert_service_availability(
 def _assert_authentication_logs(caplog, auth_type, services):
     """Helper to assert authentication log messages."""
     log_patterns = {
-        "oauth": "OAuth 2.0 (3LO) authentication (Cloud-only features)",
+        "oauth": "OAuth 2.0 (3LO) authentication (Cloud)",
         "cloud_basic": "Cloud Basic Authentication (API Token)",
         "server": "Server/Data Center authentication (PAT or Basic Auth)",
         "not_configured": (
@@ -242,8 +242,6 @@ class TestGetAvailableServices:
         [
             "ATLASSIAN_OAUTH_CLIENT_ID",
             "ATLASSIAN_OAUTH_CLIENT_SECRET",
-            "ATLASSIAN_OAUTH_REDIRECT_URI",
-            "ATLASSIAN_OAUTH_SCOPE",
             "ATLASSIAN_OAUTH_CLOUD_ID",
         ],
     )

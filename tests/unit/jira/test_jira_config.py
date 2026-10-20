@@ -194,12 +194,58 @@ def test_is_cloud_oauth_with_cloud_id():
         auth_type="oauth",
         oauth_config=oauth_config,
     )
-    assert config.is_cloud is True
+    assert config.is_cloud is True  # Cloud OAuth even with server URL
 
-    # OAuth with cloud_id and server URL - should still be Cloud
-    config = JiraConfig(
-        url="https://jira.example.com",  # Server-like URL
-        auth_type="oauth",
-        oauth_config=oauth_config,
+
+def test_dc_oauth_is_auth_configured():
+    """Test is_auth_configured returns True for DC OAuth with client_id + secret."""
+    from mcp_atlassian.utils.oauth import OAuthConfig
+
+    dc_oauth = OAuthConfig(
+        client_id="c",
+        client_secret="s",
+        redirect_uri="r",
+        scope="sc",
+        base_url="https://jira.corp.com",
     )
-    assert config.is_cloud is True
+    config = JiraConfig(
+        url="https://jira.corp.com",
+        auth_type="oauth",
+        oauth_config=dc_oauth,
+    )
+    assert config.is_auth_configured() is True
+
+
+def test_dc_oauth_is_cloud_false():
+    """Test is_cloud returns False for DC OAuth config."""
+    from mcp_atlassian.utils.oauth import OAuthConfig
+
+    dc_oauth = OAuthConfig(
+        client_id="c",
+        client_secret="s",
+        redirect_uri="r",
+        scope="sc",
+        base_url="https://jira.corp.com",
+    )
+    config = JiraConfig(
+        url="https://jira.corp.com",
+        auth_type="oauth",
+        oauth_config=dc_oauth,
+    )
+    assert config.is_cloud is False
+
+
+def test_dc_byo_is_auth_configured():
+    """Test is_auth_configured returns True for DC BYO access token."""
+    from mcp_atlassian.utils.oauth import BYOAccessTokenOAuthConfig
+
+    dc_byo = BYOAccessTokenOAuthConfig(
+        access_token="token",
+        base_url="https://jira.corp.com",
+    )
+    config = JiraConfig(
+        url="https://jira.corp.com",
+        auth_type="oauth",
+        oauth_config=dc_byo,
+    )
+    assert config.is_auth_configured() is True
