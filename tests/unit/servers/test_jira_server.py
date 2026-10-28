@@ -53,6 +53,16 @@ def mock_jira_fetcher():
     mock_fetcher.get_available_transitions.return_value = [
         {"id": "11", "name": "Start Progress"}
     ]
+    mock_fetcher.get_issue_related_pull_requests.return_value = {
+        "detail": [
+            {
+                "pullRequests": [
+                    {"id": "1", "status": "OPEN"},
+                    {"id": "2", "status": "DECLINED"},
+                ]
+            }
+        ]
+    }
     mock_fetcher.get_worklogs.return_value = [
         {"author": {"displayName": "Test User"}, "timeSpent": "1h"}
     ]
@@ -119,6 +129,10 @@ def mock_jira_fetcher():
     mock_fetcher.link_issue_to_epic.return_value = linked_issue
 
     mock_fetcher.create_issue_link.return_value = {"status": "LINKED"}
+
+    cloned_issue = MagicMock()
+    cloned_issue.to_simplified_dict.return_value = {"key": "TEST-101"}
+    mock_fetcher.clone_issue.return_value = cloned_issue
     mock_fetcher.create_remote_issue_link.return_value = {"id": "remote-link"}
     mock_fetcher.remove_issue_link.return_value = {"removed": True}
 
@@ -432,6 +446,7 @@ class DirectJiraToolCaller:
             batch_create_issues,
             batch_create_versions,
             batch_get_changelogs,
+            clone_issue,
             construct_download_endpoint,
             create_issue,
             create_issue_link,
@@ -444,6 +459,7 @@ class DirectJiraToolCaller:
             get_all_projects,
             get_board_issues,
             get_issue,
+            get_issue_related_pull_requests,
             get_link_types,
             get_project_issues,
             get_project_versions,
@@ -491,8 +507,10 @@ class DirectJiraToolCaller:
             "jira_batch_create_issues": batch_create_issues.fn,
             "jira_update_issue": update_issue.fn,
             "jira_delete_issue": delete_issue.fn,
+            "jira_get_issue_related_pull_requests": get_issue_related_pull_requests.fn,
             "jira_add_comment": add_comment.fn,
             "jira_create_issue_link": create_issue_link.fn,
+            "jira_clone_issue": clone_issue.fn,
             "jira_create_version": create_version.fn,
             "jira_batch_create_versions": batch_create_versions.fn,
             "jira_add_worklog": add_worklog.fn,
@@ -589,6 +607,22 @@ async def test_get_issue(jira_client, mock_jira_fetcher):
     assert isinstance(actual_fields, list)
     for field in ("summary", "status", "assignee", "priority"):
         assert field in actual_fields
+
+
+@pytest.mark.anyio
+async def test_get_issue_related_pull_requests(jira_client, mock_jira_fetcher):
+    """Test the Jira Bitbucket pull request discovery tool."""
+    response = await jira_client.call_tool(
+        "jira_get_issue_related_pull_requests",
+        {"issue_key": "TEST-123", "exclude_statuses": ["DECLINED"]},
+    )
+
+    data = json.loads(response.content[0].text)
+    assert data["detail"][0]["pullRequests"][0]["status"] == "OPEN"
+    mock_jira_fetcher.get_issue_related_pull_requests.assert_called_once_with(
+        issue_key="TEST-123",
+        exclude_statuses=["DECLINED"],
+    )
 
 
 @pytest.mark.anyio
@@ -1293,12 +1327,49 @@ async def test_update_issue_with_attachments(jira_client, mock_jira_fetcher):
     )
     mock_jira_fetcher.update_issue.assert_called_once_with(
         issue_key="PROJ-1",
+        update=None,
         summary="Updated summary",
         customfield_1="value",
         attachments=["/tmp/file.txt"],
     )
     payload = json.loads(response.content[0].text)
     assert payload["issue"]["attachment_results"][0]["file"] == "doc.txt"
+
+
+@pytest.mark.anyio
+async def test_update_issue_with_update_operations(jira_client, mock_jira_fetcher):
+    """Test jira_update_issue passes 'update' operations through separately."""
+    await jira_client.call_tool(
+        "jira_update_issue",
+        {
+            "issue_key": "PROJ-1",
+            "fields": {"summary": "Updated summary"},
+            "update": {
+                "issuelinks": [
+                    {
+                        "add": {
+                            "type": {"name": "Tests"},
+                            "inwardIssue": {"key": "PROJ-2"},
+                        }
+                    }
+                ]
+            },
+        },
+    )
+    mock_jira_fetcher.update_issue.assert_called_once_with(
+        issue_key="PROJ-1",
+        update={
+            "issuelinks": [
+                {
+                    "add": {
+                        "type": {"name": "Tests"},
+                        "inwardIssue": {"key": "PROJ-2"},
+                    }
+                }
+            ]
+        },
+        summary="Updated summary",
+    )
 
 
 @pytest.mark.anyio
@@ -1379,6 +1450,63 @@ async def test_create_issue_link_tool(jira_client, mock_jira_fetcher):
     assert link_payload["inwardIssue"]["key"] == "PROJ-1"
     payload = json.loads(response.content[0].text)
     assert payload["status"] == "LINKED"
+
+
+@pytest.mark.anyio
+async def test_clone_issue_tool(jira_client, mock_jira_fetcher):
+    """Test jira_clone_issue forwards parameters and returns the clone."""
+    response = await jira_client.call_tool(
+        "jira_clone_issue",
+        {
+            "issue_key": "PROJ-1",
+            "project_key": "OTHER",
+            "summary": "My Clone",
+            "include_custom_fields": False,
+            "link_to_original": False,
+            "include_links": False,
+            "additional_fields": {"priority": {"name": "High"}},
+        },
+    )
+    mock_jira_fetcher.clone_issue.assert_called_once_with(
+        issue_key="PROJ-1",
+        project_key="OTHER",
+        summary="My Clone",
+        include_custom_fields=False,
+        link_to_original=False,
+        include_links=False,
+        additional_fields={"priority": {"name": "High"}},
+    )
+    payload = json.loads(response.content[0].text)
+    assert payload["issue"]["key"] == "TEST-101"
+    assert "cloned successfully" in payload["message"]
+
+
+@pytest.mark.anyio
+async def test_clone_issue_tool_defaults(jira_client, mock_jira_fetcher):
+    """Test jira_clone_issue uses default parameter values."""
+    await jira_client.call_tool("jira_clone_issue", {"issue_key": "PROJ-1"})
+    mock_jira_fetcher.clone_issue.assert_called_once_with(
+        issue_key="PROJ-1",
+        project_key=None,
+        summary=None,
+        include_custom_fields=True,
+        link_to_original=True,
+        include_links=True,
+        additional_fields=None,
+    )
+
+
+@pytest.mark.anyio
+async def test_clone_issue_tool_reports_excluded_fields(jira_client, mock_jira_fetcher):
+    """Test jira_clone_issue surfaces fields excluded by create-screen verification."""
+    mock_jira_fetcher.clone_issue.return_value.custom_fields = {
+        "clone_excluded_fields": ["customfield_10005", "environment"]
+    }
+
+    response = await jira_client.call_tool("jira_clone_issue", {"issue_key": "PROJ-1"})
+
+    payload = json.loads(response.content[0].text)
+    assert payload["excluded_fields"] == ["customfield_10005", "environment"]
 
 
 @pytest.mark.anyio
@@ -2467,3 +2595,114 @@ async def test_get_attachment_images_issue_not_found(mock_jira_fetcher):
 
     assert result.structured_content["success"] is False
     assert "MISSING-1" in result.structured_content["error"]
+
+
+class TestCreateIssueLinkErrorHandling:
+    """Regression tests for the create_issue_link error handler.
+
+    The handler previously left `result` unbound whenever the failure was not an
+    issue-level permission restriction, so any other error (a nonexistent issue,
+    an unknown link type, a read timeout) surfaced to the caller as
+    `UnboundLocalError: cannot access local variable 'result'` instead of Jira's
+    real message. It also warned on a successful fallback and returned `null`.
+    """
+
+    @staticmethod
+    def _fetcher():
+        fetcher = MagicMock()
+        fetcher.add_issue_link_via_update.return_value = None
+        return fetcher
+
+    async def _call(self, fetcher):
+        from mcp_atlassian.servers.jira import create_issue_link
+
+        with patch(
+            "mcp_atlassian.servers.jira.get_jira_fetcher",
+            AsyncMock(return_value=fetcher),
+        ):
+            return await create_issue_link.fn(
+                MagicMock(),
+                link_type="Dependent",
+                inward_issue_key="PROJ-2",
+                outward_issue_key="PROJ-1",
+            )
+
+    @pytest.mark.anyio
+    async def test_nonexistent_issue_surfaces_jira_message(self):
+        """The most common masked cause in production."""
+        fetcher = self._fetcher()
+        fetcher.create_issue_link.side_effect = Exception(
+            "Error creating issue link: Issue Does Not Exist"
+        )
+
+        with pytest.raises(Exception) as exc_info:
+            await self._call(fetcher)
+
+        assert "Issue Does Not Exist" in str(exc_info.value)
+        assert not isinstance(exc_info.value, UnboundLocalError)
+        fetcher.add_issue_link_via_update.assert_not_called()
+
+    @pytest.mark.anyio
+    async def test_read_timeout_surfaces_instead_of_unbound_local_error(self):
+        from requests.exceptions import ReadTimeout
+
+        fetcher = self._fetcher()
+        fetcher.create_issue_link.side_effect = ReadTimeout("Read timed out.")
+
+        with pytest.raises(ReadTimeout):
+            await self._call(fetcher)
+
+    @pytest.mark.anyio
+    async def test_permission_error_falls_back_and_returns_real_payload(self):
+        fetcher = self._fetcher()
+        fetcher.create_issue_link.side_effect = Exception(
+            "Permission denied for Jira API (401). Server response: "
+            "{'errorMessages': [\"No Link Issue Permission for issue 'PROJ-2'\"]}"
+        )
+
+        payload = json.loads(await self._call(fetcher))
+
+        assert payload["success"] is True
+        assert payload["method"] == "issue_update_fallback"
+        assert payload["inward_issue"] == "PROJ-2"
+        assert payload["outward_issue"] == "PROJ-1"
+        fetcher.add_issue_link_via_update.assert_called_once_with(
+            "PROJ-1", "Dependent", "inwardIssue", "PROJ-2"
+        )
+
+    @pytest.mark.anyio
+    async def test_successful_fallback_does_not_log_a_failure_warning(self, caplog):
+        fetcher = self._fetcher()
+        fetcher.create_issue_link.side_effect = Exception(
+            "No Link Issue Permission for issue 'PROJ-2'"
+        )
+
+        with caplog.at_level(logging.WARNING):
+            await self._call(fetcher)
+
+        assert "Could not create link" not in caplog.text
+
+    @pytest.mark.anyio
+    async def test_failed_fallback_surfaces_the_fallback_error(self):
+        fetcher = self._fetcher()
+        fetcher.create_issue_link.side_effect = Exception(
+            "No Link Issue Permission for issue 'PROJ-2'"
+        )
+        fetcher.add_issue_link_via_update.side_effect = Exception(
+            "Jira rejected the update: workflow state"
+        )
+
+        with pytest.raises(Exception) as exc_info:
+            await self._call(fetcher)
+
+        assert "workflow state" in str(exc_info.value)
+
+    @pytest.mark.anyio
+    async def test_success_path_is_unchanged(self):
+        fetcher = self._fetcher()
+        fetcher.create_issue_link.return_value = {"success": True, "id": "123"}
+
+        payload = json.loads(await self._call(fetcher))
+
+        assert payload == {"success": True, "id": "123"}
+        fetcher.add_issue_link_via_update.assert_not_called()

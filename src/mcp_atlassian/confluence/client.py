@@ -7,8 +7,10 @@ from atlassian import Confluence
 from requests import Session
 
 from ..exceptions import MCPAtlassianAuthenticationError
+from ..utils.env import get_env_retries
 from ..utils.logging import get_masked_session_headers, log_config_param, mask_sensitive
 from ..utils.oauth import configure_oauth_session
+from ..utils.retry import configure_retries
 from ..utils.ssl import configure_ssl_verification
 from .config import ConfluenceConfig
 
@@ -55,6 +57,7 @@ class ConfluenceClient:
                 session=session,
                 cloud=True,  # OAuth is only for Cloud
                 verify_ssl=self.config.ssl_verify,
+                timeout=self.config.timeout,
             )
         elif self.config.auth_type == "pat":
             logger.debug(
@@ -67,6 +70,7 @@ class ConfluenceClient:
                 token=self.config.personal_token,
                 cloud=self.config.is_cloud,
                 verify_ssl=self.config.ssl_verify,
+                timeout=self.config.timeout,
             )
         else:  # basic auth
             logger.debug(
@@ -81,6 +85,7 @@ class ConfluenceClient:
                 password=self.config.api_token,  # API token is used as password
                 cloud=self.config.is_cloud,
                 verify_ssl=self.config.ssl_verify,
+                timeout=self.config.timeout,
             )
             logger.debug(
                 f"Confluence client initialized. "
@@ -94,6 +99,14 @@ class ConfluenceClient:
             url=self.config.url,
             session=self.confluence._session,
             ssl_verify=self.config.ssl_verify,
+        )
+
+        # Applied after SSL so the retry policy attaches to the adapters
+        # that configuration may have mounted.
+        configure_retries(
+            service_name="Confluence",
+            session=self.confluence._session,
+            retries=get_env_retries(),
         )
 
         # Proxy configuration

@@ -1,6 +1,9 @@
 """Environment variable utility functions for MCP Atlassian."""
 
+import logging
 import os
+
+logger = logging.getLogger("mcp-atlassian.utils.env")
 
 
 def is_env_truthy(env_var_name: str, default: str = "") -> bool:
@@ -49,6 +52,118 @@ def is_env_ssl_verify(env_var_name: str, default: str = "true") -> bool:
         True unless explicitly set to false values
     """
     return os.getenv(env_var_name, default).lower() not in ("false", "0", "no")
+
+
+DEFAULT_HTTP_TIMEOUT_SECONDS = 30
+
+# Atlassian SDK calls are synchronous, so every in-flight tool call occupies one
+# worker thread for its full duration. Python's default executor sizes itself
+# from ``os.cpu_count()``, which inside a container reports the *node's* CPUs
+# rather than the cgroup quota (``os.process_cpu_count()`` only exists on 3.13+).
+# Identical pods therefore get wildly different capacity depending on which node
+# they land on, so the size is pinned explicitly instead.
+DEFAULT_MAX_WORKER_THREADS = 32
+
+# Transient connection drops and stalls against Atlassian Server/Data Center
+# behind corporate proxies surface as one-off tool failures that would succeed
+# on a replay. Retries are applied asymmetrically by method; see
+# ``mcp_atlassian.utils.retry`` for the safety rules.
+DEFAULT_HTTP_RETRIES = 3
+
+
+def _get_positive_int_env(
+    env_var_name: str, default: int, unit: str, minimum: int = 1
+) -> int:
+    """Read a bounded integer from an environment variable.
+
+    Values that are unset, blank, non-numeric, or below ``minimum`` fall back to
+    the default rather than silently disabling the setting.
+
+    Args:
+        env_var_name: Name of the environment variable to read
+        default: Value to use when the variable is unset or invalid
+        unit: Human-readable unit used in warning messages (e.g. "seconds")
+        minimum: Smallest accepted value; use ``0`` where zero is meaningful
+            (for example, to disable retries)
+
+    Returns:
+        An integer greater than or equal to ``minimum``
+    """
+    raw_value = os.getenv(env_var_name)
+    if raw_value is None or not raw_value.strip():
+        return default
+    try:
+        value = int(raw_value)
+    except ValueError:
+        logger.warning(
+            "Invalid %s=%r; expected an integer number of %s. Using %s.",
+            env_var_name,
+            raw_value,
+            unit,
+            default,
+        )
+        return default
+    if value < minimum:
+        logger.warning(
+            "Invalid %s=%r; value must be >= %s. Using %s.",
+            env_var_name,
+            raw_value,
+            minimum,
+            default,
+        )
+        return default
+    return value
+
+
+def get_env_timeout(
+    env_var_name: str, default: int = DEFAULT_HTTP_TIMEOUT_SECONDS
+) -> int:
+    """Read an HTTP timeout (in seconds) from an environment variable.
+
+    Atlassian API calls block a worker thread for their full duration, so an
+    unbounded timeout lets a single slow upstream request stall the server and
+    trip Kubernetes liveness probes. Values that are unset, non-numeric, or
+    non-positive fall back to the default rather than disabling the timeout.
+
+    Args:
+        env_var_name: Name of the environment variable to read
+        default: Timeout to use when the variable is unset or invalid
+
+    Returns:
+        A positive timeout in seconds
+    """
+    return _get_positive_int_env(env_var_name, default, "seconds")
+
+
+def get_max_worker_threads(
+    env_var_name: str = "MCP_MAX_WORKER_THREADS",
+    default: int = DEFAULT_MAX_WORKER_THREADS,
+) -> int:
+    """Read the worker-thread pool size used for blocking Atlassian calls.
+
+    Args:
+        env_var_name: Name of the environment variable to read
+        default: Pool size to use when the variable is unset or invalid
+
+    Returns:
+        A positive worker count
+    """
+    return _get_positive_int_env(env_var_name, default, "threads")
+
+
+def get_env_retries(
+    env_var_name: str = "MCP_HTTP_RETRIES", default: int = DEFAULT_HTTP_RETRIES
+) -> int:
+    """Read how many times a transient HTTP failure may be replayed.
+
+    Args:
+        env_var_name: Name of the environment variable to read
+        default: Retry count to use when the variable is unset or invalid
+
+    Returns:
+        A retry count; ``0`` disables retrying
+    """
+    return _get_positive_int_env(env_var_name, default, "attempts", minimum=0)
 
 
 def get_custom_headers(env_var_name: str) -> dict[str, str]:

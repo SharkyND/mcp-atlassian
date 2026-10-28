@@ -4,7 +4,12 @@ import os
 from dataclasses import dataclass
 from typing import Literal
 
-from ..utils.env import get_custom_headers, is_env_ssl_verify
+from ..utils.env import (
+    DEFAULT_HTTP_TIMEOUT_SECONDS,
+    get_custom_headers,
+    get_env_timeout,
+    is_env_ssl_verify,
+)
 from ..utils.oauth import (
     BYOAccessTokenOAuthConfig,
     OAuthConfig,
@@ -29,6 +34,7 @@ class BitbucketConfig:
     personal_token: str | None = None  # Personal access token (Server/DC)
     oauth_config: OAuthConfig | BYOAccessTokenOAuthConfig | None = None
     ssl_verify: bool = True  # Whether to verify SSL certificates
+    timeout: int = DEFAULT_HTTP_TIMEOUT_SECONDS  # HTTP timeout in seconds
     workspaces_filter: str | None = None  # List of workspace names to filter searches
     http_proxy: str | None = None  # HTTP proxy URL
     https_proxy: str | None = None  # HTTPS proxy URL
@@ -139,6 +145,7 @@ class BitbucketConfig:
             personal_token=personal_token,
             oauth_config=oauth_config,
             ssl_verify=is_env_ssl_verify("BITBUCKET_SSL_VERIFY"),
+            timeout=get_env_timeout("BITBUCKET_TIMEOUT"),
             workspaces_filter=os.getenv("BITBUCKET_WORKSPACES_FILTER"),
             http_proxy=os.getenv("BITBUCKET_HTTP_PROXY", os.getenv("HTTP_PROXY")),
             https_proxy=os.getenv("BITBUCKET_HTTPS_PROXY", os.getenv("HTTPS_PROXY")),

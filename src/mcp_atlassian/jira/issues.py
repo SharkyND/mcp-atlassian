@@ -1,7 +1,9 @@
 """Module for Jira issue operations."""
 
 import logging
+import re
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 from requests.exceptions import HTTPError
@@ -10,6 +12,8 @@ from ..exceptions import MCPAtlassianAuthenticationError
 from ..models.jira import JiraIssue
 from ..models.jira.common import JiraChangelog
 from ..utils import parse_date
+from ..xray.client import XrayClient
+from ..xray.config import XrayConfig
 from .client import JiraClient
 from .constants import DEFAULT_READ_JIRA_FIELDS
 from .protocols import (
@@ -17,11 +21,56 @@ from .protocols import (
     EpicOperationsProto,
     FieldsOperationsProto,
     IssueOperationsProto,
+    LinksOperationsProto,
     ProjectsOperationsProto,
     UsersOperationsProto,
 )
 
 logger = logging.getLogger("mcp-jira")
+
+# Standard (non-custom) fields that are safe to copy verbatim from a source
+# issue's raw API response when cloning, since Jira accepts the same object
+# shape on issue creation as it returns on retrieval for these fields.
+_CLONABLE_STANDARD_FIELDS: tuple[str, ...] = (
+    "priority",
+    "labels",
+    "components",
+    "fixVersions",
+    "versions",
+    "assignee",
+    "duedate",
+    "security",
+    "environment",
+)
+
+# Custom field types that are serialized differently on GET vs. what the
+# create/update API accepts, keyed by their `schema.custom` identifier, so
+# clone_issue can reshape known offenders instead of copying them verbatim.
+_SPRINT_CUSTOM_FIELD_TYPE = "com.pyxis.greenhopper.jira:gh-sprint"
+_MULTISELECT_CUSTOM_FIELD_TYPE = (
+    "com.atlassian.jira.plugin.system.customfieldtypes:multiselect"
+)
+_XRAY_TEST_EXECUTION_TESTS_CUSTOM_FIELD_TYPE = (
+    "com.xpandit.plugins.xray:testexec-tests-custom-field"
+)
+_SPRINT_ID_PATTERN = re.compile(r"id=(\d+)")
+
+# Fields that must never be dropped by the create-time fallback, since doing
+# so would either break the clone's identity or silently change its target.
+_NON_DROPPABLE_FIELDS = frozenset({"project", "summary", "issuetype"})
+
+# Substring of the error Jira raises from the issue-link endpoint when the
+# other linked issue's state (e.g. closed) restricts linking, even for users
+# who otherwise have the "Link Issues" permission.
+_NO_LINK_ISSUE_PERMISSION = "no link issue permission"
+
+# Issue links must be created one API call at a time: Jira rejects a batched
+# update with "Too many operations (N) provided for field 'issuelinks'. We
+# support at most 1 operation for this field." Cloning an issue with many links
+# therefore needs concurrency rather than batching. Kept deliberately modest so
+# a clone does not flood Jira Server/Data Center, and because each worker holds
+# a connection from the shared session pool for the call's duration.
+_LINK_COPY_MAX_WORKERS = 4
 
 
 class IssuesMixin(
@@ -30,6 +79,7 @@ class IssuesMixin(
     EpicOperationsProto,
     FieldsOperationsProto,
     IssueOperationsProto,
+    LinksOperationsProto,
     ProjectsOperationsProto,
     UsersOperationsProto,
 ):
@@ -214,9 +264,13 @@ class IssuesMixin(
                 401,
                 403,
             ]:
+                detail = self._extract_error_detail(http_err)
                 error_msg = (
-                    f"Authentication failed for Jira API ({http_err.response.status_code}). "
-                    "Token may be expired or invalid. Please verify credentials."
+                    f"Authentication failed for Jira API "
+                    f"({http_err.response.status_code}). "
+                    "Token may be expired or invalid, or the account may lack "
+                    "permission for this issue. "
+                    f"Server response: {detail}"
                 )
                 logger.error(error_msg)
                 raise MCPAtlassianAuthenticationError(error_msg) from http_err
@@ -652,6 +706,1166 @@ class IssuesMixin(
             self._handle_create_issue_error(e, issue_type)
             raise  # Re-raise after logging
 
+    def _get_create_screen_field_ids(
+        self, project_key: str, issue_type_name: str
+    ) -> set[str] | None:
+        """
+        Get the field IDs available on the create screen for a project and
+        issue type, used to pre-verify fields before cloning.
+
+        Args:
+            project_key: The target project key
+            issue_type_name: The issue type name to resolve to an ID
+
+        Returns:
+            Set of field IDs available for creation, or None if the create
+            screen metadata could not be determined (callers should then skip
+            filtering rather than fail the clone).
+        """
+        try:
+            issue_type_id = None
+            for issue_type in self.get_project_issue_types(project_key):
+                if issue_type.get("name", "").lower() == issue_type_name.lower():
+                    issue_type_id = issue_type.get("id")
+                    break
+            if not issue_type_id:
+                logger.warning(
+                    f"Issue type '{issue_type_name}' not found in project "
+                    f"'{project_key}'; skipping create-screen field verification"
+                )
+                return None
+
+            meta = self.jira.issue_createmeta_fieldtypes(
+                project=project_key, issue_type_id=issue_type_id
+            )
+            if (
+                not isinstance(meta, dict)
+                or not isinstance(meta.get("fields"), list)
+                and not isinstance(meta.get("values"), list)
+            ):
+                logger.warning(
+                    f"Unexpected createmeta response for project '{project_key}' "
+                    f"issue type '{issue_type_name}'; skipping field verification"
+                )
+                return None
+
+            return {
+                field_meta["fieldId"]
+                for field_meta in meta.get("fields") or meta.get("values", [])
+                if isinstance(field_meta, dict) and field_meta.get("fieldId")
+            }
+        except Exception as e:  # noqa: BLE001 - field verification is best-effort
+            logger.warning(
+                f"Could not retrieve create screen fields for project "
+                f"'{project_key}' issue type '{issue_type_name}': {e!s}"
+            )
+            return None
+
+    def _get_cloners_link_roles(
+        self, source_issue_key: str, new_issue_key: str
+    ) -> tuple[dict[str, str], dict[str, str]]:
+        """
+        Determine which side of the "Cloners" issue link (inward vs. outward)
+        the new clone should take.
+
+        Verified directly against the Jira REST API (not just the inward/
+        outward text on the link type): the clone must be the inwardIssue
+        and the source issue the outwardIssue for the link to render
+        correctly ("Clones (out)" on the clone, "Is cloned by (in)" on the
+        source).
+
+        Args:
+            source_issue_key: The key of the original issue being cloned
+            new_issue_key: The key of the newly created clone
+
+        Returns:
+            A ``(inwardIssue, outwardIssue)`` tuple of ``{"key": ...}`` dicts
+            ready to use in the ``create_issue_link`` payload
+        """
+        return {"key": new_issue_key}, {"key": source_issue_key}
+
+    def _copy_issue_links(
+        self,
+        source_issue_key: str,
+        new_issue_key: str,
+        source_links: list[dict[str, Any]],
+    ) -> None:
+        """
+        Re-create each of the source issue's issue links (other than the
+        "Cloners" link, which is handled separately) on the newly created
+        clone, preserving link type and direction relative to the linked
+        issue.
+
+        Jira accepts at most one ``issuelinks`` operation per request, so the
+        links cannot be batched into a single call. They are instead created
+        over a small thread pool, which keeps a clone with many links from
+        taking one round trip per link end to end.
+
+        Best-effort: a failure copying one link does not stop the others or
+        fail the clone, matching the existing "Cloners" link behavior.
+
+        Args:
+            source_issue_key: The key of the issue that was cloned
+            new_issue_key: The key of the newly created clone
+            source_links: The source issue's raw ``issuelinks`` field entries
+        """
+        planned_links = self._plan_issue_link_copies(new_issue_key, source_links)
+        if not planned_links:
+            return
+
+        max_workers = min(_LINK_COPY_MAX_WORKERS, len(planned_links))
+        with ThreadPoolExecutor(
+            max_workers=max_workers, thread_name_prefix="clone-link"
+        ) as executor:
+            futures = [
+                executor.submit(
+                    self._copy_single_issue_link,
+                    source_issue_key,
+                    new_issue_key,
+                    *planned_link,
+                )
+                for planned_link in planned_links
+            ]
+            for future in as_completed(futures):
+                try:
+                    future.result()
+                except Exception as unexpected:  # noqa: BLE001 - best-effort
+                    # _copy_single_issue_link handles its own errors, so this
+                    # only trips on an unexpected bug; never fail the clone.
+                    logger.warning(
+                        f"Cloned {source_issue_key} to {new_issue_key} but an issue "
+                        f"link copy failed unexpectedly: {unexpected!s}"
+                    )
+
+    def _plan_issue_link_copies(
+        self, new_issue_key: str, source_links: list[dict[str, Any]]
+    ) -> list[tuple[str, str, str, dict[str, Any]]]:
+        """
+        Work out which issue links to re-create on the clone, and with what
+        payload, without performing any API calls.
+
+        Separated from the copying itself so the ordering-sensitive parsing
+        stays sequential and deterministic while only the network calls run
+        concurrently.
+
+        Args:
+            new_issue_key: The key of the newly created clone
+            source_links: The source issue's raw ``issuelinks`` field entries
+
+        Returns:
+            A list of ``(link_type_name, other_field, other_key, link_data)``
+            tuples ready to pass to ``_copy_single_issue_link``
+        """
+        planned_links: list[tuple[str, str, str, dict[str, Any]]] = []
+        for link in source_links:
+            if not isinstance(link, dict):
+                continue
+            link_type_name = (link.get("type") or {}).get("name")
+            if not link_type_name or link_type_name.lower() == "cloners":
+                continue
+
+            outward_issue = link.get("outwardIssue")
+            inward_issue = link.get("inwardIssue")
+            if outward_issue and outward_issue.get("key"):
+                # Source issue was the inward side; the clone takes the
+                # same inward role relative to the other linked issue.
+                other_field, other_key = "outwardIssue", outward_issue["key"]
+            elif inward_issue and inward_issue.get("key"):
+                # Source issue was the outward side; the clone takes the
+                # same outward role relative to the other linked issue.
+                other_field, other_key = "inwardIssue", inward_issue["key"]
+            else:
+                continue
+
+            link_data = {
+                "type": {"name": link_type_name},
+                "inwardIssue": {
+                    "key": new_issue_key if other_field == "outwardIssue" else other_key
+                },
+                "outwardIssue": {
+                    "key": other_key if other_field == "outwardIssue" else new_issue_key
+                },
+            }
+            planned_links.append((link_type_name, other_field, other_key, link_data))
+        return planned_links
+
+    def _copy_single_issue_link(
+        self,
+        source_issue_key: str,
+        new_issue_key: str,
+        link_type_name: str,
+        other_field: str,
+        other_key: str,
+        link_data: dict[str, Any],
+    ) -> None:
+        """
+        Create one of the clone's copied issue links, falling back to the
+        update-issue endpoint when Jira reports an issue-level "Link Issue"
+        permission restriction.
+
+        Never raises: each link is best-effort so one failure neither stops
+        the other links nor fails the clone.
+
+        Args:
+            source_issue_key: The key of the issue that was cloned
+            new_issue_key: The key of the newly created clone
+            link_type_name: The issue link type's name (e.g. "Blocks")
+            other_field: Either "inwardIssue" or "outwardIssue" -- whichever
+                field holds the *other* linked issue
+            other_key: The other linked issue's key
+            link_data: The ``create_issue_link`` payload for this link
+        """
+        try:
+            self.create_issue_link(link_data)
+        except Exception as link_error:  # noqa: BLE001 - link copying is best-effort
+            if _NO_LINK_ISSUE_PERMISSION in str(link_error).lower():
+                try:
+                    self.add_issue_link_via_update(
+                        new_issue_key, link_type_name, other_field, other_key
+                    )
+                    return
+                except Exception as fallback_error:  # noqa: BLE001 - best-effort
+                    link_error = fallback_error
+            logger.warning(
+                f"Cloned {source_issue_key} to {new_issue_key} but could not copy "
+                f"'{link_type_name}' link to {other_key}: {link_error!s}"
+            )
+
+    def add_issue_link_via_update(
+        self,
+        issue_key: str,
+        link_type_name: str,
+        other_field: str,
+        other_key: str,
+    ) -> None:
+        """
+        Add an issue link via the update-issue endpoint as a fallback for the
+        dedicated issue-link endpoint's "No Link Issue Permission" error.
+
+        Jira's issue-link endpoint enforces "Link Issues" permission on both
+        linked issues and rejects the request (401/403 "No Link Issue
+        Permission") when the other issue's state (e.g. closed) restricts it,
+        even for otherwise-permitted users. Updating the ``issuelinks`` field
+        via the update-issue endpoint only enforces that permission against
+        the issue being updated, so linking the clone this way succeeds where
+        the direct call did not.
+
+        Args:
+            issue_key: The issue to update (the clone); its "add" action
+                creates the link
+            link_type_name: The issue link type's name (e.g. "Tests")
+            other_field: Either "inwardIssue" or "outwardIssue" -- whichever
+                field held the *other* linked issue in the failed direct
+                attempt
+            other_key: The other linked issue's key
+        """
+        self.jira.update_issue(
+            issue_key,
+            {
+                "update": {
+                    "issuelinks": [
+                        {
+                            "add": {
+                                "type": {"name": link_type_name},
+                                other_field: {"key": other_key},
+                            }
+                        }
+                    ]
+                }
+            },
+        )
+
+    def _copy_issue_comments(self, source_issue_key: str, new_issue_key: str) -> None:
+        """Copy Jira issue comment bodies to a cloned Xray issue."""
+        try:
+            response = self.jira.issue_get_comments(source_issue_key)
+            if not isinstance(response, dict):
+                logger.warning(
+                    "Could not copy Jira comments from %s: unexpected response type %s",
+                    source_issue_key,
+                    type(response).__name__,
+                )
+                return
+            comments = response.get("comments")
+            if not isinstance(comments, list):
+                return
+            for comment in comments:
+                if not isinstance(comment, dict):
+                    continue
+                body = comment.get("body")
+                if not isinstance(body, str) or not body:
+                    continue
+                try:
+                    self.jira.issue_add_comment(new_issue_key, body)
+                except Exception as comment_error:  # noqa: BLE001 - best-effort copy
+                    logger.warning(
+                        "Could not copy Jira comment %s from %s to %s: %s",
+                        comment.get("id", "unknown"),
+                        source_issue_key,
+                        new_issue_key,
+                        comment_error,
+                    )
+        except Exception as comments_error:  # noqa: BLE001 - best-effort copy
+            logger.warning(
+                "Cloned %s to %s without Jira comments: %s",
+                source_issue_key,
+                new_issue_key,
+                comments_error,
+            )
+
+    def _copy_xray_test_runs(self, source_test_key: str, new_test_key: str) -> None:
+        """Create Test Runs for a cloned Xray Test in its source executions.
+
+        For each Test Run this creates, writable run-level data is copied via
+        Xray REST API v1. Step status, comment, and actual result are copied
+        via REST API v2, matching steps by index because IDs differ between
+        runs. Xray derives the new run's overall status from its step results.
+        Tests with no steps fall back to copying a final overall status.
+        Execution identity and timestamps are readable but system-managed.
+        """
+        try:
+            xray_config = XrayConfig.from_jira_config(self.config)
+            xray_client = XrayClient(xray_config)
+            test_executions = xray_client.xray.get_test_executions(source_test_key)
+            if not isinstance(test_executions, list):
+                logger.warning(
+                    "Could not copy Xray Test Runs from %s: unexpected Test "
+                    "Execution response type %s",
+                    source_test_key,
+                    type(test_executions).__name__,
+                )
+                return
+
+            final_statuses = self._get_final_xray_test_statuses(xray_client)
+
+            for test_execution in test_executions:
+                if not isinstance(test_execution, dict):
+                    continue
+                test_execution_key = test_execution.get("key")
+                if not isinstance(test_execution_key, str) or not test_execution_key:
+                    continue
+
+                source_run = None
+                try:
+                    source_run = self._find_xray_test_run(
+                        xray_client, source_test_key, test_execution_key
+                    )
+                except Exception as lookup_error:  # noqa: BLE001 - best-effort copy
+                    logger.warning(
+                        "Could not look up source Xray Test Run for %s in Test "
+                        "Execution %s: %s",
+                        source_test_key,
+                        test_execution_key,
+                        lookup_error,
+                    )
+
+                try:
+                    xray_client.xray.update_test_execution(
+                        test_execution_key, add=[new_test_key]
+                    )
+                except Exception as test_run_error:  # noqa: BLE001 - best-effort copy
+                    logger.warning(
+                        "Cloned %s to %s but could not create a fresh Xray Test Run "
+                        "in Test Execution %s: %s",
+                        source_test_key,
+                        new_test_key,
+                        test_execution_key,
+                        test_run_error,
+                    )
+                    continue
+
+                if not source_run:
+                    continue
+
+                try:
+                    new_run = self._find_xray_test_run(
+                        xray_client, new_test_key, test_execution_key
+                    )
+                except Exception as lookup_error:  # noqa: BLE001 - best-effort copy
+                    logger.warning(
+                        "Created a fresh Xray Test Run in Test Execution %s but "
+                        "could not look it up to copy source data: %s",
+                        test_execution_key,
+                        lookup_error,
+                    )
+                    continue
+
+                if new_run:
+                    self._copy_xray_test_run_data(
+                        xray_client, source_run, new_run, final_statuses
+                    )
+        except Exception as xray_error:  # noqa: BLE001 - Xray may not be configured
+            logger.warning(
+                "Cloned %s to %s without Xray Test Runs: %s",
+                source_test_key,
+                new_test_key,
+                xray_error,
+            )
+
+    def _get_xray_test_runs_in_execution(
+        self, xray_client: XrayClient, test_execution_key: str
+    ) -> list[dict[str, Any]]:
+        """Retrieve every Test Run in an execution across Xray pages."""
+        runs: list[dict[str, Any]] = []
+        page = 1
+        limit = 100
+        while True:
+            page_runs = xray_client.get_test_runs_in_context(
+                test_exec_key=test_execution_key,
+                limit=limit,
+                page=page,
+            )
+            if not isinstance(page_runs, list):
+                logger.warning(
+                    "Could not copy Xray Test Runs from Test Execution %s: "
+                    "unexpected response type %s",
+                    test_execution_key,
+                    type(page_runs).__name__,
+                )
+                break
+            runs.extend(run for run in page_runs if isinstance(run, dict))
+            if len(page_runs) < limit:
+                break
+            page += 1
+        return runs
+
+    def _copy_xray_test_execution_runs(
+        self, source_execution_key: str, new_execution_key: str
+    ) -> None:
+        """Recreate a cloned Test Execution's Tests and writable run data."""
+        try:
+            xray_config = XrayConfig.from_jira_config(self.config)
+            xray_client = XrayClient(xray_config)
+            source_runs = self._get_xray_test_runs_in_execution(
+                xray_client, source_execution_key
+            )
+            test_keys = list(
+                dict.fromkeys(
+                    run["testKey"]
+                    for run in source_runs
+                    if isinstance(run.get("testKey"), str) and run["testKey"]
+                )
+            )
+            if not test_keys:
+                return
+
+            xray_client.xray.update_test_execution(new_execution_key, add=test_keys)
+            new_runs = self._get_xray_test_runs_in_execution(
+                xray_client, new_execution_key
+            )
+            unmatched_new_runs = list(new_runs)
+            final_statuses = self._get_final_xray_test_statuses(xray_client)
+
+            for source_run_summary in source_runs:
+                test_key = source_run_summary.get("testKey")
+                if not isinstance(test_key, str) or not test_key:
+                    continue
+                source_environments = sorted(
+                    source_run_summary.get("testEnvironments") or []
+                )
+                match_index = next(
+                    (
+                        index
+                        for index, candidate in enumerate(unmatched_new_runs)
+                        if candidate.get("testKey") == test_key
+                        and sorted(candidate.get("testEnvironments") or [])
+                        == source_environments
+                    ),
+                    None,
+                )
+                if match_index is None:
+                    match_index = next(
+                        (
+                            index
+                            for index, candidate in enumerate(unmatched_new_runs)
+                            if candidate.get("testKey") == test_key
+                        ),
+                        None,
+                    )
+                if match_index is None:
+                    logger.warning(
+                        "Created Test Execution %s but could not find its fresh "
+                        "Test Run for %s",
+                        new_execution_key,
+                        test_key,
+                    )
+                    continue
+
+                new_run_summary = unmatched_new_runs.pop(match_index)
+                source_run_id = source_run_summary.get("id")
+                new_run_id = new_run_summary.get("id")
+                if not isinstance(source_run_id, int) or not isinstance(
+                    new_run_id, int
+                ):
+                    continue
+                try:
+                    source_run = xray_client.xray.get_test_run(source_run_id)
+                    new_run = xray_client.xray.get_test_run(new_run_id)
+                    if isinstance(source_run, dict) and isinstance(new_run, dict):
+                        self._copy_xray_test_run_data(
+                            xray_client,
+                            source_run,
+                            new_run,
+                            final_statuses,
+                        )
+                except Exception as run_error:  # noqa: BLE001 - best-effort copy
+                    logger.warning(
+                        "Could not copy Xray Test Run %s to fresh run %s in %s: %s",
+                        source_run_id,
+                        new_run_id,
+                        new_execution_key,
+                        run_error,
+                    )
+        except Exception as xray_error:  # noqa: BLE001 - Xray may not be configured
+            logger.warning(
+                "Cloned Test Execution %s to %s without Xray Test Runs: %s",
+                source_execution_key,
+                new_execution_key,
+                xray_error,
+            )
+
+    def _get_final_xray_test_statuses(self, xray_client: XrayClient) -> set[str]:
+        """Get the Xray Test status names marked as final (e.g. PASS/FAIL).
+
+        Only final statuses can be set directly on a step-less Test Run via
+        the Xray v1 REST API; intermediate statuses like EXECUTING are
+        computed by Xray from step results and rejected (HTTP 400) if set
+        directly.
+        """
+        try:
+            statuses = xray_client.xray.get_test_statuses()
+            if isinstance(statuses, list):
+                return {
+                    status["name"]
+                    for status in statuses
+                    if isinstance(status, dict)
+                    and status.get("final")
+                    and status.get("name")
+                }
+        except Exception as status_error:  # noqa: BLE001 - best-effort copy
+            logger.debug("Could not fetch Xray Test statuses: %s", status_error)
+        return {"PASS", "FAIL"}
+
+    def _find_xray_test_run(
+        self, xray_client: XrayClient, test_key: str, test_execution_key: str
+    ) -> dict[str, Any] | None:
+        """Find a Test's Xray Test Run within a specific Test Execution.
+
+        Args:
+            xray_client: The Xray client to query
+            test_key: The Test issue key
+            test_execution_key: The Test Execution issue key to match
+
+        Returns:
+            The matching Test Run dict from ``get_test_runs`` (includes its
+            ``steps``), or None if the Test has no run in that execution yet.
+        """
+        test_runs = xray_client.xray.get_test_runs(test_key)
+        if not isinstance(test_runs, list):
+            return None
+        for test_run in test_runs:
+            if (
+                isinstance(test_run, dict)
+                and test_run.get("testExecKey") == test_execution_key
+            ):
+                return test_run
+        return None
+
+    def _copy_xray_test_run_data(
+        self,
+        xray_client: XrayClient,
+        source_run: dict[str, Any],
+        new_run: dict[str, Any],
+        final_statuses: set[str],
+    ) -> None:
+        """Replicate a source Test Run's writable data onto a new Test Run.
+
+        Comment, defects, and assignee are copied first. Step status, comment,
+        and actual result are then copied by matching each source step to the
+        new run's step index, since step IDs differ between runs. Xray derives
+        the new run's overall status from these step updates. If the test has
+        no steps, a final source status is copied directly instead.
+
+        Args:
+            xray_client: The Xray client to use for the update calls
+            source_run: The source Test's Test Run (from ``get_test_runs``)
+            new_run: The cloned Test's fresh Test Run to update
+            final_statuses: Status names Xray allows setting directly on a
+                step-less run
+        """
+        new_run_id = new_run.get("id")
+        if not isinstance(new_run_id, int):
+            return
+
+        comment = source_run.get("comment")
+        if comment:
+            try:
+                xray_client.xray.update_test_run_comment(new_run_id, comment)
+            except Exception as error:  # noqa: BLE001 - best-effort field copy
+                logger.warning(
+                    "Could not copy Test Run comment to run %s: %s",
+                    new_run_id,
+                    error,
+                )
+
+        defects = source_run.get("defects")
+        if defects:
+            try:
+                xray_client.xray.update_test_run_defects(new_run_id, add=list(defects))
+            except Exception as error:  # noqa: BLE001 - best-effort field copy
+                logger.warning(
+                    "Could not copy Test Run defects to run %s: %s",
+                    new_run_id,
+                    error,
+                )
+
+        assignee = source_run.get("assignee")
+        if assignee:
+            try:
+                xray_client.xray.update_test_run_assignee(new_run_id, assignee)
+            except Exception as error:  # noqa: BLE001 - best-effort field copy
+                logger.warning(
+                    "Could not copy Test Run assignee to run %s: %s",
+                    new_run_id,
+                    error,
+                )
+
+        source_steps = source_run.get("steps")
+        new_steps = new_run.get("steps")
+        if (
+            isinstance(source_steps, list)
+            and source_steps
+            and isinstance(new_steps, list)
+            and new_steps
+        ):
+            self._copy_xray_test_run_steps(
+                xray_client, new_run_id, source_steps, new_steps
+            )
+        else:
+            status = source_run.get("status")
+            if status and status in final_statuses:
+                try:
+                    xray_client.xray.update_test_run_status(new_run_id, status)
+                except Exception as error:  # noqa: BLE001 - best-effort field copy
+                    logger.warning(
+                        "Could not copy Test Run status to run %s: %s",
+                        new_run_id,
+                        error,
+                    )
+
+    def _copy_xray_test_run_steps(
+        self,
+        xray_client: XrayClient,
+        new_run_id: int,
+        source_steps: list[Any],
+        new_steps: list[Any],
+    ) -> None:
+        """Copy writable source step results onto a new Test Run's steps.
+
+        Steps are matched by ``index`` because step IDs differ between runs.
+        Xray derives the new run's overall status from these updates.
+
+        Args:
+            xray_client: The Xray client to use for the update calls
+            new_run_id: ID of the new Test Run to update
+            source_steps: The source Test Run's ``steps`` list
+            new_steps: The new Test Run's ``steps`` list
+        """
+        new_steps_by_index = {
+            step.get("index"): step
+            for step in new_steps
+            if isinstance(step, dict) and step.get("index") is not None
+        }
+        for source_step in source_steps:
+            if not isinstance(source_step, dict):
+                continue
+            new_step = new_steps_by_index.get(source_step.get("index"))
+            if not isinstance(new_step, dict):
+                continue
+            status = source_step.get("status")
+            new_step_id = new_step.get("id")
+            comment = self._get_xray_step_text(source_step, "comment")
+            actual_result = self._get_xray_step_text(source_step, "actualResult")
+            copied_status = status if status and status != "TODO" else None
+            if not isinstance(new_step_id, int) or not any(
+                (copied_status, comment, actual_result)
+            ):
+                continue
+            try:
+                xray_client.update_test_run_step(
+                    new_run_id,
+                    new_step_id,
+                    status=copied_status,
+                    comment=comment,
+                    actual_result=actual_result,
+                )
+            except Exception as error:  # noqa: BLE001 - best-effort field copy
+                logger.warning(
+                    "Could not copy step %s result to run %s: %s",
+                    new_step_id,
+                    new_run_id,
+                    error,
+                )
+
+    def _get_xray_step_text(self, step: dict[str, Any], field_name: str) -> str | None:
+        """Extract writable raw text from an Xray step response field."""
+        value = step.get(field_name)
+        if isinstance(value, str):
+            return value or None
+        if isinstance(value, dict):
+            raw_value = value.get("raw")
+            if isinstance(raw_value, str):
+                return raw_value or None
+        return None
+
+    def clone_issue(
+        self,
+        issue_key: str,
+        project_key: str | None = None,
+        summary: str | None = None,
+        *,
+        include_custom_fields: bool = True,
+        link_to_original: bool = True,
+        include_links: bool = True,
+        additional_fields: dict[str, Any] | None = None,
+    ) -> JiraIssue:
+        """
+        Clone an existing Jira issue by copying its fields into a newly created issue.
+
+        Jira Server, Data Center, and Cloud do not expose a single "clone issue"
+        REST endpoint. The built-in Clone action in the Jira UI is implemented
+        client-side as a sequence of calls: fetch the source issue, create a new
+        issue with the copied field values, and link the two issues together with
+        a "Cloners" issue link. This method reproduces that behavior.
+
+        Standard fields copied from the source issue: summary (prefixed with
+        "CLONE - " unless overridden), description, issue type, priority, labels,
+        components, fix versions, affects versions, assignee, due date, security
+        level, and environment. All populated custom fields (``customfield_*``)
+        are also copied unless ``include_custom_fields`` is False. If the source
+        issue is a subtask, its parent is preserved when cloning into the same
+        project.
+
+        Before copying, each standard and custom field is pre-verified against
+        the target project/issue type's create screen metadata. Fields that are
+        not available on the create screen are skipped instead of failing the
+        whole clone; their IDs are returned under the
+        ``clone_excluded_fields`` key of the resulting issue's ``custom_fields``.
+        For Xray ``Test`` issues, the clone is also added to each Test Execution
+        associated with the source. For Xray ``Test Execution`` issues, all
+        associated Tests are added to the cloned execution. Both paths create
+        fresh Test Runs whose writable run data and step status/comment/actual
+        result are copied. Xray derives each new run's overall status from its
+        steps. Run IDs, timestamps, executors, and evidence are system-managed
+        or unsupported by the available API and cannot be preserved.
+        If the create screen metadata cannot be determined, pre-verification is
+        skipped and all populated fields are copied as before.
+
+        Custom fields whose write shape differs from their read shape are
+        reshaped before copying; currently this covers the Sprint field
+        (``com.pyxis.greenhopper.jira:gh-sprint``), which Jira returns as
+        sprint objects/strings but only accepts as a plain integer sprint
+        ID on create. As a further safety net, if Jira still rejects a field
+        at creation time with a per-field 400 error, that field is dropped and
+        creation is retried automatically instead of failing the whole clone.
+
+        Args:
+            issue_key: The key of the issue to clone (e.g., 'PROJ-123')
+            project_key: Target project key. Defaults to the source issue's project.
+            summary: Summary for the clone. Defaults to "CLONE - <source summary>".
+            include_custom_fields: Whether to copy populated custom fields.
+            link_to_original: Whether to create a "Cloners" issue link back to the
+                source issue after the clone is created.
+            include_links: Whether to re-create the source issue's other issue
+                links (e.g. "blocks", "relates to") on the clone, preserving
+                their type and direction relative to each linked issue.
+            additional_fields: Optional dictionary of fields to override or add on
+                top of the fields copied from the source issue. Xray-managed Test
+                Run association fields are ignored; other fields are applied
+                verbatim without create-screen field verification.
+
+        Returns:
+            JiraIssue model representing the newly created clone. If any fields
+            were excluded because they are not on the target create screen,
+            their IDs are listed under
+            ``custom_fields["clone_excluded_fields"]``.
+
+        Raises:
+            ValueError: If the issue key is missing, the source issue has no
+                fields, a target project cannot be determined, or a subtask has
+                no parent to preserve
+            MCPAtlassianAuthenticationError: If authentication fails with the
+                Jira API (401/403)
+            Exception: If there is an error cloning the issue
+        """
+        if not issue_key:
+            raise ValueError("Issue key is required")
+
+        try:
+            # Obtain the projects filter from the config, same restriction
+            # applied by get_issue. This should NOT be overridden by the request.
+            filter_to_use = self.config.projects_filter
+            if filter_to_use:
+                projects = [p.strip() for p in filter_to_use.split(",")]
+                issue_key_project = issue_key.split("-")[0]
+                if issue_key_project not in projects:
+                    msg = (
+                        "Issue with project prefix "
+                        f"'{issue_key_project}' are restricted by configuration"
+                    )
+                    raise ValueError(msg)
+
+            source_response = self.jira.get_issue(issue_key, fields="*all,issuelinks")
+            if not isinstance(source_response, dict):
+                msg = (
+                    "Unexpected return value type from `jira.get_issue`: "
+                    f"{type(source_response)}"
+                )
+                logger.error(msg)
+                raise TypeError(msg)
+
+            source_fields = source_response.get("fields") or {}
+            if not source_fields:
+                msg = f"Issue {issue_key} has no fields to clone"
+                raise ValueError(msg)
+
+            source_project_key = (source_fields.get("project") or {}).get("key")
+            target_project_key = project_key or source_project_key
+            if not target_project_key:
+                msg = (
+                    "Could not determine a target project for cloning issue "
+                    f"{issue_key}"
+                )
+                raise ValueError(msg)
+
+            source_issue_type = (source_fields.get("issuetype") or {}).get("name")
+            if not source_issue_type:
+                msg = f"Issue {issue_key} has no issue type"
+                raise ValueError(msg)
+
+            new_fields: dict[str, Any] = {
+                "project": {"key": target_project_key},
+                "summary": summary
+                if summary
+                else f"CLONE - {source_fields.get('summary', '')}",
+                "issuetype": {"name": source_issue_type},
+            }
+
+            if source_fields.get("description") is not None:
+                new_fields["description"] = source_fields["description"]
+
+            # Pre-verify fields against the target create screen so unsupported
+            # fields are excluded individually instead of failing the clone.
+            allowed_field_ids = self._get_create_screen_field_ids(
+                target_project_key, source_issue_type
+            )
+            excluded_fields: list[str] = []
+
+            for field_key in _CLONABLE_STANDARD_FIELDS:
+                value = source_fields.get(field_key)
+                if not value:
+                    continue
+                if allowed_field_ids is not None and field_key not in allowed_field_ids:
+                    excluded_fields.append(field_key)
+                    continue
+                new_fields[field_key] = value
+
+            # Subtasks must keep their parent when cloned into the same project
+            parent = source_fields.get("parent")
+            if parent and target_project_key == source_project_key:
+                new_fields["parent"] = {"key": parent["key"]}
+            elif source_issue_type.lower() in ("subtask", "sub-task") and not parent:
+                msg = (
+                    f"Issue {issue_key} is a subtask without a parent "
+                    "and cannot be cloned"
+                )
+                raise ValueError(msg)
+
+            if include_custom_fields:
+                for field_id, value in source_fields.items():
+                    if (
+                        not field_id.startswith("customfield_")
+                        or value is None
+                        or field_id in new_fields
+                    ):
+                        continue
+                    if (
+                        allowed_field_ids is not None
+                        and field_id not in allowed_field_ids
+                    ):
+                        excluded_fields.append(field_id)
+                        continue
+                    normalized_value = self._normalize_custom_field_for_clone(
+                        field_id, value
+                    )
+                    if normalized_value is None:
+                        excluded_fields.append(field_id)
+                        continue
+                    new_fields[field_id] = normalized_value
+
+            if excluded_fields:
+                logger.warning(
+                    f"Excluded fields not on the create screen for project "
+                    f"'{target_project_key}' issue type '{source_issue_type}' "
+                    f"when cloning {issue_key}: {', '.join(sorted(excluded_fields))}"
+                )
+
+            if additional_fields:
+                for field_id, value in additional_fields.items():
+                    if (
+                        field_id.startswith("customfield_")
+                        and self._get_custom_field_type(field_id)
+                        == _XRAY_TEST_EXECUTION_TESTS_CUSTOM_FIELD_TYPE
+                    ):
+                        excluded_fields.append(field_id)
+                        continue
+                    new_fields[field_id] = value
+
+            new_issue_key = self._create_issue_with_field_fallback(
+                new_fields, excluded_fields
+            )
+
+            if link_to_original:
+                try:
+                    inward_issue, outward_issue = self._get_cloners_link_roles(
+                        issue_key, new_issue_key
+                    )
+                    self.create_issue_link(
+                        {
+                            "type": {"name": "Cloners"},
+                            "inwardIssue": inward_issue,
+                            "outwardIssue": outward_issue,
+                        }
+                    )
+                except Exception as link_error:  # noqa: BLE001 - linking is best-effort
+                    logger.warning(
+                        f"Cloned {issue_key} to {new_issue_key} but could not create "
+                        f"'Cloners' link: {link_error!s}"
+                    )
+
+            if include_links:
+                self._copy_issue_links(
+                    issue_key, new_issue_key, source_fields.get("issuelinks") or []
+                )
+
+            if source_issue_type.lower() == "test":
+                self._copy_xray_test_runs(issue_key, new_issue_key)
+            elif source_issue_type.lower() == "test execution":
+                self._copy_xray_test_execution_runs(issue_key, new_issue_key)
+
+            if source_issue_type.lower() in {"test", "test execution"}:
+                self._copy_issue_comments(issue_key, new_issue_key)
+
+            issue_data = self.jira.get_issue(new_issue_key)
+            if not isinstance(issue_data, dict):
+                msg = (
+                    "Unexpected return value type from `jira.get_issue`: "
+                    f"{type(issue_data)}"
+                )
+                logger.error(msg)
+                raise TypeError(msg)
+            cloned_issue = JiraIssue.from_api_response(issue_data)
+            if excluded_fields:
+                cloned_issue.custom_fields["clone_excluded_fields"] = sorted(
+                    set(excluded_fields)
+                )
+            return cloned_issue
+
+        except HTTPError as http_err:
+            if http_err.response is not None and http_err.response.status_code in [
+                401,
+                403,
+            ]:
+                detail = self._extract_error_detail(http_err)
+                error_msg = (
+                    "Authentication failed for Jira API "
+                    f"({http_err.response.status_code}). "
+                    "Token may be expired or invalid, or the account may lack "
+                    "permission for this issue. "
+                    f"Server response: {detail}"
+                )
+                logger.error(error_msg)
+                raise MCPAtlassianAuthenticationError(error_msg) from http_err
+            logger.error(f"HTTP error while cloning issue {issue_key}: {http_err}")
+            raise
+        except (ValueError, TypeError):
+            raise
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"Error cloning issue {issue_key}: {error_msg}")
+            msg = f"Error cloning issue {issue_key}: {error_msg}"
+            raise Exception(msg) from e
+
+    def _get_custom_field_type(self, field_id: str) -> str | None:
+        """Return a custom field's schema identifier when available."""
+        field_def = self.get_field_by_id(field_id)
+        custom_type = (field_def or {}).get("schema", {}).get("custom")
+        return custom_type if isinstance(custom_type, str) else None
+
+    def _normalize_custom_field_for_clone(self, field_id: str, value: Any) -> Any:
+        """
+        Reshape a custom field's GET-response value into the shape the create
+        API expects, for field types known to differ between read and write.
+
+        The Sprint field (``com.pyxis.greenhopper.jira:gh-sprint``) is the
+        primary offender: it is returned as a list of sprint objects (Cloud)
+        or stringified Java objects (Server/Data Center), but the create API
+        only accepts a plain integer sprint ID. Fields with an unrecognized
+        or undeterminable type are returned unchanged so they continue to be
+        copied verbatim, as before. Xray's Test Execution Tests field is
+        system-managed and is skipped because its Test Run IDs cannot be
+        reused on a cloned issue.
+
+        Args:
+            field_id: The custom field ID (e.g., 'customfield_10004')
+            value: The raw field value from the source issue
+
+        Returns:
+            The value to send on create, or None if the field should be
+            skipped (e.g. because no usable value could be extracted).
+        """
+        custom_type = self._get_custom_field_type(field_id)
+        if custom_type == _XRAY_TEST_EXECUTION_TESTS_CUSTOM_FIELD_TYPE:
+            return None
+        if custom_type == _SPRINT_CUSTOM_FIELD_TYPE:
+            return self._extract_sprint_id(value)
+        if custom_type == _MULTISELECT_CUSTOM_FIELD_TYPE:
+            values = value if isinstance(value, list) else [value]
+            return [{"value": v["value"]} for v in values if v is not None]
+
+        return value
+
+    def _extract_sprint_id(self, value: Any) -> int | None:
+        """
+        Extract the numeric sprint ID from a Sprint custom field value.
+
+        Args:
+            value: The Sprint field value, which may be a single sprint or a
+                list of sprints, each represented as an int, a dict with an
+                "id" key, or a stringified Java object of the form
+                "...Sprint@...[id=123,...]". Only the first usable sprint is
+                returned, since the create/update API accepts a single
+                integer rather than a list.
+
+        Returns:
+            The integer sprint ID, or None if none could be extracted.
+        """
+        if value is None:
+            return None
+        items = value if isinstance(value, list) else [value]
+        for item in items:
+            if isinstance(item, bool):
+                continue
+            if isinstance(item, int):
+                return item
+            elif isinstance(item, dict) and item.get("id") is not None:
+                try:
+                    return int(item["id"])
+                except (TypeError, ValueError):
+                    continue
+            elif isinstance(item, str):
+                match = _SPRINT_ID_PATTERN.search(item)
+                if match:
+                    return int(match.group(1))
+                try:
+                    return int(item)
+                except ValueError:
+                    continue
+        return None
+
+    def _extract_invalid_fields_from_error(self, http_err: HTTPError) -> set[str]:
+        """
+        Parse the per-field error keys out of a Jira 400 response body.
+
+        Jira's create-issue error responses report field-level validation
+        failures as ``{"errors": {"<fieldId>": "<message>"}}``. This lets
+        callers identify exactly which field(s) caused a 400 so they can be
+        dropped and the request retried, instead of failing outright.
+
+        Args:
+            http_err: The HTTPError raised by the failed create-issue call
+
+        Returns:
+            Set of field IDs reported as invalid, or an empty set if the
+            response was not a 400 with a parseable field-error body.
+        """
+        response = http_err.response
+        if response is None or response.status_code != 400:
+            return set()
+        try:
+            payload = response.json()
+        except ValueError:
+            return set()
+        errors = payload.get("errors") if isinstance(payload, dict) else None
+        return set(errors.keys()) if isinstance(errors, dict) else set()
+
+    def _create_issue_with_field_fallback(
+        self, fields: dict[str, Any], excluded_fields: list[str]
+    ) -> str:
+        """
+        Create an issue, dropping any individual field Jira rejects and
+        retrying, as a last-resort safety net for clone_issue.
+
+        Create-screen metadata pre-verification does not catch every
+        incompatibility (e.g. a field whose value shape is valid for the
+        source project/issue type but not the target one). When Jira responds
+        with a 400 listing specific invalid fields, this removes just those
+        fields from the payload and retries, appending them to
+        ``excluded_fields`` (mutated in place) so they are reported back to
+        the caller the same way as pre-verification exclusions.
+
+        Args:
+            fields: The issue fields payload to create, mutated as fields are
+                dropped across retries
+            excluded_fields: List to append dropped field IDs to (mutated)
+
+        Returns:
+            The key of the newly created issue
+
+        Raises:
+            HTTPError: If creation still fails after removing all fields the
+                API reported as invalid, or if the failure isn't a field-level
+                400 error
+            TypeError: If the create-issue response has an unexpected shape
+            ValueError: If the create-issue response has no issue key
+        """
+        remaining_fields = dict(fields)
+        max_attempts = len(remaining_fields) + 1
+        for _ in range(max_attempts):
+            try:
+                response = self.jira.create_issue(fields=remaining_fields)
+            except HTTPError as http_err:
+                bad_fields = self._extract_invalid_fields_from_error(http_err) & (
+                    remaining_fields.keys() - _NON_DROPPABLE_FIELDS
+                )
+                if not bad_fields:
+                    raise
+                for bad_field in bad_fields:
+                    logger.warning(
+                        "Dropping field '%s' rejected by Jira during clone (value=%r)",
+                        bad_field,
+                        remaining_fields.pop(bad_field),
+                    )
+                excluded_fields.extend(bad_fields)
+                continue
+
+            if not isinstance(response, dict):
+                msg = (
+                    "Unexpected return value type from `jira.create_issue`: "
+                    f"{type(response)}"
+                )
+                logger.error(msg)
+                raise TypeError(msg)
+
+            new_issue_key = response.get("key")
+            if not new_issue_key:
+                msg = "No issue key in response when cloning issue"
+                raise ValueError(msg)
+            return new_issue_key
+
+        msg = "Could not create cloned issue after removing all invalid fields"
+        raise ValueError(msg)
+
     def _is_epic_issue_type(self, issue_type: str) -> bool:
         """
         Check if an issue type is an Epic, handling localized names.
@@ -711,11 +1925,21 @@ class IssuesMixin(
         """
         try:
             issue_types = self.get_project_issue_types(project_key)
-            for issue_type in issue_types:
-                # Check the subtask field - this is the most reliable way
-                if issue_type.get("subtask", False):
-                    return issue_type.get("name")
-            return None
+            subtask_type_names = [
+                issue_type.get("name")
+                for issue_type in issue_types
+                if issue_type.get("subtask", False) and issue_type.get("name")
+            ]
+            if not subtask_type_names:
+                return None
+            # Some projects have more than one subtask-flagged issue type
+            # (e.g. Xray's "Sub Test Execution" alongside the plain
+            # "Sub-task"); prefer the generic name instead of whichever one
+            # happens to come first in the project's issue type list.
+            for name in subtask_type_names:
+                if name.lower() in ("subtask", "sub-task"):
+                    return name
+            return subtask_type_names[0]
         except Exception as e:
             logger.warning(f"Could not get issue types for project {project_key}: {e}")
             return None
@@ -966,26 +2190,55 @@ class IssuesMixin(
             exception: The exception that occurred
             issue_type: The type of issue being created
         """
-        error_msg = str(exception)
+        error_msg = self._describe_exception(exception)
 
         # Check for specific error types
         if "epic name" in error_msg.lower() or "epicname" in error_msg.lower():
             logger.error(
                 f"Error creating {issue_type}: {error_msg}. "
-                "Try specifying an epic_name in the additional fields"
+                "Try specifying an epic_name in the additional fields",
+                exc_info=True,
             )
         elif "customfield" in error_msg.lower():
             logger.error(
                 f"Error creating {issue_type}: {error_msg}. "
-                "This may be due to a required custom field"
+                "This may be due to a required custom field",
+                exc_info=True,
             )
         else:
-            logger.error(f"Error creating {issue_type}: {error_msg}")
+            logger.error(f"Error creating {issue_type}: {error_msg}", exc_info=True)
+
+    def _describe_exception(self, exc: Exception) -> str:
+        """Build a detailed, never-blank description of an exception.
+
+        Includes the exception type and, for HTTP-based errors (e.g.
+        requests.HTTPError), the HTTP status code and response body, since
+        `str(exc)` is often empty for those.
+
+        Args:
+            exc: The exception to describe
+
+        Returns:
+            A human-readable description suitable for logs and error messages
+        """
+        parts = [f"[{type(exc).__name__}] {str(exc) or '<no message provided>'}"]
+
+        response = getattr(exc, "response", None)
+        if response is not None:
+            status_code = getattr(response, "status_code", None)
+            if status_code is not None:
+                parts.append(f"HTTP status: {status_code}")
+            body = getattr(response, "text", None)
+            if body:
+                parts.append(f"Response body: {body[:1000]}")
+
+        return " | ".join(parts)
 
     def update_issue(
         self,
         issue_key: str,
         fields: dict[str, Any] | None = None,
+        update: dict[str, list[dict[str, Any]]] | None = None,
         **kwargs: Any,  # noqa: ANN401 - Dynamic field types are necessary for Jira API
     ) -> JiraIssue:
         """
@@ -993,7 +2246,10 @@ class IssuesMixin(
 
         Args:
             issue_key: The key of the issue to update
-            fields: Dictionary of fields to update
+            fields: Dictionary of fields to directly overwrite
+            update: Dictionary of Jira "update" operations for fields that
+                require add/remove/set semantics instead of a direct
+                overwrite (e.g. ``{"issuelinks": [{"add": {...}}]}``)
             **kwargs: Additional fields to update. Special fields include:
                 - attachments: List of file paths to upload as attachments
                 - status: New status for the issue (handled via transitions)
@@ -1025,7 +2281,9 @@ class IssuesMixin(
                     # Status changes are handled separately via transitions
                     # Add status to fields so _update_issue_with_status can find it
                     update_fields["status"] = value
-                    return self._update_issue_with_status(issue_key, update_fields)
+                    return self._update_issue_with_status(
+                        issue_key, update_fields, update
+                    )
 
                 elif key == "attachments":
                     # Handle attachments separately - they're not part of fields update
@@ -1045,6 +2303,22 @@ class IssuesMixin(
                             self._add_assignee_to_fields(update_fields, account_id)
                         except ValueError as e:
                             logger.warning(f"Could not update assignee: {str(e)}")
+
+                elif key == "components":
+                    if isinstance(value, list):
+                        # Support both string names and pre-formatted {"name": ...} dicts
+                        if all(isinstance(c, dict) for c in value):
+                            update_fields["components"] = value
+                        else:
+                            valid_components = [
+                                c.strip()
+                                for c in value
+                                if isinstance(c, str) and c.strip()
+                            ]
+                            if valid_components:
+                                update_fields["components"] = [
+                                    {"name": c} for c in valid_components
+                                ]
                 elif key == "description":
                     # Handle description with markdown conversion
                     update_fields["description"] = self._markdown_to_jira(value)
@@ -1054,11 +2328,14 @@ class IssuesMixin(
                     field_kwargs = {key: value}
                     self._process_additional_fields(update_fields, field_kwargs)
 
-            # Update the issue fields
+            # Update the issue fields and/or "update" operations in one call
+            request_body: dict[str, Any] = {}
             if update_fields:
-                self.jira.update_issue(
-                    issue_key=issue_key, update={"fields": update_fields}
-                )
+                request_body["fields"] = update_fields
+            if update:
+                request_body["update"] = update
+            if request_body:
+                self.jira.update_issue(issue_key=issue_key, update=request_body)
 
             # Handle attachments if provided
             if "attachments" in kwargs and kwargs["attachments"]:
@@ -1090,13 +2367,16 @@ class IssuesMixin(
             return issue
 
         except Exception as e:
-            error_msg = str(e)
-            logger.error(f"Error updating issue {issue_key}: {error_msg}")
-            msg = f"Failed to update issue {issue_key}: {error_msg}"
+            detail = self._describe_exception(e)
+            logger.error(f"Error updating issue {issue_key}: {detail}", exc_info=True)
+            msg = f"Failed to update issue {issue_key}: {detail}"
             raise ValueError(msg) from e
 
     def _update_issue_with_status(
-        self, issue_key: str, fields: dict[str, Any]
+        self,
+        issue_key: str,
+        fields: dict[str, Any],
+        update: dict[str, list[dict[str, Any]]] | None = None,
     ) -> JiraIssue:
         """
         Update an issue with a status change.
@@ -1104,6 +2384,8 @@ class IssuesMixin(
         Args:
             issue_key: The key of the issue to update
             fields: Dictionary of fields to update
+            update: Optional dictionary of Jira "update" operations to apply
+                alongside the fields, before the status transition
 
         Returns:
             JiraIssue model representing the updated issue
@@ -1114,9 +2396,14 @@ class IssuesMixin(
         # Extract status from fields and remove it for the standard update
         status = fields.pop("status", None)
 
-        # First update any fields if needed
+        # First update any fields/operations if needed
+        request_body: dict[str, Any] = {}
         if fields:
-            self.jira.update_issue(issue_key=issue_key, fields=fields)  # type: ignore[call-arg]
+            request_body["fields"] = fields
+        if update:
+            request_body["update"] = update
+        if request_body:
+            self.jira.update_issue(issue_key=issue_key, update=request_body)
 
         # If no status change is requested, return the issue
         if not status:
@@ -1347,6 +2634,10 @@ class IssuesMixin(
     ) -> list[JiraIssue]:
         """Create multiple Jira issues in a batch.
 
+        Field handling mirrors create_issue: Epic/Subtask localized issue type
+        names, two-step Epic field creation, subtask/parent linking, and Markdown
+        description conversion are all supported here as well.
+
         Args:
             issues: List of issue dictionaries, each containing:
                 - project_key (str): Key of the project
@@ -1355,6 +2646,9 @@ class IssuesMixin(
                 - description (str, optional): Issue description
                 - assignee (str, optional): Username of assignee
                 - components (list[str], optional): List of component names
+                - parent (str, optional): Parent issue key (required for subtasks)
+                - additional_fields (dict, optional): Nested dict of extra fields,
+                  unpacked the same way as create_issue's **kwargs
                 - **kwargs: Additional fields specific to your Jira instance
             validate_only: If True, only validates the issues without creating them
 
@@ -1370,6 +2664,8 @@ class IssuesMixin(
 
         # Prepare issues for bulk creation
         issue_updates = []
+        # Per-issue epic kwargs (post-creation update), aligned by index with issue_updates
+        epic_post_update_kwargs: list[dict[str, Any] | None] = []
         for issue_data in issues:
             try:
                 # Extract and validate required fields
@@ -1385,16 +2681,35 @@ class IssuesMixin(
                     msg = f"Missing required fields for issue: {project_key=}, {summary=}, {issue_type=}"
                     raise ValueError(msg)
 
+                # Unpack a nested additional_fields dict, matching create_issue's flat-kwargs convention
+                additional_fields = issue_data.pop("additional_fields", None)
+                if additional_fields and isinstance(additional_fields, dict):
+                    issue_data.update(additional_fields)
+
+                # Resolve localized Epic/Subtask issue type names, same as create_issue
+                actual_issue_type = issue_type
+                if (
+                    self._is_epic_issue_type(issue_type)
+                    and issue_type.lower() == "epic"
+                ):
+                    epic_type_name = self._find_epic_issue_type_name(project_key)
+                    if epic_type_name:
+                        actual_issue_type = epic_type_name
+                elif issue_type.lower() in ["subtask", "sub-task"]:
+                    subtask_type_name = self._find_subtask_issue_type_name(project_key)
+                    if subtask_type_name:
+                        actual_issue_type = subtask_type_name
+
                 # Prepare fields dictionary
-                fields = {
+                fields: dict[str, Any] = {
                     "project": {"key": project_key},
                     "summary": summary,
-                    "issuetype": {"name": issue_type},
+                    "issuetype": {"name": actual_issue_type},
                 }
 
-                # Add optional fields
+                # Add optional fields (convert from Markdown to Jira format)
                 if description:
-                    fields["description"] = description
+                    fields["description"] = self._markdown_to_jira(description)
 
                 # Add assignee if provided
                 if assignee:
@@ -1418,8 +2733,29 @@ class IssuesMixin(
                                 {"name": comp_name} for comp_name in valid_components
                             ]
 
+                # Unpack nested additional_fields dict into issue_data before processing
+                additional_fields = issue_data.pop("additional_fields", None)
+                if additional_fields and isinstance(additional_fields, dict):
+                    issue_data.update(additional_fields)
+
+                # Preserve original kwargs for additional-field processing before
+                # epic prep mutates issue_data (mirrors create_issue's kwargs_copy)
+                kwargs_copy = issue_data.copy()
+
+                # Prepare epic fields if this is an epic (stores epic-specific
+                # fields as __epic_* keys in issue_data for post-creation update)
+                if self._is_epic_issue_type(issue_type):
+                    self._prepare_epic_fields(fields, summary, issue_data)
+
+                # Prepare parent field if this is a subtask
+                if issue_type.lower() in ("subtask", "sub-task"):
+                    self._prepare_parent_fields(fields, issue_data)
+                # Allow parent field for all issue types when explicitly provided
+                elif "parent" in issue_data:
+                    self._prepare_parent_fields(fields, issue_data)
+
                 # Add any remaining custom fields
-                self._process_additional_fields(fields, issue_data)
+                self._process_additional_fields(fields, kwargs_copy)
 
                 if validate_only:
                     # For validation, just log the issue that would be created
@@ -1430,9 +2766,16 @@ class IssuesMixin(
 
                 # Add to bulk creation list
                 issue_updates.append({"fields": fields})
+                has_epic_fields = self._is_epic_issue_type(issue_type) and any(
+                    k.startswith("__epic_") for k in issue_data
+                )
+                epic_post_update_kwargs.append(issue_data if has_epic_fields else None)
 
             except Exception as e:
-                logger.error(f"Failed to prepare issue for creation: {str(e)}")
+                detail = self._describe_exception(e)
+                logger.error(
+                    f"Failed to prepare issue for creation: {detail}", exc_info=True
+                )
                 if not issue_updates:
                     raise
 
@@ -1447,42 +2790,81 @@ class IssuesMixin(
                 logger.error(msg)
                 raise TypeError(msg)
 
-            # Process results
-            created_issues = []
-            for issue_info in response.get("issues", []):
-                issue_key = issue_info.get("key")
-                if issue_key:
-                    try:
-                        # Fetch the full issue data
-                        issue_data = self.jira.get_issue(issue_key)
-                        if not isinstance(issue_data, dict):
-                            msg = f"Unexpected return value type from `jira.get_issue`: {type(issue_data)}"
-                            logger.error(msg)
-                            raise TypeError(msg)
-
-                        created_issues.append(
-                            JiraIssue.from_api_response(
-                                issue_data,
-                                base_url=self.config.url
-                                if hasattr(self, "config")
-                                else None,
-                            )
-                        )
-                    except Exception as e:
-                        logger.error(
-                            f"Error fetching created issue {issue_key}: {str(e)}"
-                        )
-
             # Log any errors from the bulk creation
-            errors = response.get("errors", [])
+            errors = response.get("errors", []) or []
             if errors:
                 for error in errors:
                     logger.error(f"Bulk creation error: {error}")
 
+            # Map each returned issue back to its original submission index so
+            # epic post-update kwargs line up correctly even if some items failed
+            failed_indices = {
+                error.get("failedElementNumber")
+                for error in errors
+                if isinstance(error, dict)
+                and error.get("failedElementNumber") is not None
+            }
+            successful_indices = [
+                i for i in range(len(issue_updates)) if i not in failed_indices
+            ]
+
+            # Process results
+            created_issues = []
+            for position, issue_info in enumerate(response.get("issues", [])):
+                issue_key = issue_info.get("key")
+                if not issue_key:
+                    continue
+                try:
+                    original_index = (
+                        successful_indices[position]
+                        if position < len(successful_indices)
+                        else None
+                    )
+                    epic_kwargs = (
+                        epic_post_update_kwargs[original_index]
+                        if original_index is not None
+                        and original_index < len(epic_post_update_kwargs)
+                        else None
+                    )
+                    if epic_kwargs:
+                        try:
+                            self.update_epic_fields(issue_key, epic_kwargs)
+                        except Exception as update_error:
+                            logger.error(
+                                f"Error during post-creation update of Epic {issue_key}: "
+                                f"{self._describe_exception(update_error)}",
+                                exc_info=True,
+                            )
+
+                        # Fetch the full issue data
+                    issue_data = self.jira.get_issue(issue_key)
+                    if not isinstance(issue_data, dict):
+                        msg = f"Unexpected return value type from `jira.get_issue`: {type(issue_data)}"
+                        logger.error(msg)
+                        raise TypeError(msg)
+
+                    created_issues.append(
+                        JiraIssue.from_api_response(
+                            issue_data,
+                            base_url=self.config.url
+                            if hasattr(self, "config")
+                            else None,
+                        )
+                    )
+                except Exception as e:
+                    detail = self._describe_exception(e)
+                    logger.error(
+                        f"Error fetching created issue {issue_key}: {detail}",
+                        exc_info=True,
+                    )
+
             return created_issues
 
         except Exception as e:
-            logger.error(f"Error in bulk issue creation: {str(e)}")
+            logger.error(
+                f"Error in bulk issue creation: {self._describe_exception(e)}",
+                exc_info=True,
+            )
             raise
 
     def batch_get_changelogs(

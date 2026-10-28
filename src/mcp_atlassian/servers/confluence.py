@@ -1,5 +1,6 @@
 """Confluence FastMCP server instance and tool definitions."""
 
+import asyncio
 import json
 import logging
 from typing import Annotated
@@ -91,19 +92,28 @@ async def search(
             logger.info(
                 f"Converting simple search term to CQL using siteSearch: {query}"
             )
-            pages = confluence_fetcher.search(
-                query, limit=limit, spaces_filter=spaces_filter
+            pages = await asyncio.to_thread(
+                confluence_fetcher.search,
+                query,
+                limit=limit,
+                spaces_filter=spaces_filter,
             )
         except Exception as e:
             logger.warning(f"siteSearch failed ('{e}'), falling back to text search.")
             query = f'text ~ "{original_query}"'
             logger.info(f"Falling back to text search with CQL: {query}")
-            pages = confluence_fetcher.search(
-                query, limit=limit, spaces_filter=spaces_filter
+            pages = await asyncio.to_thread(
+                confluence_fetcher.search,
+                query,
+                limit=limit,
+                spaces_filter=spaces_filter,
             )
     else:
-        pages = confluence_fetcher.search(
-            query, limit=limit, spaces_filter=spaces_filter
+        pages = await asyncio.to_thread(
+            confluence_fetcher.search,
+            query,
+            limit=limit,
+            spaces_filter=spaces_filter,
         )
     search_results = [page.to_simplified_dict() for page in pages]
     return json.dumps(search_results, indent=2, ensure_ascii=False)
@@ -192,8 +202,11 @@ async def get_page(
                 "page_id was provided; title and space_key parameters will be ignored."
             )
         try:
-            page_object = confluence_fetcher.get_page_content(
-                page_id, convert_to_markdown=convert_to_markdown, top_n=sample
+            page_object = await asyncio.to_thread(
+                confluence_fetcher.get_page_content,
+                page_id,
+                convert_to_markdown=convert_to_markdown,
+                top_n=sample,
             )
         except Exception as e:
             logger.error(f"Error fetching page by ID '{page_id}': {e}")
@@ -203,8 +216,12 @@ async def get_page(
                 ensure_ascii=False,
             )
     elif title and space_key:
-        page_object = confluence_fetcher.get_page_by_title(
-            space_key, title, convert_to_markdown=convert_to_markdown, top_n=sample
+        page_object = await asyncio.to_thread(
+            confluence_fetcher.get_page_by_title,
+            space_key,
+            title,
+            convert_to_markdown=convert_to_markdown,
+            top_n=sample,
         )
         if not page_object:
             return json.dumps(
@@ -300,7 +317,8 @@ async def get_page_children(
         expand = f"{expand},body.storage" if expand else "body.storage"
 
     try:
-        pages = confluence_fetcher.get_page_children(
+        pages = await asyncio.to_thread(
+            confluence_fetcher.get_page_children,
             page_id=parent_id,
             start=start,
             limit=limit,
@@ -349,7 +367,10 @@ async def get_comments(
         JSON string representing a list of comment objects.
     """
     confluence_fetcher = await get_confluence_fetcher(ctx)
-    comments = confluence_fetcher.get_page_comments(page_id)
+    comments = await asyncio.to_thread(
+        confluence_fetcher.get_page_comments,
+        page_id,
+    )
     formatted_comments = [comment.to_simplified_dict() for comment in comments]
     return json.dumps(formatted_comments, indent=2, ensure_ascii=False)
 
@@ -378,7 +399,10 @@ async def get_labels(
         JSON string representing a list of label objects.
     """
     confluence_fetcher = await get_confluence_fetcher(ctx)
-    labels = confluence_fetcher.get_page_labels(page_id)
+    labels = await asyncio.to_thread(
+        confluence_fetcher.get_page_labels,
+        page_id,
+    )
     formatted_labels = [label.to_simplified_dict() for label in labels]
     return json.dumps(formatted_labels, indent=2, ensure_ascii=False)
 
@@ -404,7 +428,11 @@ async def add_label(
         ValueError: If in read-only mode or Confluence client is unavailable.
     """
     confluence_fetcher = await get_confluence_fetcher(ctx)
-    labels = confluence_fetcher.add_page_label(page_id, name)
+    labels = await asyncio.to_thread(
+        confluence_fetcher.add_page_label,
+        page_id,
+        name,
+    )
     formatted_labels = [label.to_simplified_dict() for label in labels]
     return json.dumps(formatted_labels, indent=2, ensure_ascii=False)
 
@@ -481,7 +509,8 @@ async def create_page(
         is_markdown = False
         content_representation = content_format  # Pass 'wiki' or 'storage' directly
 
-    page = confluence_fetcher.create_page(
+    page = await asyncio.to_thread(
+        confluence_fetcher.create_page,
         space_key=space_key,
         title=title,
         body=content,
@@ -572,7 +601,8 @@ async def update_page(
         is_markdown = False
         content_representation = content_format  # Pass 'wiki' or 'storage' directly
 
-    updated_page = confluence_fetcher.update_page(
+    updated_page = await asyncio.to_thread(
+        confluence_fetcher.update_page,
         page_id=page_id,
         title=title,
         body=content,
@@ -613,7 +643,10 @@ async def delete_page(
     """
     confluence_fetcher = await get_confluence_fetcher(ctx)
     try:
-        result = confluence_fetcher.delete_page(page_id=page_id)
+        result = await asyncio.to_thread(
+            confluence_fetcher.delete_page,
+            page_id=page_id,
+        )
         if result:
             response = {
                 "success": True,
@@ -661,7 +694,11 @@ async def add_comment(
     """
     confluence_fetcher = await get_confluence_fetcher(ctx)
     try:
-        comment = confluence_fetcher.add_comment(page_id=page_id, content=content)
+        comment = await asyncio.to_thread(
+            confluence_fetcher.add_comment,
+            page_id=page_id,
+            content=content,
+        )
         if comment:
             comment_data = comment.to_simplified_dict()
             response = {
@@ -731,7 +768,11 @@ async def search_user(
         logger.info(f"Converting simple search term to user CQL: {query}")
 
     try:
-        user_results = confluence_fetcher.search_user(query, limit=limit)
+        user_results = await asyncio.to_thread(
+            confluence_fetcher.search_user,
+            query,
+            limit=limit,
+        )
         search_results = [user.to_simplified_dict() for user in user_results]
         return json.dumps(search_results, indent=2, ensure_ascii=False)
     except MCPAtlassianAuthenticationError as e:

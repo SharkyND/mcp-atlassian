@@ -6,15 +6,18 @@ from typing import Any, Literal
 
 from atlassian import Jira
 from requests import Session
+from requests.exceptions import HTTPError
 
 from mcp_atlassian.exceptions import MCPAtlassianAuthenticationError
 from mcp_atlassian.preprocessing import JiraPreprocessor
+from mcp_atlassian.utils.env import get_env_retries
 from mcp_atlassian.utils.logging import (
     get_masked_session_headers,
     log_config_param,
     mask_sensitive,
 )
 from mcp_atlassian.utils.oauth import configure_oauth_session
+from mcp_atlassian.utils.retry import configure_retries
 from mcp_atlassian.utils.ssl import configure_ssl_verification
 
 from .config import JiraConfig
@@ -70,6 +73,7 @@ class JiraClient:
                 session=session,
                 cloud=True,  # OAuth is only for Cloud
                 verify_ssl=self.config.ssl_verify,
+                timeout=self.config.timeout,
             )
         elif self.config.auth_type == "pat":
             logger.debug(
@@ -82,6 +86,7 @@ class JiraClient:
                 token=self.config.personal_token,
                 cloud=self.config.is_cloud,
                 verify_ssl=self.config.ssl_verify,
+                timeout=self.config.timeout,
             )
         else:  # basic auth
             logger.debug(
@@ -96,6 +101,7 @@ class JiraClient:
                 password=self.config.api_token,
                 cloud=self.config.is_cloud,
                 verify_ssl=self.config.ssl_verify,
+                timeout=self.config.timeout,
             )
             logger.debug(
                 f"Jira client initialized. Session headers (Authorization masked): "
@@ -108,6 +114,14 @@ class JiraClient:
             url=self.config.url,
             session=self.jira._session,
             ssl_verify=self.config.ssl_verify,
+        )
+
+        # Applied after SSL so the retry policy attaches to the adapters
+        # that configuration may have mounted.
+        configure_retries(
+            service_name="Jira",
+            session=self.jira._session,
+            retries=get_env_retries(),
         )
 
         # Proxy configuration
@@ -318,3 +332,31 @@ class JiraClient:
             error_message = f"Unexpected response from Jira API: {result}"
             raise ValueError(error_message)
         return result
+
+    @staticmethod
+    def _extract_error_detail(http_err: HTTPError) -> str:
+        """
+        Pull the actual error detail out of a Jira HTTP error response body,
+        since the generic "authentication failed" message alone doesn't
+        distinguish a real auth/token problem from other causes (e.g. a
+        permission restriction or an unrecognized link type) that some Jira
+        Server/Data Center deployments also report as 401/403.
+
+        Args:
+            http_err: The HTTPError raised for the failed request
+
+        Returns:
+            The response body (JSON errorMessages/errors if present, else raw
+            text truncated to 500 characters), or "<no response body>" if the
+            response has no content.
+        """
+        response = http_err.response
+        if response is None:
+            return "<no response body>"
+        try:
+            body = response.json()
+            if body:
+                return str(body)
+        except ValueError:
+            pass
+        return response.text[:500] if response.text else "<empty response body>"

@@ -17,6 +17,7 @@ from .formatting import FormattingMixin
 from .issues import IssuesMixin
 from .links import LinksMixin
 from .projects import ProjectsMixin
+from .pull_requests import PullRequestsMixin
 from .search import SearchMixin
 from .sprints import SprintsMixin
 from .transitions import TransitionsMixin
@@ -41,6 +42,7 @@ class JiraFetcher(
     SprintsMixin,
     AttachmentsMixin,
     LinksMixin,
+    PullRequestsMixin,
 ):
     """
     The main Jira client class providing access to all Jira operations.
@@ -60,6 +62,7 @@ class JiraFetcher(
     - SprintsMixin: Sprint operations
     - AttachmentsMixin: Attachment download operations
     - LinksMixin: Issue link operations
+    - PullRequestsMixin: Bitbucket pull request operations
 
     The class structure is designed to maintain backward compatibility while
     improving code organization and maintainability.

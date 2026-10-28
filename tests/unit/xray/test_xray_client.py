@@ -34,6 +34,7 @@ def test_init_with_basic_auth_cloud():
             password="test_token",
             cloud=True,
             verify_ssl=True,
+            timeout=30,
         )
 
         # Verify SSL verification was configured
@@ -72,6 +73,7 @@ def test_init_with_basic_auth_server():
             password="test_token",
             cloud=False,
             verify_ssl=False,
+            timeout=30,
         )
 
         # Verify SSL verification was configured
@@ -108,6 +110,7 @@ def test_init_with_pat_auth():
             token="test_personal_token",
             cloud=False,
             verify_ssl=False,
+            timeout=30,
         )
 
         # Verify SSL verification was configured
@@ -162,6 +165,7 @@ def test_init_with_oauth():
             session=mock_session.return_value,
             cloud=True,
             verify_ssl=True,
+            timeout=30,
         )
 
         # Verify SSL verification was configured

@@ -120,11 +120,23 @@ class LinksMixin(JiraClient):
                 401,
                 403,
             ]:
-                error_msg = (
-                    f"Authentication failed for Jira API "
-                    f"({http_err.response.status_code}). "
-                    "Token may be expired or invalid. Please verify credentials."
-                )
+                detail = self._extract_error_detail(http_err)
+                # Jira reports issue-level "Link Issue" permission restrictions
+                # (e.g. a security scheme on a Test Execution) as 401/403 too,
+                # which is not an actual auth/token problem.
+                if "permission" in detail.lower():
+                    error_msg = (
+                        f"Permission denied for Jira API "
+                        f"({http_err.response.status_code}). "
+                        f"Server response: {detail}"
+                    )
+                else:
+                    error_msg = (
+                        f"Authentication failed for Jira API "
+                        f"({http_err.response.status_code}). "
+                        "Token may be expired or invalid. Please verify credentials. "
+                        f"Server response: {detail}"
+                    )
                 logger.error(error_msg)
                 raise MCPAtlassianAuthenticationError(error_msg) from http_err
             else:

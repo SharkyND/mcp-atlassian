@@ -3,7 +3,7 @@
 from abc import abstractmethod
 from typing import Any, Protocol, runtime_checkable
 
-from ..models.jira import JiraIssue
+from ..models.jira import JiraIssue, JiraIssueLinkType
 from ..models.jira.search import JiraSearchResult
 
 
@@ -204,4 +204,37 @@ class UsersOperationsProto(Protocol):
 
         Raises:
             ValueError: If the account ID could not be found
+        """
+
+
+class LinksOperationsProto(Protocol):
+    """Protocol defining issue link operations interface."""
+
+    @abstractmethod
+    def get_issue_link_types(self) -> list[JiraIssueLinkType]:
+        """
+        Get all available issue link types.
+
+        Returns:
+            List of JiraIssueLinkType objects
+
+        Raises:
+            Exception: If there is an error retrieving issue link types
+        """
+
+    @abstractmethod
+    def create_issue_link(self, data: dict[str, Any]) -> dict[str, Any]:
+        """
+        Create a link between two issues.
+
+        Args:
+            data: A dictionary containing the link data (type, inwardIssue,
+                outwardIssue, and an optional comment)
+
+        Returns:
+            Dictionary with the created link information
+
+        Raises:
+            ValueError: If required fields are missing
+            Exception: If there is an error creating the issue link
         """

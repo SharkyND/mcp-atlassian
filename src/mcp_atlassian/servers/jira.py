@@ -54,6 +54,8 @@ _IMAGE_EXTENSIONS: frozenset[str] = frozenset(
     {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".tif", ".webp"}
 )
 
+_NO_LINK_ISSUE_PERMISSION = "no link issue permission"
+
 # Image file extension -> format string accepted by MCP ImageContent / vision models.
 _IMAGE_FORMAT_MAP: dict[str, str] = {
     ".jpg": "jpeg",
@@ -153,7 +155,10 @@ async def get_user_profile(
     """
     jira = await get_jira_fetcher(ctx)
     try:
-        user: JiraUser = jira.get_user_profile_by_identifier(user_identifier)
+        user: JiraUser = await asyncio.to_thread(
+            jira.get_user_profile_by_identifier,
+            user_identifier,
+        )
         result = user.to_simplified_dict()
         response_data = {"success": True, "user": result}
     except Exception as e:
@@ -257,7 +262,8 @@ async def get_issue(
     if fields and fields != "*all":
         fields_list = [f.strip() for f in fields.split(",")]
 
-    issue = jira.get_issue(
+    issue = await asyncio.to_thread(
+        jira.get_issue,
         issue_key=issue_key,
         fields=fields_list,
         expand=expand,
@@ -266,6 +272,39 @@ async def get_issue(
         update_history=update_history,
     )
     result = issue.to_simplified_dict()
+    return json.dumps(result, indent=2, ensure_ascii=False)
+
+
+@jira_mcp.tool(tags={"jira", "read", "development"})
+async def get_issue_related_pull_requests(
+    ctx: Context,
+    issue_key: Annotated[str, Field(description="Jira issue key (e.g., 'PROJ-123')")],
+    exclude_statuses: Annotated[
+        list[str],
+        Field(
+            description=(
+                "Bitbucket pull request statuses to exclude. Defaults to ['DECLINED']."
+            ),
+            default_factory=lambda: ["DECLINED"],
+        ),
+    ],
+) -> str:
+    """Get Bitbucket pull requests related to a Jira issue.
+
+    Args:
+        ctx: The FastMCP context.
+        issue_key: Jira issue key.
+        exclude_statuses: Pull request statuses to omit. Defaults to DECLINED.
+
+    Returns:
+        JSON string containing Jira's development status response.
+    """
+    jira = await get_jira_fetcher(ctx)
+    result = await asyncio.to_thread(
+        jira.get_issue_related_pull_requests,
+        issue_key=issue_key,
+        exclude_statuses=exclude_statuses,
+    )
     return json.dumps(result, indent=2, ensure_ascii=False)
 
 
@@ -344,7 +383,8 @@ async def search(
     if fields and fields != "*all":
         fields_list = [f.strip() for f in fields.split(",")]
 
-    search_result = jira.search_issues(
+    search_result = await asyncio.to_thread(
+        jira.search_issues,
         jql=jql,
         fields=fields_list,
         limit=limit,
@@ -386,7 +426,12 @@ async def search_fields(
         JSON string representing a list of matching field definitions.
     """
     jira = await get_jira_fetcher(ctx)
-    result = jira.search_fields(keyword, limit=limit, refresh=refresh)
+    result = await asyncio.to_thread(
+        jira.search_fields,
+        keyword,
+        limit=limit,
+        refresh=refresh,
+    )
     return json.dumps(result, indent=2, ensure_ascii=False)
 
 
@@ -415,8 +460,11 @@ async def get_project_issues(
         JSON string representing the search results including pagination info.
     """
     jira = await get_jira_fetcher(ctx)
-    search_result = jira.get_project_issues(
-        project_key=project_key, start=start_at, limit=limit
+    search_result = await asyncio.to_thread(
+        jira.get_project_issues,
+        project_key=project_key,
+        start=start_at,
+        limit=limit,
     )
     result = search_result.to_simplified_dict()
     return json.dumps(result, indent=2, ensure_ascii=False)
@@ -438,7 +486,10 @@ async def get_transitions(
     """
     jira = await get_jira_fetcher(ctx)
     # Underlying method returns list[dict] in the desired format
-    transitions = jira.get_available_transitions(issue_key)
+    transitions = await asyncio.to_thread(
+        jira.get_available_transitions,
+        issue_key,
+    )
     return json.dumps(transitions, indent=2, ensure_ascii=False)
 
 
@@ -457,7 +508,10 @@ async def get_worklog(
         JSON string representing the worklog entries.
     """
     jira = await get_jira_fetcher(ctx)
-    worklogs = jira.get_worklogs(issue_key)
+    worklogs = await asyncio.to_thread(
+        jira.get_worklogs,
+        issue_key,
+    )
     result = {"worklogs": worklogs}
     return json.dumps(result, indent=2, ensure_ascii=False)
 
@@ -522,7 +576,8 @@ async def download_attachments(
         )
 
     jira = await get_jira_fetcher(ctx)
-    result = jira.download_issue_attachments(
+    result = await asyncio.to_thread(
+        jira.download_issue_attachments,
         issue_key=issue_key,
         target_dir=target_dir or "",
         return_content=should_return_content,
@@ -577,7 +632,8 @@ async def get_agile_boards(
         JSON string representing a list of board objects.
     """
     jira = await get_jira_fetcher(ctx)
-    boards = jira.get_all_agile_boards_model(
+    boards = await asyncio.to_thread(
+        jira.get_all_agile_boards_model,
         board_name=board_name,
         project_key=project_key,
         board_type=board_type,
@@ -653,7 +709,8 @@ async def get_board_issues(
     if fields and fields != "*all":
         fields_list = [f.strip() for f in fields.split(",")]
 
-    search_result = jira.get_board_issues(
+    search_result = await asyncio.to_thread(
+        jira.get_board_issues,
         board_id=board_id,
         jql=jql,
         fields=fields_list,
@@ -695,8 +752,12 @@ async def get_sprints_from_board(
         JSON string representing a list of sprint objects.
     """
     jira = await get_jira_fetcher(ctx)
-    sprints = jira.get_all_sprints_from_board_model(
-        board_id=board_id, state=state, start=start_at, limit=limit
+    sprints = await asyncio.to_thread(
+        jira.get_all_sprints_from_board_model,
+        board_id=board_id,
+        state=state,
+        start=start_at,
+        limit=limit,
     )
     result = [sprint.to_simplified_dict() for sprint in sprints]
     return json.dumps(result, indent=2, ensure_ascii=False)
@@ -743,8 +804,12 @@ async def get_sprint_issues(
     if fields and fields != "*all":
         fields_list = [f.strip() for f in fields.split(",")]
 
-    search_result = jira.get_sprint_issues(
-        sprint_id=sprint_id, fields=fields_list, start=start_at, limit=limit
+    search_result = await asyncio.to_thread(
+        jira.get_sprint_issues,
+        sprint_id=sprint_id,
+        fields=fields_list,
+        start=start_at,
+        limit=limit,
     )
     result = search_result.to_simplified_dict()
     return json.dumps(result, indent=2, ensure_ascii=False)
@@ -761,7 +826,7 @@ async def get_link_types(ctx: Context) -> str:
         JSON string representing a list of issue link type objects.
     """
     jira = await get_jira_fetcher(ctx)
-    link_types = jira.get_issue_link_types()
+    link_types = await asyncio.to_thread(jira.get_issue_link_types)
     formatted_link_types = [link_type.to_simplified_dict() for link_type in link_types]
     return json.dumps(formatted_link_types, indent=2, ensure_ascii=False)
 
@@ -854,7 +919,8 @@ async def create_issue(
     if not isinstance(extra_fields, dict):
         raise ValueError("additional_fields must be a dictionary.")
 
-    issue = jira.create_issue(
+    issue = await asyncio.to_thread(
+        jira.create_issue,
         project_key=project_key,
         summary=summary,
         issue_type=issue_type,
@@ -930,7 +996,11 @@ async def batch_create_issues(
         raise ValueError("Input 'issues' must be an array of issue objects.")
 
     # Create issues in batch
-    created_issues = jira.batch_create_issues(issues_list, validate_only=validate_only)
+    created_issues = await asyncio.to_thread(
+        jira.batch_create_issues,
+        issues_list,
+        validate_only=validate_only,
+    )
 
     message = (
         "Issues validated successfully"
@@ -996,8 +1066,10 @@ async def batch_get_changelogs(
         )
 
     # Call the underlying method
-    issues_with_changelogs = jira.batch_get_changelogs(
-        issue_ids_or_keys=issue_ids_or_keys, fields=fields
+    issues_with_changelogs = await asyncio.to_thread(
+        jira.batch_get_changelogs,
+        issue_ids_or_keys=issue_ids_or_keys,
+        fields=fields,
     )
 
     # Format the response
@@ -1037,6 +1109,19 @@ async def update_issue(
             default=None,
         ),
     ] = None,
+    update: Annotated[
+        dict[str, list[dict[str, Any]]] | None,
+        Field(
+            description=(
+                "(Optional) Dictionary of Jira 'update' operations for fields that "
+                "require add/remove/set semantics instead of a direct overwrite "
+                "(e.g. issuelinks, labels, components). Each key maps to a list "
+                "of operation dicts. Example: `{'issuelinks': [{'add': "
+                "{'type': {'name': 'Tests'}, 'inwardIssue': {'key': 'PROJ-123'}}}]}`"
+            ),
+            default=None,
+        ),
+    ] = None,
     attachments: Annotated[
         str | None,
         Field(
@@ -1055,6 +1140,8 @@ async def update_issue(
         issue_key: Jira issue key.
         fields: Dictionary of fields to update.
         additional_fields: Optional dictionary of additional fields.
+        update: Optional dictionary of Jira "update" operations (add/remove/set)
+            for fields that cannot be set via a direct overwrite.
         attachments: Optional JSON array string or comma-separated list of file paths.
 
     Returns:
@@ -1073,6 +1160,9 @@ async def update_issue(
     extra_fields = additional_fields or {}
     if not isinstance(extra_fields, dict):
         raise ValueError("additional_fields must be a dictionary.")
+
+    if update is not None and not isinstance(update, dict):
+        raise ValueError("update must be a dictionary.")
 
     # Parse attachments
     attachment_paths = []
@@ -1100,7 +1190,12 @@ async def update_issue(
         all_updates["attachments"] = attachment_paths
 
     try:
-        issue = jira.update_issue(issue_key=issue_key, **all_updates)
+        issue = await asyncio.to_thread(
+            jira.update_issue,
+            issue_key=issue_key,
+            update=update,
+            **all_updates,
+        )
         result = issue.to_simplified_dict()
         if (
             hasattr(issue, "custom_fields")
@@ -1137,7 +1232,10 @@ async def delete_issue(
         ValueError: If in read-only mode or Jira client unavailable.
     """
     jira = await get_jira_fetcher(ctx)
-    jira.delete_issue(issue_key)
+    await asyncio.to_thread(
+        jira.delete_issue,
+        issue_key,
+    )
     result = {"message": f"Issue {issue_key} has been deleted successfully."}
     # The underlying method raises on failure, so if we reach here, it's success.
     return json.dumps(result, indent=2, ensure_ascii=False)
@@ -1165,7 +1263,11 @@ async def add_comment(
     """
     jira = await get_jira_fetcher(ctx)
     # add_comment returns dict
-    result = jira.add_comment(issue_key, comment)
+    result = await asyncio.to_thread(
+        jira.add_comment,
+        issue_key,
+        comment,
+    )
     return json.dumps(result, indent=2, ensure_ascii=False)
 
 
@@ -1224,7 +1326,8 @@ async def add_worklog(
     """
     jira = await get_jira_fetcher(ctx)
     # add_worklog returns dict
-    worklog_result = jira.add_worklog(
+    worklog_result = await asyncio.to_thread(
+        jira.add_worklog,
         issue_key=issue_key,
         time_spent=time_spent,
         comment=comment,
@@ -1261,7 +1364,11 @@ async def link_to_epic(
         ValueError: If in read-only mode or Jira client unavailable.
     """
     jira = await get_jira_fetcher(ctx)
-    issue = jira.link_issue_to_epic(issue_key, epic_key)
+    issue = await asyncio.to_thread(
+        jira.link_issue_to_epic,
+        issue_key,
+        epic_key,
+    )
     result = {
         "message": f"Issue {issue_key} has been linked to epic {epic_key}.",
         "issue": issue.to_simplified_dict(),
@@ -1333,8 +1440,181 @@ async def create_issue_link(
                 logger.warning("Invalid comment_visibility dictionary structure.")
         link_data["comment"] = comment_obj
 
-    result = jira.create_issue_link(link_data)
+    try:
+        result = await asyncio.to_thread(
+            jira.create_issue_link,
+            link_data,
+        )
+    except Exception as link_error:
+        if _NO_LINK_ISSUE_PERMISSION not in str(link_error).lower():
+            # The update-issue fallback only works around Jira's issue-level
+            # "Link Issues" restriction. Anything else (a nonexistent issue, an
+            # unknown link type, a timeout) is a real failure, so surface Jira's
+            # actual message instead of hiding it behind a generic response.
+            logger.error(
+                f"Could not create link '{link_type}' from {outward_issue_key} "
+                f"to {inward_issue_key}: {link_error!s}"
+            )
+            raise
+        # Jira enforces "Link Issues" against both issues on the dedicated
+        # endpoint, but only against the issue being updated on the update
+        # endpoint, so linking from the other side can still succeed. If this
+        # also fails, the error propagates with Jira's real message.
+        logger.info(
+            f"Direct creation of link '{link_type}' from {outward_issue_key} to "
+            f"{inward_issue_key} was denied; retrying via the update endpoint"
+        )
+        await asyncio.to_thread(
+            jira.add_issue_link_via_update,
+            outward_issue_key,
+            link_type,
+            "inwardIssue",
+            inward_issue_key,
+        )
+        result = {
+            "success": True,
+            "message": (
+                f"Link created between {inward_issue_key} and {outward_issue_key}"
+            ),
+            "link_type": link_type,
+            "inward_issue": inward_issue_key,
+            "outward_issue": outward_issue_key,
+            "method": "issue_update_fallback",
+        }
+
     return json.dumps(result, indent=2, ensure_ascii=False)
+
+
+@jira_mcp.tool(tags={"jira", "write"})
+@check_write_access
+async def clone_issue(
+    ctx: Context,
+    issue_key: Annotated[
+        str, Field(description="The key of the issue to clone (e.g., 'PROJ-123')")
+    ],
+    project_key: Annotated[
+        str | None,
+        Field(
+            description=(
+                "(Optional) Target project key for the clone (e.g., 'PROJ'). "
+                "Defaults to the source issue's project. If the source issue is "
+                "a subtask, its parent link is only preserved when cloning into "
+                "the same project."
+            ),
+            default=None,
+        ),
+    ] = None,
+    summary: Annotated[
+        str | None,
+        Field(
+            description=(
+                "(Optional) Summary for the cloned issue. Defaults to "
+                "'CLONE - <source summary>', matching Jira's built-in Clone action."
+            ),
+            default=None,
+        ),
+    ] = None,
+    *,
+    include_custom_fields: Annotated[
+        bool,
+        Field(
+            description=(
+                "Whether to copy all populated custom fields from the source "
+                "issue (e.g., Epic Name, Epic Link, and other customfield_* values)"
+            ),
+            default=True,
+        ),
+    ] = True,
+    link_to_original: Annotated[
+        bool,
+        Field(
+            description=(
+                "Whether to create a 'Cloners' issue link between the new clone "
+                "and the source issue, matching Jira's built-in Clone action"
+            ),
+            default=True,
+        ),
+    ] = True,
+    include_links: Annotated[
+        bool,
+        Field(
+            description=(
+                "Whether to re-create the source issue's other issue links "
+                "(e.g. 'blocks', 'relates to') on the clone, preserving their "
+                "type and direction relative to each linked issue"
+            ),
+            default=True,
+        ),
+    ] = True,
+    additional_fields: Annotated[
+        dict[str, Any] | None,
+        Field(
+            description=(
+                "(Optional) Dictionary of fields to override or add on top of "
+                "the fields copied from the source issue. "
+                "Example: {'priority': {'name': 'High'}}"
+            ),
+            default=None,
+        ),
+    ] = None,
+) -> str:
+    """Clone an existing Jira issue by copying its fields into a new issue.
+
+    Jira does not provide a single "clone issue" REST endpoint on Data Center,
+    Server, or Cloud. This tool reproduces the Jira UI's built-in Clone action:
+    it fetches the source issue's fields, creates a new issue with those fields
+    copied over (summary, description, issue type, priority, labels, components,
+    fix/affects versions, assignee, due date, security level, environment, and
+    populated custom fields), and links the new issue back to the source issue
+    with a "Cloners" issue link.
+
+    Each standard and custom field is pre-verified against the target project's
+    create screen metadata before being copied, so fields that are not available
+    for that project/issue type are excluded individually instead of failing the
+    whole clone. Any excluded fields are listed under "excluded_fields" in the
+    response.
+
+    Args:
+        ctx: The FastMCP context.
+        issue_key: The key of the issue to clone.
+        project_key: Optional target project key.
+        summary: Optional summary override for the clone.
+        include_custom_fields: Whether to copy populated custom fields.
+        link_to_original: Whether to create a "Cloners" link back to the source issue.
+        include_links: Whether to re-create the source issue's other issue links.
+        additional_fields: Optional dictionary of fields to override or add.
+
+    Returns:
+        JSON string representing the newly created clone issue. Includes an
+        "excluded_fields" list when fields were skipped because they are not
+        on the target create screen.
+
+    Raises:
+        ValueError: If in read-only mode, Jira client unavailable, or the source
+            issue/target project is invalid.
+    """
+    jira = await get_jira_fetcher(ctx)
+    issue = await asyncio.to_thread(
+        jira.clone_issue,
+        issue_key=issue_key,
+        project_key=project_key,
+        summary=summary,
+        include_custom_fields=include_custom_fields,
+        link_to_original=link_to_original,
+        include_links=include_links,
+        additional_fields=additional_fields,
+    )
+    result = issue.to_simplified_dict()
+    response: dict[str, Any] = {
+        "message": f"Issue {issue_key} cloned successfully",
+        "issue": result,
+    }
+    if (
+        hasattr(issue, "custom_fields")
+        and "clone_excluded_fields" in issue.custom_fields
+    ):
+        response["excluded_fields"] = issue.custom_fields["clone_excluded_fields"]
+    return json.dumps(response, indent=2, ensure_ascii=False)
 
 
 @jira_mcp.tool(tags={"jira", "write"})
@@ -1415,7 +1695,11 @@ async def create_remote_issue_link(
     if relationship:
         link_data["relationship"] = relationship
 
-    result = jira.create_remote_issue_link(issue_key, link_data)
+    result = await asyncio.to_thread(
+        jira.create_remote_issue_link,
+        issue_key,
+        link_data,
+    )
     return json.dumps(result, indent=2, ensure_ascii=False)
 
 
@@ -1441,7 +1725,10 @@ async def remove_issue_link(
     if not link_id:
         raise ValueError("link_id is required")
 
-    result = jira.remove_issue_link(link_id)  # Returns dict on success
+    result = await asyncio.to_thread(
+        jira.remove_issue_link,
+        link_id,
+    )  # Returns dict on success
     return json.dumps(result, indent=2, ensure_ascii=False)
 
 
@@ -1504,7 +1791,8 @@ async def transition_issue(
     if not isinstance(update_fields, dict):
         raise ValueError("fields must be a dictionary.")
 
-    issue = jira.transition_issue(
+    issue = await asyncio.to_thread(
+        jira.transition_issue,
         issue_key=issue_key,
         transition_id=transition_id,
         fields=update_fields,
@@ -1553,7 +1841,8 @@ async def create_sprint(
         ValueError: If in read-only mode or Jira client unavailable.
     """
     jira = await get_jira_fetcher(ctx)
-    sprint = jira.create_sprint(
+    sprint = await asyncio.to_thread(
+        jira.create_sprint,
         board_id=board_id,
         sprint_name=sprint_name,
         start_date=start_date,
@@ -1603,7 +1892,8 @@ async def update_sprint(
         ValueError: If in read-only mode or Jira client unavailable.
     """
     jira = await get_jira_fetcher(ctx)
-    sprint = jira.update_sprint(
+    sprint = await asyncio.to_thread(
+        jira.update_sprint,
         sprint_id=sprint_id,
         sprint_name=sprint_name,
         state=state,
@@ -1628,7 +1918,10 @@ async def get_project_versions(
 ) -> str:
     """Get all fix versions for a specific Jira project."""
     jira = await get_jira_fetcher(ctx)
-    versions = jira.get_project_versions(project_key)
+    versions = await asyncio.to_thread(
+        jira.get_project_versions,
+        project_key,
+    )
     return json.dumps(versions, indent=2, ensure_ascii=False)
 
 
@@ -1659,7 +1952,10 @@ async def get_all_projects(
     """
     try:
         jira = await get_jira_fetcher(ctx)
-        projects = jira.get_all_projects(include_archived=include_archived)
+        projects = await asyncio.to_thread(
+            jira.get_all_projects,
+            include_archived=include_archived,
+        )
     except (MCPAtlassianAuthenticationError, HTTPError, OSError, ValueError) as e:
         error_message = ""
         log_level = logging.ERROR
@@ -1686,7 +1982,11 @@ async def get_all_projects(
     if jira.config.projects_filter:
         # Split projects filter by commas and handle possible whitespace
         allowed_project_keys = {
-            p.strip().upper() for p in jira.config.projects_filter.split(",")
+            p.strip().upper()
+            for p in await asyncio.to_thread(
+                jira.config.projects_filter.split,
+                ",",
+            )
         }
         projects = [
             project
@@ -1728,7 +2028,8 @@ async def create_version(
     """
     jira = await get_jira_fetcher(ctx)
     try:
-        version = jira.create_project_version(
+        version = await asyncio.to_thread(
+            jira.create_project_version,
             project_key=project_key,
             name=name,
             start_date=start_date,
@@ -1803,7 +2104,8 @@ async def batch_create_versions(
             )
             continue
         try:
-            version = jira.create_project_version(
+            version = await asyncio.to_thread(
+                jira.create_project_version,
                 project_key=project_key,
                 name=v["name"],
                 start_date=v.get("startDate"),
@@ -2263,7 +2565,11 @@ async def construct_download_endpoint(
         # instance, or not fetched yet. Fetch it on demand so the download-URL
         # flow works regardless of which instance served jira_download_attachments.
         jira = await get_jira_fetcher(ctx)
-        if not jira.fetch_and_cache_attachment(issue_key, filename):
+        if not await asyncio.to_thread(
+            jira.fetch_and_cache_attachment,
+            issue_key,
+            filename,
+        ):
             raise
         token_info = cache.create_download_token(
             issue_key=issue_key,
@@ -2366,7 +2672,8 @@ async def jira_upload_attachment(
             )
             continue
 
-        result = jira.upload_attachment_from_bytes(
+        result = await asyncio.to_thread(
+            jira.upload_attachment_from_bytes,
             issue_key=issue_key,
             filename=entry["filename"],
             content=entry["content"],
@@ -2562,7 +2869,11 @@ async def summarize_attachments(
     """
     jira = await get_jira_fetcher(ctx)
 
-    issue_data = jira.jira.issue(issue_key, fields="attachment")
+    issue_data = await asyncio.to_thread(
+        jira.jira.issue,
+        issue_key,
+        fields="attachment",
+    )
     if not isinstance(issue_data, dict) or "fields" not in issue_data:
         return json.dumps(
             {"success": False, "error": f"Could not retrieve issue {issue_key}"},
@@ -2728,7 +3039,11 @@ async def get_attachment_images(
 
     jira = await get_jira_fetcher(ctx)
 
-    issue_data = jira.jira.issue(issue_key, fields="attachment")
+    issue_data = await asyncio.to_thread(
+        jira.jira.issue,
+        issue_key,
+        fields="attachment",
+    )
     if not isinstance(issue_data, dict) or "fields" not in issue_data:
         return ToolResult(
             content=[

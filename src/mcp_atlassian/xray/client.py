@@ -6,12 +6,14 @@ from atlassian import Xray
 from requests import Session
 
 from mcp_atlassian.exceptions import MCPAtlassianAuthenticationError
+from mcp_atlassian.utils.env import get_env_retries
 from mcp_atlassian.utils.logging import (
     get_masked_session_headers,
     log_config_param,
     mask_sensitive,
 )
 from mcp_atlassian.utils.oauth import configure_oauth_session
+from mcp_atlassian.utils.retry import configure_retries
 from mcp_atlassian.utils.ssl import configure_ssl_verification
 
 from .config import XrayConfig
@@ -66,6 +68,7 @@ class XrayClient:
                 session=session,
                 cloud=self.config.is_cloud,  # Use consistent config value
                 verify_ssl=self.config.ssl_verify,
+                timeout=self.config.timeout,
             )
         elif self.config.auth_type == "pat":
             logger.debug(
@@ -78,6 +81,7 @@ class XrayClient:
                 token=self.config.personal_token,
                 cloud=self.config.is_cloud,
                 verify_ssl=self.config.ssl_verify,
+                timeout=self.config.timeout,
             )
         else:  # basic auth
             logger.debug(
@@ -92,6 +96,7 @@ class XrayClient:
                 password=self.config.api_token,
                 cloud=self.config.is_cloud,
                 verify_ssl=self.config.ssl_verify,
+                timeout=self.config.timeout,
             )
             logger.debug(
                 f"Xray client initialized. Session headers (Authorization masked): "
@@ -104,6 +109,14 @@ class XrayClient:
             url=self.config.url,
             session=self.xray._session,
             ssl_verify=self.config.ssl_verify,
+        )
+
+        # Applied after SSL so the retry policy attaches to the adapters
+        # that configuration may have mounted.
+        configure_retries(
+            service_name="Xray",
+            session=self.xray._session,
+            retries=get_env_retries(),
         )
 
         # Proxy configuration
@@ -168,3 +181,42 @@ class XrayClient:
 
         url = self.xray.resource_url("testruns", api_version="2.0")
         return self.xray.get(url, params=params)
+
+    def update_test_run_step(
+        self,
+        test_run_id: int,
+        step_id: int,
+        *,
+        status: str | None = None,
+        comment: str | None = None,
+        actual_result: str | None = None,
+    ) -> Any:
+        """Update writable fields on a Test Run step using Xray REST API v2.
+
+        Args:
+            test_run_id: ID of the Test Run.
+            step_id: ID of the step result within that Test Run.
+            status: Optional step status (e.g. "PASS", "FAIL").
+            comment: Optional step comment.
+            actual_result: Optional actual result text.
+
+        Returns:
+            The response returned by the Xray step-result endpoint.
+
+        Raises:
+            ValueError: If no writable fields are supplied.
+        """
+        update: dict[str, str] = {}
+        if status is not None:
+            update["status"] = status
+        if comment is not None:
+            update["comment"] = comment
+        if actual_result is not None:
+            update["actualResult"] = actual_result
+        if not update:
+            raise ValueError("At least one Test Run step field must be provided")
+
+        url = self.xray.resource_url(
+            f"testrun/{test_run_id}/step/{step_id}", api_version="2.0"
+        )
+        return self.xray.put(url, update)

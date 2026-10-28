@@ -145,10 +145,14 @@ class EpicsMixin(
             # Extract and handle epic_name
             epic_name_field = self._get_epic_name_field_id(field_ids)
             if epic_name_field:
-                # Get epic name value
-                epic_name = kwargs.pop(
-                    "epic_name", kwargs.pop("epicName", summary)
-                )  # Use summary as default if epic_name not provided
+                # Get epic name value. Prefer a value passed under the actual
+                # field ID (e.g. "customfield_10005" via additional_fields),
+                # since callers commonly set it that way rather than via the
+                # "epic_name"/"epicName" aliases. Falls back to summary.
+                if epic_name_field in kwargs:
+                    epic_name = kwargs.pop(epic_name_field)
+                else:
+                    epic_name = kwargs.pop("epic_name", kwargs.pop("epicName", summary))
 
                 # Check if this field is required
                 if epic_name_field in required_fields:

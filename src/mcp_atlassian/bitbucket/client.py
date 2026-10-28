@@ -8,11 +8,13 @@ from atlassian import Bitbucket
 from requests import Session
 
 from mcp_atlassian.exceptions import MCPAtlassianAuthenticationError
+from mcp_atlassian.utils.env import get_env_retries
 from mcp_atlassian.utils.logging import (
     get_masked_session_headers,
     mask_sensitive,
 )
 from mcp_atlassian.utils.oauth import configure_oauth_session
+from mcp_atlassian.utils.retry import configure_retries
 from mcp_atlassian.utils.ssl import configure_ssl_verification
 
 from .config import BitbucketConfig
@@ -62,6 +64,7 @@ class BitbucketClient:
                 session=session,
                 cloud=True,  # OAuth is only for Cloud
                 verify_ssl=self.config.ssl_verify,
+                timeout=self.config.timeout,
             )
         elif self.config.auth_type == "pat":
             logger.debug(
@@ -73,6 +76,7 @@ class BitbucketClient:
                 url=self.config.url,
                 cloud=self.config.is_cloud,
                 verify_ssl=self.config.ssl_verify,
+                timeout=self.config.timeout,
                 token=self.config.personal_token,
             )
 
@@ -89,6 +93,7 @@ class BitbucketClient:
                 password=self.config.app_password,
                 cloud=self.config.is_cloud,
                 verify_ssl=self.config.ssl_verify,
+                timeout=self.config.timeout,
             )
             logger.debug(
                 f"Bitbucket client initialized. Session headers (Authorization masked): "
@@ -101,6 +106,14 @@ class BitbucketClient:
             url=self.config.url,
             session=self.bitbucket._session,
             ssl_verify=self.config.ssl_verify,
+        )
+
+        # Applied after SSL so the retry policy attaches to the adapters
+        # that configuration may have mounted.
+        configure_retries(
+            service_name="Bitbucket",
+            session=self.bitbucket._session,
+            retries=get_env_retries(),
         )
 
         # Proxy configuration
