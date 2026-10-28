@@ -2,6 +2,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
+from fastmcp.exceptions import ToolError
 
 from mcp_atlassian.exceptions import MCPAtlassianAuthenticationError
 from mcp_atlassian.servers import bitbucket as bitbucket_server
@@ -30,7 +31,7 @@ def make_ctx(read_only: bool = False) -> SimpleNamespace:
 
 def tool_fn(name: str):
     """Return the underlying coroutine for a tool name."""
-    return getattr(bitbucket_server, name).fn
+    return getattr(bitbucket_server, name)
 
 
 success_cases = [
@@ -156,11 +157,7 @@ success_cases.extend(
         {
             "func": "create_pull_request",
             "method": "create_pull_request",
-            "method_impl": lambda workspace,
-            repository,
-            pr_data,
-            *,
-            capture=create_pr_capture: (
+            "method_impl": lambda workspace, repository, pr_data, *, capture=create_pr_capture: (
                 capture.update({"payload": pr_data}) or {"id": 42}
             ),
             "kwargs": {
@@ -202,11 +199,7 @@ success_cases.extend(
         {
             "func": "create_branch",
             "method": "create_branch",
-            "method_impl": lambda workspace,
-            repository,
-            branch_data,
-            *,
-            capture=create_branch_capture: (
+            "method_impl": lambda workspace, repository, branch_data, *, capture=create_branch_capture: (
                 capture.update({"payload": branch_data}) or {"name": "feature"}
             ),
             "kwargs": {
@@ -347,11 +340,11 @@ async def test_create_branch_read_only(monkeypatch: pytest.MonkeyPatch) -> None:
     ctx = make_ctx(read_only=True)
 
     async def fake_fetcher(_ctx):  # noqa: ANN001
-        AssertionError("Fetcher should not be called when read-only")
+        raise AssertionError("Fetcher should not be called when read-only")
 
     monkeypatch.setattr(bitbucket_server, "get_bitbucket_fetcher", fake_fetcher)
 
-    with pytest.raises(ValueError) as exc:
+    with pytest.raises(ToolError) as exc:
         await tool_fn("create_branch")(
             ctx, "ws", "rep", branch_name="feature", source_branch="main"
         )

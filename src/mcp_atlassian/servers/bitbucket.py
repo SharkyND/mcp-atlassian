@@ -17,8 +17,18 @@ logger = logging.getLogger(__name__)
 bitbucket_mcp = FastMCP(name="Bitbucket MCP Service")
 
 
-@bitbucket_mcp.tool(tags={"bitbucket", "read"})
-async def list_workspaces_or_projects(ctx: Context) -> str:
+@bitbucket_mcp.tool(tags={"bitbucket", "read", "toolset:bitbucket"})
+async def list_workspaces_or_projects(
+    ctx: Context,
+    limit: Annotated[
+        int | None,
+        Field(
+            description="Optional maximum number of workspaces/projects to return",
+            ge=1,
+            le=1000,
+        ),
+    ] = None,
+) -> str:
     """
     List all accessible workspaces (Cloud) or projects (Server/DC).
 
@@ -31,6 +41,8 @@ async def list_workspaces_or_projects(ctx: Context) -> str:
     try:
         bitbucket = await get_bitbucket_fetcher(ctx)
         workspaces = bitbucket.get_all_workspaces()
+        if limit is not None:
+            workspaces = workspaces[:limit]
         workspace_dicts = [
             ws.model_dump(mode="json", serialize_as_any=True) for ws in workspaces
         ]
@@ -57,7 +69,7 @@ async def list_workspaces_or_projects(ctx: Context) -> str:
         return json.dumps(error_result, indent=2)
 
 
-@bitbucket_mcp.tool(tags={"bitbucket", "read"})
+@bitbucket_mcp.tool(tags={"bitbucket", "read", "toolset:bitbucket"})
 async def list_repositories(
     ctx: Context,
     workspace: Annotated[
@@ -109,7 +121,7 @@ async def list_repositories(
         return json.dumps(error_result, indent=2)
 
 
-@bitbucket_mcp.tool(tags={"bitbucket", "read"})
+@bitbucket_mcp.tool(tags={"bitbucket", "read", "toolset:bitbucket"})
 async def get_repository_info(
     ctx: Context,
     workspace: Annotated[
@@ -162,7 +174,7 @@ async def get_repository_info(
         return json.dumps(error_result, indent=2)
 
 
-@bitbucket_mcp.tool(tags={"bitbucket", "read"})
+@bitbucket_mcp.tool(tags={"bitbucket", "read", "toolset:bitbucket"})
 async def list_branches(
     ctx: Context,
     workspace: Annotated[
@@ -239,7 +251,7 @@ async def list_branches(
         return json.dumps(error_result, indent=2)
 
 
-@bitbucket_mcp.tool(tags={"bitbucket", "read"})
+@bitbucket_mcp.tool(tags={"bitbucket", "read", "toolset:bitbucket"})
 async def get_default_branch(
     ctx: Context,
     workspace: Annotated[
@@ -294,7 +306,7 @@ async def get_default_branch(
         return json.dumps(error_result, indent=2)
 
 
-@bitbucket_mcp.tool(tags={"bitbucket", "read"})
+@bitbucket_mcp.tool(tags={"bitbucket", "read", "toolset:bitbucket"})
 async def get_file_content(
     ctx: Context,
     workspace: Annotated[
@@ -373,7 +385,7 @@ async def get_file_content(
         return json.dumps(error_result, indent=2)
 
 
-@bitbucket_mcp.tool(tags={"bitbucket", "read"})
+@bitbucket_mcp.tool(tags={"bitbucket", "read", "toolset:bitbucket"})
 async def list_directory(
     ctx: Context,
     workspace: Annotated[
@@ -435,7 +447,7 @@ async def list_directory(
         return json.dumps(error_result, indent=2)
 
 
-@bitbucket_mcp.tool(tags={"bitbucket", "read"})
+@bitbucket_mcp.tool(tags={"bitbucket", "read", "toolset:bitbucket"})
 async def list_pull_requests(
     ctx: Context,
     workspace: Annotated[
@@ -490,7 +502,7 @@ async def list_pull_requests(
         return json.dumps(error_result, indent=2)
 
 
-@bitbucket_mcp.tool(tags={"bitbucket", "read"})
+@bitbucket_mcp.tool(tags={"bitbucket", "read", "toolset:bitbucket"})
 async def pull_request_activities(
     ctx: Context,
     workspace: Annotated[
@@ -546,7 +558,7 @@ async def pull_request_activities(
         return json.dumps(error_result, indent=2)
 
 
-@bitbucket_mcp.tool(tags={"bitbucket", "read"})
+@bitbucket_mcp.tool(tags={"bitbucket", "read", "toolset:bitbucket"})
 async def get_pull_request(
     ctx: Context,
     workspace: Annotated[
@@ -604,7 +616,7 @@ async def get_pull_request(
         return json.dumps(error_result, indent=2)
 
 
-@bitbucket_mcp.tool(tags={"bitbucket", "read"})
+@bitbucket_mcp.tool(tags={"bitbucket", "read", "toolset:bitbucket"})
 async def get_commit_changes(
     ctx: Context,
     workspace: Annotated[
@@ -674,7 +686,7 @@ async def get_commit_changes(
         return json.dumps(error_result, indent=2)
 
 
-@bitbucket_mcp.tool(tags={"bitbucket", "read"})
+@bitbucket_mcp.tool(tags={"bitbucket", "read", "toolset:bitbucket"})
 async def get_commits(
     ctx: Context,
     workspace: Annotated[
@@ -748,7 +760,7 @@ async def get_commits(
         return json.dumps(error_result, indent=2)
 
 
-@bitbucket_mcp.tool(tags={"bitbucket", "write"})
+@bitbucket_mcp.tool(tags={"bitbucket", "write", "toolset:bitbucket"})
 @check_write_access
 async def create_pull_request(
     ctx: Context,
@@ -852,7 +864,7 @@ async def create_pull_request(
         return json.dumps(error_result, indent=2)
 
 
-@bitbucket_mcp.tool(tags={"bitbucket", "write"})
+@bitbucket_mcp.tool(tags={"bitbucket", "write", "toolset:bitbucket"})
 @check_write_access
 async def create_branch(
     ctx: Context,
@@ -926,7 +938,7 @@ async def create_branch(
         return json.dumps(error_result, indent=2)
 
 
-@bitbucket_mcp.tool(tags={"bitbucket", "write"})
+@bitbucket_mcp.tool(tags={"bitbucket", "write", "toolset:bitbucket"})
 @check_write_access
 async def add_pull_request_blocker_comment(
     ctx: Context,
@@ -1007,7 +1019,7 @@ async def add_pull_request_blocker_comment(
         return json.dumps(error_result, indent=2)
 
 
-@bitbucket_mcp.tool(tags={"bitbucket", "write"})
+@bitbucket_mcp.tool(tags={"bitbucket", "write", "toolset:bitbucket"})
 @check_write_access
 async def add_pull_request_comment(
     ctx: Context,

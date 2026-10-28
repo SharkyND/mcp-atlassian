@@ -382,6 +382,71 @@ MOCK_SPACES_RESPONSE = {
     },
 }
 
+# ============================================================================
+# Confluence Space / Content Type / Macro Definitions (used by unit test fixtures)
+# ============================================================================
+
+MOCK_CONFLUENCE_SPACES: list[dict] = [
+    {
+        "id": 12345,
+        "key": "TEST",
+        "name": "Test Space",
+        "type": "global",
+        "status": "current",
+        "description": {"plain": {"value": "Test space for unit tests"}},
+        "_links": {
+            "webui": "/spaces/TEST",
+            "self": "https://test.atlassian.net/wiki/rest/api/space/TEST",
+        },
+    },
+    {
+        "id": 12346,
+        "key": "DEMO",
+        "name": "Demo Space",
+        "type": "global",
+        "status": "current",
+        "description": {"plain": {"value": "Demo space for testing"}},
+        "_links": {
+            "webui": "/spaces/DEMO",
+            "self": "https://test.atlassian.net/wiki/rest/api/space/DEMO",
+        },
+    },
+    {
+        "id": 12347,
+        "key": "SAMPLE",
+        "name": "Sample Space",
+        "type": "personal",
+        "status": "current",
+        "description": {"plain": {"value": "Sample personal space"}},
+        "_links": {
+            "webui": "/spaces/SAMPLE",
+            "self": "https://test.atlassian.net/wiki/rest/api/space/SAMPLE",
+        },
+    },
+]
+
+MOCK_CONFLUENCE_CONTENT_TYPES: list[dict] = [
+    {"name": "page", "type": "content"},
+    {"name": "blogpost", "type": "content"},
+    {"name": "comment", "type": "content"},
+    {"name": "attachment", "type": "content"},
+    {"name": "space", "type": "space"},
+    {"name": "user", "type": "user"},
+]
+
+MOCK_CONFLUENCE_MACROS: list[dict] = [
+    {"name": "info", "hasBody": True, "bodyType": "rich-text"},
+    {"name": "warning", "hasBody": True, "bodyType": "rich-text"},
+    {"name": "note", "hasBody": True, "bodyType": "rich-text"},
+    {"name": "tip", "hasBody": True, "bodyType": "rich-text"},
+    {"name": "code", "hasBody": True, "bodyType": "plain-text"},
+    {"name": "toc", "hasBody": False},
+    {"name": "children", "hasBody": False},
+    {"name": "excerpt", "hasBody": True, "bodyType": "rich-text"},
+    {"name": "include", "hasBody": False},
+    {"name": "panel", "hasBody": True, "bodyType": "rich-text"},
+]
+
 MOCK_PAGES_FROM_SPACE_RESPONSE = [
     {
         "id": "123456789",
@@ -468,3 +533,160 @@ MOCK_PAGES_FROM_SPACE_RESPONSE = [
         },
     },
 ]
+
+# ============================================================================
+# Comment Reply Mock Data
+# ============================================================================
+
+MOCK_PARENT_COMMENT_V1_RESPONSE = {
+    "id": "456789123",
+    "type": "comment",
+    "status": "current",
+    "title": "Original Comment",
+    "container": {
+        "id": "987654321",
+        "type": "page",
+        "status": "current",
+        "title": "Example Page",
+    },
+}
+
+MOCK_COMMENT_REPLY_V1_RESPONSE = {
+    "id": "111222333",
+    "type": "comment",
+    "status": "current",
+    "title": "Re: Original Comment",
+    "container": {
+        "id": "456789123",
+        "type": "comment",
+        "status": "current",
+        "title": "Original Comment",
+    },
+    "body": {
+        "view": {
+            "value": "<p>This is a reply</p>",
+            "representation": "view",
+        },
+    },
+    "version": {
+        "by": {
+            "type": "known",
+            "accountId": "user123",
+            "displayName": "Test User",
+        },
+        "when": "2024-01-02T10:00:00.000Z",
+        "number": 1,
+    },
+    "extensions": {
+        "location": "footer",
+    },
+    "_links": {
+        "webui": "/spaces/TEST/pages/12345?focusedCommentId=111222333",
+        "self": "https://example.atlassian.net/wiki/rest/api/content/111222333",
+    },
+}
+
+MOCK_COMMENT_REPLY_V2_RESPONSE = {
+    "id": "222333444",
+    "status": "current",
+    "title": "Re: Original Comment",
+    "parentCommentId": "456789123",
+    "pageId": "12345",
+    "body": {
+        "storage": {
+            "value": "<p>This is a v2 reply</p>",
+            "representation": "storage",
+        },
+    },
+    "version": {
+        "number": 1,
+        "createdAt": "2024-01-02T10:00:00.000Z",
+    },
+    "author": {
+        "type": "known",
+        "accountId": "user123",
+        "displayName": "Test User",
+    },
+    "_links": {
+        "webui": "/spaces/TEST/pages/12345?focusedCommentId=222333444",
+    },
+}
+
+# ============================================================================
+# Inline Comment Mock Data
+# ============================================================================
+
+MOCK_INLINE_COMMENT_V1_RESPONSE = {
+    "id": "333444555",
+    "type": "comment",
+    "status": "current",
+    "title": "Inline Comment",
+    "container": {
+        "id": "12345",
+        "type": "page",
+        "status": "current",
+        "title": "Test Page",
+    },
+    "body": {
+        "view": {
+            "value": "<p>This is an inline comment</p>",
+            "representation": "view",
+        },
+    },
+    "version": {
+        "by": {
+            "type": "known",
+            "accountId": "user123",
+            "displayName": "Test User",
+        },
+        "when": "2024-01-03T10:00:00.000Z",
+        "number": 1,
+    },
+    "extensions": {
+        "location": "inline",
+        "inlineProperties": {
+            "originalSelection": "some text to anchor",
+        },
+    },
+    "_links": {
+        "webui": "/spaces/TEST/pages/12345?focusedCommentId=333444555",
+        "self": "https://example.atlassian.net/wiki/rest/api/content/333444555",
+    },
+}
+
+MOCK_INLINE_COMMENT_V2_RESPONSE = {
+    "id": "444555666",
+    "status": "open",
+    "pageId": "12345",
+    "inlineCommentProperties": {
+        "textSelection": "some text to anchor",
+        "textSelectionMatchCount": 1,
+        "textSelectionMatchIndex": 0,
+        "resolved": False,
+    },
+    "body": {
+        "storage": {
+            "value": "<p>This is a v2 inline comment</p>",
+            "representation": "storage",
+        },
+    },
+    "version": {
+        "number": 1,
+        "createdAt": "2024-01-03T10:00:00.000Z",
+    },
+    "author": {
+        "type": "known",
+        "accountId": "user123",
+        "displayName": "Test User",
+    },
+    "_links": {
+        "webui": "/spaces/TEST/pages/12345?focusedCommentId=444555666",
+    },
+}
+
+MOCK_INLINE_COMMENTS_V2_LIST_RESPONSE = {
+    "results": [MOCK_INLINE_COMMENT_V2_RESPONSE],
+    "_links": {
+        "self": "https://example.atlassian.net/wiki/api/v2/pages/12345/inline-comments",
+    },
+}

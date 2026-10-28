@@ -7,11 +7,13 @@ reusable fixtures for model validation and serialization testing.
 """
 
 import os
+from datetime import datetime, tzinfo
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pytest
 
-from mcp_atlassian.utils.env import is_env_truthy
+from mcp_atlassian.utils import parse_date as parse_date_utility
 from tests.fixtures.confluence_mocks import (
     MOCK_COMMENTS_RESPONSE,
     MOCK_CQL_SEARCH_RESPONSE,
@@ -21,7 +23,6 @@ from tests.fixtures.confluence_mocks import (
 
 # Import mock data
 from tests.fixtures.jira_mocks import (
-    MOCK_JIRA_COMMENTS,
     MOCK_JIRA_ISSUE_RESPONSE,
     MOCK_JIRA_JQL_RESPONSE,
 )
@@ -34,6 +35,56 @@ from tests.utils.factories import (
 # ============================================================================
 # Factory-Based Data Fixtures
 # ============================================================================
+
+
+@pytest.fixture
+def pacific_timezone(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Use America/Los_Angeles when converting datetimes to local time."""
+
+    class PacificDatetime(datetime):
+        @classmethod
+        def fromisoformat(
+            cls: type["PacificDatetime"], date_string: str
+        ) -> "PacificDatetime":
+            parsed = datetime.fromisoformat(date_string)
+            return cls(
+                parsed.year,
+                parsed.month,
+                parsed.day,
+                parsed.hour,
+                parsed.minute,
+                parsed.second,
+                parsed.microsecond,
+                parsed.tzinfo,
+                fold=parsed.fold,
+            )
+
+        def astimezone(self, tz: tzinfo | None = None) -> "PacificDatetime":
+            converted = super().astimezone(tz or ZoneInfo("America/Los_Angeles"))
+            return self.fromtimestamp(converted.timestamp(), converted.tzinfo)
+
+    def parse_date_in_pacific(
+        date_str: str | int | None,
+    ) -> datetime | None:
+        parsed = parse_date_utility(date_str)
+        if parsed is None:
+            return None
+        return PacificDatetime(
+            parsed.year,
+            parsed.month,
+            parsed.day,
+            parsed.hour,
+            parsed.minute,
+            parsed.second,
+            parsed.microsecond,
+            parsed.tzinfo,
+            fold=parsed.fold,
+        )
+
+    monkeypatch.setattr("mcp_atlassian.models.base.parse_date", parse_date_in_pacific)
+    monkeypatch.setattr(
+        "src.mcp_atlassian.models.base.parse_date", parse_date_in_pacific
+    )
 
 
 @pytest.fixture
@@ -123,16 +174,6 @@ def jira_search_data() -> dict[str, Any]:
     Note: This fixture is maintained for backward compatibility.
     """
     return MOCK_JIRA_JQL_RESPONSE
-
-
-@pytest.fixture
-def jira_comments_data() -> dict[str, Any]:
-    """
-    Return mock Jira comments data.
-
-    Note: This fixture is maintained for backward compatibility.
-    """
-    return MOCK_JIRA_COMMENTS
 
 
 @pytest.fixture
@@ -254,11 +295,17 @@ def complete_confluence_page_data():
         space={"key": "COMPLETE", "name": "Complete Test Space", "type": "global"},
         body={
             "storage": {
-                "value": "<h1>Complete Test Page</h1><p>This page has all fields populated.</p>",
+                "value": (
+                    "<h1>Complete Test Page</h1>"
+                    "<p>This page has all fields populated.</p>"
+                ),
                 "representation": "storage",
             },
             "view": {
-                "value": "<h1>Complete Test Page</h1><p>This page has all fields populated.</p>",
+                "value": (
+                    "<h1>Complete Test Page</h1>"
+                    "<p>This page has all fields populated.</p>"
+                ),
                 "representation": "view",
             },
         },
@@ -398,42 +445,6 @@ def confluence_model_serialization_cases():
 # ============================================================================
 # Real Data Integration Fixtures
 # ============================================================================
-
-
-@pytest.fixture
-def use_real_jira_data() -> bool:
-    """
-    Check if we should use real Jira data from the API.
-
-    This will only return True if:
-    1. The JIRA_URL, JIRA_USERNAME, and JIRA_API_TOKEN environment variables are set
-    2. The USE_REAL_DATA environment variable is set to "true"
-
-    Note: This fixture is maintained for backward compatibility.
-    """
-    required_vars = ["JIRA_URL", "JIRA_USERNAME", "JIRA_API_TOKEN"]
-    if not all(os.environ.get(var) for var in required_vars):
-        return False
-
-    return is_env_truthy("USE_REAL_DATA")
-
-
-@pytest.fixture
-def use_real_confluence_data() -> bool:
-    """
-    Check if we should use real Confluence data from the API.
-
-    This will only return True if:
-    1. The CONFLUENCE_URL, CONFLUENCE_USERNAME, and CONFLUENCE_API_TOKEN environment variables are set
-    2. The USE_REAL_DATA environment variable is set to "true"
-
-    Note: This fixture is maintained for backward compatibility.
-    """
-    required_vars = ["CONFLUENCE_URL", "CONFLUENCE_USERNAME", "CONFLUENCE_API_TOKEN"]
-    if not all(os.environ.get(var) for var in required_vars):
-        return False
-
-    return is_env_truthy("USE_REAL_DATA")
 
 
 @pytest.fixture

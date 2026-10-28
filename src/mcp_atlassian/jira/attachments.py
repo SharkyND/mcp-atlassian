@@ -1,11 +1,14 @@
 """Attachment operations for Jira API."""
 
 import logging
+import mimetypes
 import os
 from pathlib import Path
 from typing import Any
 
 from ..models.jira import JiraAttachment
+from ..utils.io import validate_safe_path
+from ..utils.media import ATTACHMENT_MAX_BYTES
 from .client import JiraClient
 from .protocols import AttachmentsOperationsProto
 
@@ -36,6 +39,20 @@ class AttachmentsMixin(JiraClient, AttachmentsOperationsProto):
             if not os.path.isabs(target_path):
                 target_path = os.path.abspath(target_path)
 
+            # Guard against path traversal (resolves symlinks)
+            validate_safe_path(target_path)
+
+            # Do not write into the working-directory root itself: that is where
+            # Python resolves imports first, so a download landing there could
+            # overwrite an importable module and gain code execution (GHSA-6vmq).
+            # Attachments must be saved into a subdirectory.
+            resolved = Path(target_path).resolve()
+            if resolved.parent == Path(os.getcwd()).resolve():
+                logger.error(
+                    f"Refusing to download into the working-directory root: {target_path}"
+                )
+                return False
+
             logger.info(f"Downloading attachment from {url} to {target_path}")
 
             # Create the directory if it doesn't exist
@@ -65,6 +82,184 @@ class AttachmentsMixin(JiraClient, AttachmentsOperationsProto):
             logger.error(f"Error downloading attachment: {str(e)}")
             return False
 
+    def fetch_attachment_content(self, url: str) -> bytes | None:
+        """
+        Fetch attachment content into memory.
+
+        Args:
+            url: The URL of the attachment to download
+
+        Returns:
+            The raw bytes of the attachment, or None on failure
+        """
+        if not url:
+            logger.error("No URL provided for attachment fetch")
+            return None
+
+        try:
+            logger.info(f"Fetching attachment from {url}")
+            response = self.jira._session.get(url, stream=True)
+            response.raise_for_status()
+
+            chunks: list[bytes] = []
+            for chunk in response.iter_content(chunk_size=8192):
+                chunks.append(chunk)
+
+            data = b"".join(chunks)
+            logger.info(
+                f"Successfully fetched attachment from {url} (size: {len(data)} bytes)"
+            )
+            return data
+
+        except Exception as e:
+            logger.error(f"Error fetching attachment: {str(e)}")
+            return None
+
+    def get_issue_attachments(self, issue_key: str) -> list[JiraAttachment]:
+        """Return attachment metadata for a Jira issue without downloading.
+
+        Args:
+            issue_key: The Jira issue key (e.g., 'PROJ-123').
+
+        Returns:
+            A list of JiraAttachment instances.
+        """
+        logger.info(f"Fetching attachment metadata for {issue_key}")
+        issue_data = self.jira.issue(issue_key, fields="attachment")
+
+        if not isinstance(issue_data, dict):
+            msg = f"Unexpected return value type from `jira.issue`: {type(issue_data)}"
+            logger.error(msg)
+            raise TypeError(msg)
+
+        if "fields" not in issue_data:
+            logger.error(f"Could not retrieve issue {issue_key}")
+            return []
+
+        attachment_data = issue_data.get("fields", {}).get("attachment", [])
+        return [
+            JiraAttachment.from_api_response(item)
+            for item in attachment_data
+            if isinstance(item, dict)
+        ]
+
+    def get_issue_attachment_contents(self, issue_key: str) -> dict[str, Any]:
+        """
+        Fetch all attachment contents for a Jira issue into memory.
+
+        Unlike download_issue_attachments, this method does not write to
+        the filesystem.  Each attachment is returned as raw bytes so the
+        caller (e.g. the MCP server layer) can serialise them however it
+        needs (base64 embedded resources, etc.).
+
+        Args:
+            issue_key: The Jira issue key (e.g., 'PROJ-123')
+
+        Returns:
+            A dictionary with:
+                success (bool)
+                issue_key (str)
+                total (int)
+                attachments (list[dict]): each dict has 'filename',
+                    'content_type', 'size', and 'data' (bytes)
+                failed (list[dict]): each dict has 'filename' and 'error'
+        """
+        logger.info(f"Fetching attachment contents for {issue_key}")
+
+        issue_data = self.jira.issue(issue_key, fields="attachment")
+
+        if not isinstance(issue_data, dict):
+            msg = f"Unexpected return value type from `jira.issue`: {type(issue_data)}"
+            logger.error(msg)
+            raise TypeError(msg)
+
+        if "fields" not in issue_data:
+            logger.error(f"Could not retrieve issue {issue_key}")
+            return {
+                "success": False,
+                "error": f"Could not retrieve issue {issue_key}",
+            }
+
+        attachment_data = issue_data.get("fields", {}).get("attachment", [])
+
+        if not attachment_data:
+            return {
+                "success": True,
+                "message": f"No attachments found for issue {issue_key}",
+                "attachments": [],
+                "failed": [],
+            }
+
+        attachments: list[JiraAttachment] = []
+        for item in attachment_data:
+            if isinstance(item, dict):
+                attachments.append(JiraAttachment.from_api_response(item))
+
+        if not attachments:
+            return {
+                "success": True,
+                "message": f"No attachments found for issue {issue_key}",
+                "attachments": [],
+                "failed": [],
+            }
+
+        fetched: list[dict[str, Any]] = []
+        failed: list[dict[str, Any]] = []
+
+        for attachment in attachments:
+            if not attachment.url:
+                logger.warning(f"No URL for attachment {attachment.filename}")
+                failed.append(
+                    {"filename": attachment.filename, "error": "No URL available"}
+                )
+                continue
+
+            if attachment.size > ATTACHMENT_MAX_BYTES:
+                logger.warning(
+                    f"Skipping attachment {attachment.filename}: "
+                    f"{attachment.size} bytes exceeds 50 MB limit"
+                )
+                failed.append(
+                    {
+                        "filename": attachment.filename,
+                        "error": (
+                            f"Attachment '{attachment.filename}' is "
+                            f"{attachment.size} bytes which exceeds "
+                            "the 50 MB inline limit. Retrieve it "
+                            "directly from Jira."
+                        ),
+                    }
+                )
+                continue
+
+            data = self.fetch_attachment_content(attachment.url)
+            if data is not None:
+                content_type = (
+                    attachment.content_type
+                    or mimetypes.guess_type(attachment.filename)[0]
+                    or "application/octet-stream"
+                )
+                fetched.append(
+                    {
+                        "filename": attachment.filename,
+                        "content_type": content_type,
+                        "size": len(data),
+                        "data": data,
+                    }
+                )
+            else:
+                failed.append(
+                    {"filename": attachment.filename, "error": "Fetch failed"}
+                )
+
+        return {
+            "success": True,
+            "issue_key": issue_key,
+            "total": len(attachments),
+            "attachments": fetched,
+            "failed": failed,
+        }
+
     def download_issue_attachments(
         self, issue_key: str, target_dir: str
     ) -> dict[str, Any]:
@@ -81,6 +276,9 @@ class AttachmentsMixin(JiraClient, AttachmentsOperationsProto):
         # Convert to absolute path if relative
         if not os.path.isabs(target_dir):
             target_dir = os.path.abspath(target_dir)
+
+        # Guard against path traversal (resolves symlinks)
+        validate_safe_path(target_dir)
 
         logger.info(
             f"Downloading attachments for {issue_key} to directory: {target_dir}"
@@ -182,9 +380,10 @@ class AttachmentsMixin(JiraClient, AttachmentsOperationsProto):
             return {"success": False, "error": "No file path provided"}
 
         try:
-            # Convert to absolute path if relative
-            if not os.path.isabs(file_path):
-                file_path = os.path.abspath(file_path)
+            # Confine the upload source to the workspace before it is read: reject
+            # traversal/absolute paths that escape CWD (arbitrary file read /
+            # exfiltration via a caller-supplied file_path).
+            file_path = str(validate_safe_path(file_path))
 
             # Check if file exists
             if not os.path.exists(file_path):

@@ -17,6 +17,7 @@ import time
 import urllib.parse
 import webbrowser
 from dataclasses import dataclass
+from html import escape as html_escape
 
 from ..utils.oauth import OAuthConfig
 
@@ -28,6 +29,21 @@ authorization_code = None
 authorization_state = None
 callback_received = False
 callback_error = None
+
+
+def _sanitize_input(user_input: str) -> str:
+    """Sanitize user input by removing trailing/leading whitespace and Windows line endings.
+    Args:
+        user_input: Raw input string from user
+    Returns:
+        Sanitized string with whitespace and line endings removed
+    """
+    if not user_input:
+        return user_input
+    # Remove leading/trailing whitespace and various line endings
+    # Handle Windows (\r\n), Unix (\n), and Mac (\r) line endings
+    sanitized = user_input.strip().rstrip("\r\n").strip()
+    return sanitized
 
 
 class CallbackHandler(http.server.BaseHTTPRequestHandler):
@@ -70,6 +86,10 @@ class CallbackHandler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-type", "text/html")
         self.end_headers()
 
+        # Escape the message: it can carry attacker-controlled OAuth callback
+        # text (e.g. the error query param), so raw interpolation is reflected XSS.
+        escaped_message = html_escape(message)
+
         html = f"""
         <!DOCTYPE html>
         <html>
@@ -107,7 +127,7 @@ class CallbackHandler(http.server.BaseHTTPRequestHandler):
         <body>
             <h1>Atlassian OAuth Authorization</h1>
             <div class="message {"success" if status == 200 else "error"}">
-                <p>{message}</p>
+                <p>{escaped_message}</p>
             </div>
             <p>This window will automatically close in <span class="countdown">5</span> seconds...</p>
             <button onclick="window.close()">Close Window Now</button>
@@ -254,12 +274,8 @@ def run_oauth_flow(args: OAuthSetupArgs) -> bool:
     logger.info("Exchanging authorization code for tokens...")
     if oauth_config.exchange_code_for_tokens(authorization_code):
         logger.info("✅ OAuth authorization successful!")
-        logger.info(
-            f"Access token: {oauth_config.access_token[:10]}...{oauth_config.access_token[-5:]}"
-        )
-        logger.info(
-            f"Refresh token saved: {oauth_config.refresh_token[:5]}...{oauth_config.refresh_token[-3:]}"
-        )
+        logger.info("Access token obtained successfully.")
+        logger.info("Refresh token saved successfully.")
 
         if oauth_config.cloud_id:
             logger.info(f"Cloud ID: {oauth_config.cloud_id}")
@@ -278,7 +294,7 @@ def run_oauth_flow(args: OAuthSetupArgs) -> bool:
             )
             logger.info("------------------------------------------------------------")
             logger.info(f"ATLASSIAN_OAUTH_CLIENT_ID={oauth_config.client_id}")
-            logger.info(f"ATLASSIAN_OAUTH_CLIENT_SECRET={oauth_config.client_secret}")
+            logger.info("ATLASSIAN_OAUTH_CLIENT_SECRET=<redacted>")
             logger.info(f"ATLASSIAN_OAUTH_REDIRECT_URI={oauth_config.redirect_uri}")
             logger.info(f"ATLASSIAN_OAUTH_SCOPE={oauth_config.scope}")
             logger.info(f"ATLASSIAN_OAUTH_CLOUD_ID={oauth_config.cloud_id}")
@@ -327,7 +343,7 @@ def run_oauth_flow(args: OAuthSetupArgs) -> bool:
                             "CONFLUENCE_URL": "https://your-company.atlassian.net/wiki",
                             "JIRA_URL": "https://your-company.atlassian.net",
                             "ATLASSIAN_OAUTH_CLIENT_ID": oauth_config.client_id,
-                            "ATLASSIAN_OAUTH_CLIENT_SECRET": oauth_config.client_secret,
+                            "ATLASSIAN_OAUTH_CLIENT_SECRET": "<redacted - set via environment variable>",
                             "ATLASSIAN_OAUTH_REDIRECT_URI": oauth_config.redirect_uri,
                             "ATLASSIAN_OAUTH_SCOPE": oauth_config.scope,
                             "ATLASSIAN_OAUTH_CLOUD_ID": oauth_config.cloud_id,
@@ -360,8 +376,10 @@ def run_oauth_flow(args: OAuthSetupArgs) -> bool:
         return False
 
 
-def _prompt_for_input(prompt: str, env_var: str = None, is_secret: bool = False) -> str:
-    """Prompt the user for input."""
+def _prompt_for_input(
+    prompt: str, env_var: str | None = None, is_secret: bool = False
+) -> str:
+    """Prompt the user for input with sanitization for Windows line endings and whitespace."""
     value = os.getenv(env_var, "") if env_var else ""
     if value:
         if is_secret:
@@ -373,11 +391,11 @@ def _prompt_for_input(prompt: str, env_var: str = None, is_secret: bool = False)
             print(f"{prompt} [{masked}]: ", end="")
         else:
             print(f"{prompt} [{value}]: ", end="")
-        user_input = input()
+        user_input = _sanitize_input(input())
         return user_input if user_input else value
     else:
         print(f"{prompt}: ", end="")
-        return input()
+        return _sanitize_input(input())
 
 
 def run_oauth_setup() -> int:

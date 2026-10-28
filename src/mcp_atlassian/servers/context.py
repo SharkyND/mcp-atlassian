@@ -24,3 +24,4 @@ class MainAppContext:
     cli_read_only: bool | None = None
     env_read_only: bool | None = None
     enabled_tools: list[str] | None = None
+    enabled_toolsets: set[str] | None = None

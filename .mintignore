@@ -1,0 +1,17 @@
+# Ignore devcontainer (uses JSONC with comments)
+.devcontainer/
+
+# Ignore Python/development files
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# Ignore other non-docs directories
+src/
+tests/
+scripts/
+docs/_overrides/
+.github/
+.claude/

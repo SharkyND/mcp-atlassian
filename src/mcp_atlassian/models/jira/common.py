@@ -9,7 +9,7 @@ import logging
 from datetime import datetime
 from typing import Any
 
-from pydantic import Field
+from pydantic import Field, field_serializer
 
 from mcp_atlassian.utils import parse_date
 
@@ -31,6 +31,8 @@ class JiraUser(ApiModel):
     """
 
     account_id: str | None = None
+    username: str | None = None
+    user_key: str | None = None
     display_name: str = UNASSIGNED
     email: str | None = None
     active: bool = True
@@ -66,6 +68,8 @@ class JiraUser(ApiModel):
 
         return cls(
             account_id=data.get("accountId"),
+            username=data.get("name"),
+            user_key=data.get("key"),
             display_name=str(data.get("displayName", UNASSIGNED)),
             email=data.get("emailAddress"),
             active=bool(data.get("active", True)),
@@ -75,12 +79,16 @@ class JiraUser(ApiModel):
 
     def to_simplified_dict(self) -> dict[str, Any]:
         """Convert to simplified dictionary for API response."""
-        return {
+        result: dict[str, Any] = {
+            "account_id": self.account_id,
             "display_name": self.display_name,
-            "name": self.display_name,  # Add name for backward compatibility
+            "name": self.username or self.display_name,
             "email": self.email,
             "avatar_url": self.avatar_url,
         }
+        if self.user_key:
+            result["key"] = self.user_key
+        return result
 
 
 class JiraStatusCategory(ApiModel):
@@ -518,6 +526,13 @@ class JiraChangelog(ApiModel, TimestampMixin):
     created: datetime | None = None
     items: list[JiraChangelogItem] = Field(default_factory=list)
 
+    @field_serializer("created")
+    def serialize_created(self, value: datetime | None) -> str | None:
+        """Serialize datetime to ISO 8601 string for JSON compatibility."""
+        if value is None:
+            return None
+        return value.isoformat()
+
     @classmethod
     def from_api_response(cls, data: dict[str, Any], **kwargs: Any) -> "JiraChangelog":
         """
@@ -578,6 +593,6 @@ class JiraChangelog(ApiModel, TimestampMixin):
             result["author"] = self.author.to_simplified_dict()
 
         if self.created:
-            result["created"] = str(self.created)
+            result["created"] = self.created.isoformat()
 
         return result

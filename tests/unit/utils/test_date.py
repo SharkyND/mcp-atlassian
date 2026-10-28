@@ -37,3 +37,76 @@ def test_parse_date_rfc3339():
         str(parse_date("1937-01-01T12:00:27.87+00:20"))
         == "1937-01-01 12:00:27.870000+00:20"
     )
+
+
+def test_parse_date_timestamp_boundary_max_valid() -> None:
+    """Test that maximum valid timestamp (year 9999) is handled correctly.
+
+    This is a regression test for issue #916 (Python 3.14 PyTime_t overflow).
+    The maximum valid timestamp for Python datetime is 253402300799999 (year 9999).
+    """
+    result = parse_date("253402300799999")
+    assert result is not None
+    assert result.year == 9999
+
+
+def test_parse_date_timestamp_overflow_returns_none() -> None:
+    """Test that timestamp exceeding year 9999 returns None, not crashes.
+
+    This is a regression test for issue #916 (Python 3.14 PyTime_t overflow).
+    Timestamps beyond year 9999 should return None gracefully instead of raising.
+    """
+    result = parse_date("253402300800000")
+    assert result is None
+
+
+def test_parse_date_huge_timestamp_returns_none() -> None:
+    """Test that extremely large timestamps don't crash with PyTime_t overflow.
+
+    This is a regression test for issue #916 (Python 3.14 PyTime_t overflow).
+    Very large timestamps should return None gracefully.
+    """
+    result = parse_date("99999999999999999")
+    assert result is None
+
+
+@pytest.mark.parametrize(
+    "input_val",
+    [
+        "9999-12-31T23:59:59.000+0000",  # Year 9999 sentinel (ISO)
+        "9999-12-31T23:59:59.999+0000",  # Year 9999 sentinel variant
+    ],
+    ids=["year_9999_sentinel", "year_9999_sentinel_variant"],
+)
+def test_parse_date_iso_overflow_returns_none(input_val: str) -> None:
+    """Regression test for #1033: ISO sentinel dates must not crash.
+
+    On Windows, dateutil.parser.parse raises OverflowError for year 9999
+    sentinel dates because the resulting timestamp exceeds C _PyTime_t.
+    parse_date should return None gracefully instead of propagating the error.
+    """
+    from unittest.mock import patch
+
+    # Simulate the Windows OverflowError that dateutil raises for year 9999
+    with patch(
+        "mcp_atlassian.utils.date.dateutil.parser.parse",
+        side_effect=OverflowError("timestamp too large to convert to C _PyTime_t"),
+    ):
+        result = parse_date(input_val)
+        assert result is None
+
+
+def test_parse_date_iso_oserror_returns_none() -> None:
+    """Regression test for #1033: OSError from dateutil must not crash.
+
+    On some platforms, dateutil.parser.parse can raise OSError for dates
+    that cannot be represented. parse_date should return None gracefully.
+    """
+    from unittest.mock import patch
+
+    with patch(
+        "mcp_atlassian.utils.date.dateutil.parser.parse",
+        side_effect=OSError("timestamp out of range for platform time_t"),
+    ):
+        result = parse_date("9999-12-31T23:59:59.000+0000")
+        assert result is None

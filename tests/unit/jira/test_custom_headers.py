@@ -71,6 +71,21 @@ class TestJiraConfigCustomHeaders:
             config = JiraConfig.from_env()
             assert config.custom_headers == {}
 
+    def test_passthrough_headers(self):
+        """Test JiraConfig parsing of passthrough header names."""
+        with patch.dict(
+            os.environ,
+            {
+                "JIRA_URL": "https://test.atlassian.net",
+                "JIRA_USERNAME": "test_user",
+                "JIRA_API_TOKEN": "test_token",
+                "JIRA_PASSTHROUGH_HEADERS": "X-SSO-User, X-Request-ID,x-sso-user",
+            },
+            clear=True,
+        ):
+            config = JiraConfig.from_env()
+            assert config.passthrough_headers == ["X-SSO-User", "X-Request-ID"]
+
 
 class TestJiraClientCustomHeaders:
     """Test JiraClient custom headers application."""
@@ -101,8 +116,9 @@ class TestJiraClientCustomHeaders:
 
         client = JiraClient(config=config)
 
-        # Verify no custom headers were applied
-        assert mock_session.headers == {}
+        # Only the default User-Agent should be present; no custom headers added.
+        assert set(mock_session.headers.keys()) == {"User-Agent"}
+        assert mock_session.headers["User-Agent"].startswith("mcp-atlassian/")
 
     def test_custom_headers_applied_to_session(self, monkeypatch):
         """Test that custom headers are applied to the JIRA session."""

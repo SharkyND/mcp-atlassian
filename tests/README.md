@@ -62,10 +62,7 @@ These fixtures return factory functions for creating customizable test data:
 ```python
 # Example usage
 def test_custom_issue(make_jira_issue):
-    issue = make_jira_issue(
-        key="CUSTOM-123",
-        fields={"priority": {"name": "High"}}
-    )
+    issue = make_jira_issue(key="CUSTOM-123", fields={"priority": {"name": "High"}})
     assert issue["key"] == "CUSTOM-123"
     assert issue["fields"]["priority"]["name"] == "High"
 ```
@@ -81,8 +78,9 @@ Enhanced environment fixtures for testing different authentication scenarios:
 
 ```python
 # Example usage
-@pytest.mark.parametrize("parametrized_auth_env",
-                       ["oauth", "basic_auth"], indirect=True)
+@pytest.mark.parametrize(
+    "parametrized_auth_env", ["oauth", "basic_auth"], indirect=True
+)
 def test_auth_scenarios(parametrized_auth_env):
     # Test runs once for OAuth and once for basic auth
     pass
@@ -163,6 +161,7 @@ def test_field_parsing(session_jira_field_definitions):
     parser = FieldParser(session_jira_field_definitions)
     assert parser.is_valid()
 
+
 # Avoid: Creates new data every time
 def test_field_parsing():
     fields = create_field_definitions()  # Expensive operation
@@ -180,6 +179,7 @@ def test_issue_key_validation(make_jira_issue):
     issue = make_jira_issue(key="VALID-123")
     assert validate_key(issue["key"])
 
+
 # Avoid: Uses complex data when simple would do
 def test_issue_key_validation(complete_jira_issue_data):
     assert validate_key(complete_jira_issue_data["key"])
@@ -190,8 +190,9 @@ def test_issue_key_validation(complete_jira_issue_data):
 Use parametrized fixtures for testing multiple scenarios:
 
 ```python
-@pytest.mark.parametrize("parametrized_auth_env",
-                       ["oauth", "basic_auth", "clean"], indirect=True)
+@pytest.mark.parametrize(
+    "parametrized_auth_env", ["oauth", "basic_auth", "clean"], indirect=True
+)
 def test_auth_detection(parametrized_auth_env):
     # Test with different auth environments
     detector = AuthDetector()
@@ -223,10 +224,7 @@ The enhanced fixture system provides significant performance improvements:
 ```python
 def test_jira_issue_creation(make_jira_issue):
     # Create a custom issue
-    issue = make_jira_issue(
-        key="TEST-456",
-        fields={"summary": "Custom test issue"}
-    )
+    issue = make_jira_issue(key="TEST-456", fields={"summary": "Custom test issue"})
 
     # Test the issue
     model = JiraIssue.from_dict(issue)
@@ -238,22 +236,18 @@ def test_jira_issue_creation(make_jira_issue):
 
 ```python
 def test_complex_workflow(
-    make_jira_issue_with_worklog,
-    make_confluence_page_with_content,
-    oauth_environment
+    make_jira_issue_with_worklog, make_confluence_page_with_content, oauth_environment
 ):
     # Create issue with worklog
     issue = make_jira_issue_with_worklog(
-        key="WORKFLOW-123",
-        worklog_hours=8,
-        worklog_comment="Development work"
+        key="WORKFLOW-123", worklog_hours=8, worklog_comment="Development work"
     )
 
     # Create page with content
     page = make_confluence_page_with_content(
         title="Workflow Documentation",
         content="<h1>Workflow</h1><p>Process documentation</p>",
-        labels=["workflow", "documentation"]
+        labels=["workflow", "documentation"],
     )
 
     # Test workflow with OAuth environment
@@ -272,7 +266,7 @@ def test_real_api_integration(
     jira_integration_client,
     confluence_integration_client,
     use_real_jira_data,
-    use_real_confluence_data
+    use_real_confluence_data,
 ):
     if not use_real_jira_data:
         pytest.skip("Real Jira data not available")
