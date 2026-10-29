@@ -5,6 +5,7 @@ import functools
 import json
 import logging
 import mimetypes
+import re
 from typing import Annotated, Any
 from urllib.parse import quote, unquote
 
@@ -3131,4 +3132,245 @@ async def get_attachment_images(
             "images": image_meta,
             "failed": failed,
         },
+    )
+
+
+# --- List tools: check or list many issues in one call -----------------------------------------
+# The model passes a whole list; the server does the paging (Jira Cloud: nextPageToken) and the
+# matching, so a comparison needs one tool call instead of one search per item.
+
+_LIST_MAX_TERMS = 1000
+_LIST_KEY_CHUNK = 50
+_LIST_TEXT_CHUNK = 15
+_LIST_KEY_RE = re.compile(r"^([A-Za-z][A-Za-z0-9_]*)-(\d+)$")
+
+
+def _list_parse_terms(raw: str | list[str]) -> list[str]:
+    """Accept a JSON array or a list separated by commas, semicolons or new lines."""
+    items: list[str]
+    if isinstance(raw, list):
+        items = [str(item) for item in raw]
+    else:
+        text = raw.strip()
+        items = []
+        if text.startswith("["):
+            try:
+                parsed = json.loads(text)
+                if isinstance(parsed, list):
+                    items = [str(item) for item in parsed]
+            except ValueError:
+                items = []
+        if not items:
+            items = re.split(r"[,;\n]+", text)
+    seen: set[str] = set()
+    out: list[str] = []
+    for item in items:
+        item = item.strip()
+        if item and item.lower() not in seen:
+            seen.add(item.lower())
+            out.append(item)
+    return out
+
+
+def _list_word_match(term: str, text: str) -> bool:
+    """Whole-word match: "ABC-12" does not match inside "ABC-123"."""
+    pattern = r"(?i)(^|[^\w])" + re.escape(term) + r"($|[^\w])"
+    return re.search(pattern, text or "") is not None
+
+
+def _list_value(value: Any) -> Any:
+    """Reduce a Jira field value to its readable part (name, displayName, value)."""
+    if isinstance(value, dict):
+        for key in ("displayName", "name", "value", "key"):
+            if key in value:
+                return value[key]
+        return value
+    if isinstance(value, list):
+        return [_list_value(item) for item in value]
+    return value
+
+
+def _list_compact(issue: dict, fields: list[str]) -> dict[str, Any]:
+    raw = issue.get("fields") or {}
+    out: dict[str, Any] = {"key": issue.get("key")}
+    for name in fields:
+        if name != "key":
+            out[name] = _list_value(raw.get(name))
+    return out
+
+
+def _list_fetch_all(jira: Any, jql: str, fields: list[str], limit: int | None) -> list[dict]:
+    """All issues of a JQL query, paged by the server; stops after limit if given."""
+    field_param = ",".join(dict.fromkeys(fields))
+    if jira.config.is_cloud:
+        return jira.jira.enhanced_jql_get_list_of_tickets(jql, fields=field_param, limit=limit)
+    issues: list[dict] = []
+    start = 0
+    while True:
+        page = jira.jira.jql(jql, fields=field_param, start=start, limit=100) or {}
+        batch = page.get("issues", [])
+        issues.extend(batch)
+        start += len(batch)
+        if len(batch) < 100 or (limit is not None and len(issues) >= limit):
+            return issues
+
+
+def _list_and(jql: str, scope: str | None) -> str:
+    return f"({jql}) AND ({scope})" if scope else jql
+
+
+def _list_check_keys(jira: Any, keys: list[str], scope: str | None, fields: list[str]) -> tuple[dict, list[str]]:
+    """Look up issue keys in chunks with "key in (...)". Keys Jira rejects as unknown count as
+    missing; if the error names none of them, the chunk is matched by a key range instead."""
+    found: dict[str, dict] = {}
+    by_project: dict[str, list[str]] = {}
+    for key in keys:
+        match = _LIST_KEY_RE.match(key)
+        if match:
+            by_project.setdefault(match.group(1).upper(), []).append(key.upper())
+    for project, project_keys in by_project.items():
+        for offset in range(0, len(project_keys), _LIST_KEY_CHUNK):
+            chunk = project_keys[offset : offset + _LIST_KEY_CHUNK]
+            while chunk:
+                try:
+                    issues = _list_fetch_all(jira, _list_and(f"key in ({', '.join(chunk)})", scope), fields, None)
+                    for issue in issues:
+                        found[str(issue.get("key")).upper()] = _list_compact(issue, fields)
+                    break
+                except HTTPError as error:
+                    message = str(error)
+                    if error.response is not None:
+                        message += " " + (error.response.text or "")
+                    rejected = [key for key in chunk if re.search(rf"(^|[^\w-]){re.escape(key)}($|[^\w-])", message)]
+                    if rejected:
+                        chunk = [key for key in chunk if key not in rejected]
+                        continue
+                    numbers = [int(_LIST_KEY_RE.match(key).group(2)) for key in chunk]
+                    range_jql = (f"project = {project} AND key >= {project}-{min(numbers)} "
+                                 f"AND key <= {project}-{max(numbers)}")
+                    wanted = set(chunk)
+                    for issue in _list_fetch_all(jira, _list_and(range_jql, scope), fields, None):
+                        key = str(issue.get("key")).upper()
+                        if key in wanted:
+                            found[key] = _list_compact(issue, fields)
+                    break
+    missing = [key for key in keys if key.upper() not in found]
+    return {key: found[key.upper()] for key in keys if key.upper() in found}, missing
+
+
+def _list_check_text(jira: Any, terms: list[str], match_field: str, scope: str | None,
+                     fields: list[str]) -> tuple[dict, list[str]]:
+    """Find issues whose text field contains each term as a whole word. Jira's text search
+    preselects candidates, the exact match is done here."""
+    jql_field = "text" if match_field == "text" else match_field
+    read_fields = ["summary", "description"] if match_field == "text" else [match_field]
+    found: dict[str, list[dict]] = {}
+    for offset in range(0, len(terms), _LIST_TEXT_CHUNK):
+        chunk = terms[offset : offset + _LIST_TEXT_CHUNK]
+        clauses = " OR ".join(
+            f'{jql_field} ~ "\\"{term.replace(chr(92), " ").replace(chr(34), " ")}\\""' for term in chunk
+        )
+        issues = _list_fetch_all(jira, _list_and(clauses, scope), list(dict.fromkeys(fields + read_fields)), None)
+        for issue in issues:
+            raw = issue.get("fields") or {}
+            text = "\n".join(str(_list_value(raw.get(name)) or "") for name in read_fields)
+            for term in chunk:
+                if _list_word_match(term, text):
+                    found.setdefault(term, []).append(_list_compact(issue, fields))
+    missing = [term for term in terms if term not in found]
+    return found, missing
+
+
+@jira_mcp.tool(tags={"jira", "read"})
+async def check_list(
+    ctx: Context,
+    values: Annotated[
+        str,
+        Field(
+            description=(
+                "Issue keys or search texts to check, separated by commas or new lines; a JSON array "
+                "of strings is accepted too. At most 1000."
+            )
+        ),
+    ],
+    match_field: Annotated[
+        str,
+        Field(
+            description=(
+                "'key' (default): values are issue keys. Otherwise the text field to search the values "
+                "in as whole words, e.g. 'summary', 'description' or 'text' (summary and description)."
+            ),
+            default="key",
+        ),
+    ] = "key",
+    jql: Annotated[
+        str | None,
+        Field(
+            description="(Optional) JQL that restricts where to look, e.g. 'project = ABC AND statusCategory != Done'.",
+            default=None,
+        ),
+    ] = None,
+    fields: Annotated[
+        str,
+        Field(description="Comma-separated fields to return for each match.", default="summary,status"),
+    ] = "summary,status",
+    only_missing: Annotated[
+        bool,
+        Field(description="Return only the values without a match.", default=False),
+    ] = False,
+) -> str:
+    """Check a whole list of issue keys or texts against Jira in one call.
+
+    Returns which values exist (with the requested fields) and which are missing. Use this
+    instead of one search or get_issue call per value.
+    """
+    terms = _list_parse_terms(values)
+    if not terms:
+        raise ValueError("values is empty")
+    if len(terms) > _LIST_MAX_TERMS:
+        raise ValueError(f"at most {_LIST_MAX_TERMS} values per call, got {len(terms)}")
+    field_list = [name.strip() for name in fields.split(",") if name.strip()]
+    jira = await get_jira_fetcher(ctx)
+    result: dict[str, Any] = {"values_checked": len(terms)}
+    if match_field == "key":
+        invalid = [term for term in terms if not _LIST_KEY_RE.match(term)]
+        keys = [term for term in terms if _LIST_KEY_RE.match(term)]
+        found, missing = await asyncio.to_thread(_list_check_keys, jira, keys, jql, field_list)
+        if invalid:
+            result["not_an_issue_key"] = invalid
+    else:
+        found, missing = await asyncio.to_thread(_list_check_text, jira, terms, match_field, jql, field_list)
+    result.update({"found_count": len(found), "missing_count": len(missing), "missing": missing})
+    if not only_missing:
+        result["found"] = found
+    return json.dumps(result, ensure_ascii=False)
+
+
+@jira_mcp.tool(tags={"jira", "read"})
+async def list_all(
+    ctx: Context,
+    jql: Annotated[str, Field(description="JQL query, e.g. 'project = ABC AND statusCategory != Done ORDER BY key DESC'.")],
+    fields: Annotated[
+        str,
+        Field(description="Comma-separated fields to return for each issue.", default="summary,status"),
+    ] = "summary,status",
+    max_results: Annotated[
+        int,
+        Field(description="Stop after this many issues and report that there are more.", default=200, ge=1, le=2000),
+    ] = 200,
+) -> str:
+    """List all issues of a JQL query in one call, with only the requested fields.
+
+    Pages through the results on the server (jira_search returns at most 50 and cannot page).
+    If there are more than max_results, returns the first max_results and "more": true, so the
+    call doubles as a size check.
+    """
+    field_list = [name.strip() for name in fields.split(",") if name.strip()]
+    jira = await get_jira_fetcher(ctx)
+    issues = await asyncio.to_thread(_list_fetch_all, jira, jql, field_list, max_results + 1)
+    more = len(issues) > max_results
+    issues = issues[:max_results]
+    return json.dumps(
+        {"count": len(issues), "more": more, "issues": [_list_compact(issue, field_list) for issue in issues]},
+        ensure_ascii=False,
     )
