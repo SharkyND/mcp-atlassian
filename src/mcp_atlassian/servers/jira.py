@@ -2,6 +2,7 @@
 
 import asyncio
 import functools
+import html
 import json
 import logging
 import mimetypes
@@ -3140,6 +3141,7 @@ async def get_attachment_images(
 # matching, so a comparison needs one tool call instead of one search per item.
 
 _LIST_MAX_TERMS = 1000
+_LIST_COUNT_MAX = 20000
 _LIST_KEY_CHUNK = 50
 _LIST_TEXT_CHUNK = 15
 _LIST_KEY_RE = re.compile(r"^([A-Za-z][A-Za-z0-9_]*)-(\d+)$")
@@ -3213,6 +3215,11 @@ def _list_fetch_all(jira: Any, jql: str, fields: list[str], limit: int | None) -
         start += len(batch)
         if len(batch) < 100 or (limit is not None and len(issues) >= limit):
             return issues
+
+
+def _list_jql(jql: str | None) -> str | None:
+    """Undo HTML escaping (&gt;= instead of >=) that models sometimes put into JQL."""
+    return html.unescape(jql).strip() if jql else jql
 
 
 def _list_and(jql: str, scope: str | None) -> str:
@@ -3330,6 +3337,7 @@ async def check_list(
     if len(terms) > _LIST_MAX_TERMS:
         raise ValueError(f"at most {_LIST_MAX_TERMS} values per call, got {len(terms)}")
     field_list = [name.strip() for name in fields.split(",") if name.strip()]
+    jql = _list_jql(jql)
     jira = await get_jira_fetcher(ctx)
     result: dict[str, Any] = {"values_checked": len(terms)}
     if match_field == "key":
@@ -3349,7 +3357,17 @@ async def check_list(
 @jira_mcp.tool(tags={"jira", "read"})
 async def list_all(
     ctx: Context,
-    jql: Annotated[str, Field(description="JQL query, e.g. 'project = ABC AND statusCategory != Done ORDER BY key DESC'.")],
+    jql: Annotated[
+        str,
+        Field(
+            description=(
+                "JQL query with at least one restriction, e.g. 'project = ABC AND statusCategory != Done "
+                "ORDER BY key DESC'. Jira Cloud rejects queries without a restriction such as "
+                "'ORDER BY key'; use jira_get_all_projects to list projects. Quote values with spaces: "
+                "statusCategory = \"To Do\"."
+            )
+        ),
+    ],
     fields: Annotated[
         str,
         Field(description="Comma-separated fields to return for each issue.", default="summary,status"),
@@ -3358,15 +3376,48 @@ async def list_all(
         int,
         Field(description="Stop after this many issues and report that there are more.", default=200, ge=1, le=2000),
     ] = 200,
+    count_by: Annotated[
+        str | None,
+        Field(
+            description=(
+                "(Optional) Field name, e.g. 'status', 'issuetype' or 'assignee'. Instead of the issues, "
+                f"return the number of issues per value of this field (up to {_LIST_COUNT_MAX} issues; "
+                "fields and max_results are ignored). Use this for distributions instead of listing "
+                "issues and counting them in code."
+            ),
+            default=None,
+        ),
+    ] = None,
 ) -> str:
     """List all issues of a JQL query in one call, with only the requested fields.
 
     Pages through the results on the server (jira_search returns at most 50 and cannot page).
     If there are more than max_results, returns the first max_results and "more": true, so the
-    call doubles as a size check.
+    call doubles as a size check. With count_by, returns the number of issues per field value.
     """
-    field_list = [name.strip() for name in fields.split(",") if name.strip()]
+    jql = _list_jql(jql)
     jira = await get_jira_fetcher(ctx)
+    if count_by:
+        name = count_by.strip()
+        issues = await asyncio.to_thread(_list_fetch_all, jira, jql, [name], _LIST_COUNT_MAX + 1)
+        complete = len(issues) <= _LIST_COUNT_MAX
+        counts: dict[str, int] = {}
+        for issue in issues[:_LIST_COUNT_MAX]:
+            value = _list_value((issue.get("fields") or {}).get(name))
+            # Multi-valued fields (labels, sprint, components) count once per value
+            for item in (value if isinstance(value, list) else [value]) or [None]:
+                label = "(none)" if item in (None, "") else str(item)
+                counts[label] = counts.get(label, 0) + 1
+        return json.dumps(
+            {
+                "total": min(len(issues), _LIST_COUNT_MAX),
+                "complete": complete,
+                "count_by": name,
+                "counts": dict(sorted(counts.items(), key=lambda item: -item[1])),
+            },
+            ensure_ascii=False,
+        )
+    field_list = [name.strip() for name in fields.split(",") if name.strip()]
     issues = await asyncio.to_thread(_list_fetch_all, jira, jql, field_list, max_results + 1)
     more = len(issues) > max_results
     issues = issues[:max_results]
