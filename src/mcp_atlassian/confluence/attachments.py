@@ -1,0 +1,821 @@
+"""Attachment operations for Confluence API."""
+
+import logging
+import os
+import urllib.parse
+from pathlib import Path
+from typing import Any
+
+from ..models.confluence import ConfluenceAttachment
+from ..utils.io import validate_safe_path
+from ..utils.urls import resolve_relative_url
+from .client import ConfluenceClient
+from .protocols import AttachmentsOperationsProto
+from .v2_adapter import ConfluenceV2Adapter
+
+# Configure logging
+logger = logging.getLogger("mcp-confluence")
+
+
+class AttachmentsMixin(ConfluenceClient, AttachmentsOperationsProto):
+    """Mixin for Confluence attachment operations."""
+
+    @property
+    def _v2_adapter(self) -> ConfluenceV2Adapter | None:
+        """Get v2 API adapter for OAuth authentication.
+
+        Returns:
+            ConfluenceV2Adapter instance if OAuth is configured, None otherwise
+        """
+        if self.config.auth_type == "oauth" and self.config.is_cloud:
+            return ConfluenceV2Adapter(
+                session=self.confluence._session, base_url=self.confluence.url
+            )
+        return None
+
+    def _rest_base_url(self) -> str:
+        """Return the REST API base URL, adding the Cloud ``/wiki`` prefix.
+
+        On Confluence Cloud, ``config.url`` is the bare site URL
+        (``https://site.atlassian.net``) but the REST API is served under
+        ``/wiki``. Hand-built URLs must include this prefix or requests 404.
+        The ``endswith`` guard avoids producing ``/wiki/wiki`` when the
+        configured URL already includes the prefix.
+
+        Returns:
+            The base URL to use for direct REST API calls.
+        """
+        base_url = self.config.url.rstrip("/")
+        if self.config.is_cloud and not base_url.endswith("/wiki"):
+            base_url = f"{base_url}/wiki"
+        return base_url
+
+    def _resolve_attachment_download_url(
+        self,
+        download_url: str | None,
+        attachment_id: str | None = None,
+        content_id: str | None = None,
+    ) -> str:
+        """Resolve an attachment's download URL to an absolute URL.
+
+        Confluence Cloud removed the legacy ``/download/attachments/{cid}/{file}``
+        endpoint that the attachment's ``_links.download`` still points to; it now
+        returns 401 for API-token / scoped-token auth (while metadata endpoints
+        keep working). Depending on ``config.attachment_download_use_v1`` this
+        rewrites the link to the v1 REST endpoint
+        ``/rest/api/content/{cid}/child/attachment/{aid}/download`` (which still
+        authenticates correctly):
+
+        - ``None`` (default): auto — v1 on Cloud, the legacy link on Server/DC.
+        - ``True``: always use v1.
+        - ``False``: always use the legacy link.
+
+        Args:
+            download_url: The (possibly relative) download link from the API.
+            attachment_id: The attachment ID (e.g. ``att123``); required for v1.
+            content_id: The parent content ID. If omitted, it is parsed from the
+                legacy download link.
+
+        Returns:
+            An absolute URL to fetch the attachment binary from, or an empty
+            string when ``download_url`` is falsy.
+        """
+        resolved = (
+            resolve_relative_url(download_url, self.config.url) if download_url else ""
+        )
+        use_v1 = self.config.attachment_download_use_v1
+        if use_v1 is None:
+            # Auto: Cloud removed the legacy endpoint, so default to v1 there;
+            # Server/DC keeps the legacy link.
+            use_v1 = self.config.is_cloud
+        if not (use_v1 and attachment_id and download_url):
+            return resolved
+
+        parsed = urllib.parse.urlsplit(download_url)
+        if not content_id:
+            # Legacy path form: /download/attachments/{content_id}/{filename}
+            # (match with or without a leading slash on the path).
+            marker = "download/attachments/"
+            if marker not in parsed.path:
+                logger.debug(
+                    "Could not derive content_id from download URL %s; "
+                    "falling back to the original link",
+                    download_url,
+                )
+                return resolved
+            content_id = parsed.path.split(marker, 1)[1].split("/", 1)[0]
+
+        base = self._rest_base_url()
+        # v1 "Get attachment download" endpoint — not part of the deprecated
+        # /download/attachments/... paths. See:
+        # https://developer.atlassian.com/cloud/confluence/rest/v1/api-group-content---attachments/
+        v1_url = (
+            f"{base}/rest/api/content/{content_id}"
+            f"/child/attachment/{attachment_id}/download"
+        )
+        # Keep only the documented ``version`` query param (the endpoint honours
+        # it) so a version-specific link still resolves to that version; drop the
+        # other legacy params (api / cacheVersion / modificationDate).
+        version = urllib.parse.parse_qs(parsed.query).get("version", [None])[0]
+        if version:
+            v1_url = f"{v1_url}?{urllib.parse.urlencode({'version': version})}"
+        return v1_url
+
+    def upload_attachment(
+        self,
+        content_id: str,
+        file_path: str,
+        comment: str | None = None,
+        minor_edit: bool = True,
+    ) -> dict[str, Any]:
+        """
+        Upload a single attachment to Confluence content.
+
+        Args:
+            content_id: The Confluence content ID
+            file_path: The path to the file to upload
+            comment: Optional comment for the attachment
+            minor_edit: Whether this is a minor edit (default: True)
+
+        Returns:
+            A dictionary with upload result information
+        """
+        if not content_id:
+            logger.error("No content ID provided for attachment upload")
+            return {"success": False, "error": "No content ID provided"}
+
+        if not file_path:
+            logger.error("No file path provided for attachment upload")
+            return {"success": False, "error": "No file path provided"}
+
+        try:
+            # Confine the upload source to the workspace before it is read: reject
+            # traversal/absolute paths that escape CWD (arbitrary file read /
+            # exfiltration via a caller-supplied file_path).
+            file_path = str(validate_safe_path(file_path))
+
+            # Check if file exists
+            if not os.path.exists(file_path):
+                logger.error(f"File not found: {file_path}")
+                return {"success": False, "error": f"File not found: {file_path}"}
+
+            logger.info(
+                f"Uploading attachment from {file_path} to content {content_id} (minor_edit={minor_edit})"
+            )
+
+            # Use direct REST API call to support minorEdit parameter
+            filename = os.path.basename(file_path)
+            attachment = self._upload_attachment_direct(
+                content_id, file_path, filename, comment, minor_edit
+            )
+
+            if attachment:
+                file_size = os.path.getsize(file_path)
+                logger.info(
+                    f"Successfully uploaded attachment {filename} to content {content_id} (size: {file_size} bytes)"
+                )
+                return {
+                    "success": True,
+                    "content_id": content_id,
+                    "filename": filename,
+                    "size": file_size,
+                    "id": attachment.get("id")
+                    if isinstance(attachment, dict)
+                    else None,
+                }
+            else:
+                logger.error(
+                    f"Failed to upload attachment {filename} to content {content_id}"
+                )
+                return {
+                    "success": False,
+                    "error": f"Failed to upload attachment {filename} to content {content_id}",
+                }
+
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"Error uploading attachment: {error_msg}")
+            return {"success": False, "error": error_msg}
+
+    def upload_attachments(
+        self,
+        content_id: str,
+        file_paths: list[str],
+        comment: str | None = None,
+        minor_edit: bool = True,
+    ) -> dict[str, Any]:
+        """
+        Upload multiple attachments to Confluence content.
+
+        Args:
+            content_id: The Confluence content ID
+            file_paths: List of paths to files to upload
+            comment: Optional comment for the attachments
+            minor_edit: Whether this is a minor edit (default: True)
+
+        Returns:
+            A dictionary with upload results
+        """
+        if not content_id:
+            logger.error("No content ID provided for attachment upload")
+            return {"success": False, "error": "No content ID provided"}
+
+        if not file_paths:
+            logger.error("No file paths provided for attachment upload")
+            return {"success": False, "error": "No file paths provided"}
+
+        logger.info(f"Uploading {len(file_paths)} attachments to content {content_id}")
+
+        # Upload each attachment
+        uploaded = []
+        failed = []
+
+        for file_path in file_paths:
+            result = self.upload_attachment(content_id, file_path, comment, minor_edit)
+
+            if result.get("success"):
+                uploaded.append(
+                    {
+                        "filename": result.get("filename"),
+                        "size": result.get("size"),
+                        "id": result.get("id"),
+                    }
+                )
+            else:
+                failed.append(
+                    {
+                        "filename": os.path.basename(file_path),
+                        "error": result.get("error"),
+                    }
+                )
+
+        return {
+            "success": True,
+            "content_id": content_id,
+            "total": len(file_paths),
+            "uploaded": uploaded,
+            "failed": failed,
+        }
+
+    def upload_attachment_from_content(
+        self,
+        content_id: str,
+        filename: str,
+        content: bytes,
+        comment: str | None = None,
+        minor_edit: bool = True,
+    ) -> dict[str, Any]:
+        """
+        Upload a single attachment from in-memory bytes.
+
+        This is the filesystem-free counterpart to ``upload_attachment``. It is
+        intended for deployments where the server cannot read host file paths
+        (for example, a remote or containerized MCP server): the caller provides
+        the raw file content directly instead of a path.
+
+        Args:
+            content_id: The Confluence content ID
+            filename: Name of the attachment (determines title and file type)
+            content: Raw file bytes to upload
+            comment: Optional comment for the attachment
+            minor_edit: Whether this is a minor edit (default: True)
+
+        Returns:
+            A dictionary with upload result information
+        """
+        if not content_id:
+            logger.error("No content ID provided for attachment upload")
+            return {"success": False, "error": "No content ID provided"}
+
+        if not filename:
+            logger.error("No filename provided for attachment upload")
+            return {"success": False, "error": "No filename provided"}
+
+        if content is None:
+            logger.error("No file content provided for attachment upload")
+            return {"success": False, "error": "No file content provided"}
+
+        try:
+            logger.info(
+                f"Uploading attachment {filename} ({len(content)} bytes) to "
+                f"content {content_id} (minor_edit={minor_edit})"
+            )
+
+            attachment = self._upload_attachment_from_bytes(
+                content_id, filename, content, comment, minor_edit
+            )
+
+            if attachment:
+                logger.info(
+                    f"Successfully uploaded attachment {filename} to content "
+                    f"{content_id} (size: {len(content)} bytes)"
+                )
+                return {
+                    "success": True,
+                    "content_id": content_id,
+                    "filename": filename,
+                    "size": len(content),
+                    "id": attachment.get("id")
+                    if isinstance(attachment, dict)
+                    else None,
+                }
+
+            logger.error(
+                f"Failed to upload attachment {filename} to content {content_id}"
+            )
+            return {
+                "success": False,
+                "error": (
+                    f"Failed to upload attachment {filename} to content {content_id}"
+                ),
+            }
+
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"Error uploading attachment from content: {error_msg}")
+            return {"success": False, "error": error_msg}
+
+    def fetch_attachment_content(self, url: str) -> bytes | None:
+        """Fetch attachment content into memory.
+
+        Args:
+            url: The URL of the attachment to download.
+
+        Returns:
+            The raw bytes of the attachment, or None on failure.
+        """
+        if not url:
+            logger.error("No URL provided for attachment fetch")
+            return None
+
+        try:
+            logger.info(f"Fetching attachment from {url}")
+            response = self.confluence._session.get(url, stream=True)
+            response.raise_for_status()
+
+            chunks: list[bytes] = []
+            for chunk in response.iter_content(chunk_size=8192):
+                chunks.append(chunk)
+
+            data = b"".join(chunks)
+            logger.info(
+                f"Successfully fetched attachment from {url} (size: {len(data)} bytes)"
+            )
+            return data
+
+        except Exception as e:
+            logger.error(f"Error fetching attachment: {str(e)}")
+            return None
+
+    def download_attachment(self, url: str, target_path: str) -> bool:
+        """
+        Download a Confluence attachment to the specified path.
+
+        Args:
+            url: The URL of the attachment to download
+            target_path: The path where the attachment should be saved
+
+        Returns:
+            True if successful, False otherwise
+        """
+        if not url:
+            logger.error("No URL provided for attachment download")
+            return False
+
+        try:
+            # Convert to absolute path if relative
+            if not os.path.isabs(target_path):
+                target_path = os.path.abspath(target_path)
+
+            # Guard against path traversal (resolves symlinks)
+            validate_safe_path(target_path)
+
+            logger.info(f"Downloading attachment from {url} to {target_path}")
+
+            # Create the directory if it doesn't exist
+            os.makedirs(os.path.dirname(target_path), exist_ok=True)
+
+            # Use the Confluence session to download the file
+            response = self.confluence._session.get(url, stream=True)
+            response.raise_for_status()
+
+            # Write the file to disk
+            with open(target_path, "wb") as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+
+            # Verify the file was created
+            if os.path.exists(target_path):
+                file_size = os.path.getsize(target_path)
+                logger.info(
+                    f"Successfully downloaded attachment to {target_path} (size: {file_size} bytes)"
+                )
+                return True
+            else:
+                logger.error(f"File was not created at {target_path}")
+                return False
+
+        except Exception as e:
+            logger.error(f"Error downloading attachment: {str(e)}")
+            return False
+
+    def download_content_attachments(
+        self, content_id: str, target_dir: str
+    ) -> dict[str, Any]:
+        """
+        Download all attachments for Confluence content.
+
+        Args:
+            content_id: The Confluence content ID
+            target_dir: The directory where attachments should be saved
+
+        Returns:
+            A dictionary with download results
+        """
+        # Convert to absolute path if relative
+        if not os.path.isabs(target_dir):
+            target_dir = os.path.abspath(target_dir)
+
+        # Guard against path traversal (resolves symlinks)
+        validate_safe_path(target_dir)
+
+        logger.info(
+            f"Downloading attachments for content {content_id} to directory: {target_dir}"
+        )
+
+        # Create the target directory if it doesn't exist
+        target_path = Path(target_dir)
+        target_path.mkdir(parents=True, exist_ok=True)
+
+        # Get the attachments
+        logger.info(f"Fetching attachments for content {content_id}")
+        attachments_result = self.get_content_attachments(content_id)
+
+        if not attachments_result.get("success"):
+            return attachments_result
+
+        attachment_data = attachments_result.get("attachments", [])
+
+        if not attachment_data:
+            return {
+                "success": True,
+                "message": f"No attachments found for content {content_id}",
+                "downloaded": [],
+                "failed": [],
+            }
+
+        # Create ConfluenceAttachment objects for each attachment
+        attachments = []
+        for attachment in attachment_data:
+            if isinstance(attachment, dict):
+                attachments.append(ConfluenceAttachment.from_api_response(attachment))
+
+        # Download each attachment
+        downloaded = []
+        failed = []
+
+        for attachment in attachments:
+            if not attachment.download_url:
+                logger.warning(f"No download URL for attachment {attachment.title}")
+                failed.append(
+                    {
+                        "filename": attachment.title,
+                        "error": "No download URL available",
+                    }
+                )
+                continue
+
+            # Create a safe filename
+            safe_filename = Path(attachment.title).name
+            file_path = target_path / safe_filename
+
+            # Resolve to an absolute URL (and optionally the v1 endpoint)
+            download_url = self._resolve_attachment_download_url(
+                attachment.download_url,
+                attachment_id=attachment.id,
+                content_id=content_id,
+            )
+
+            # Download the attachment
+            success = self.download_attachment(download_url, str(file_path))
+
+            if success:
+                downloaded.append(
+                    {
+                        "filename": attachment.title,
+                        "path": str(file_path),
+                        "size": attachment.file_size,
+                    }
+                )
+            else:
+                failed.append(
+                    {"filename": attachment.title, "error": "Download failed"}
+                )
+
+        return {
+            "success": True,
+            "content_id": content_id,
+            "total": len(attachments),
+            "downloaded": downloaded,
+            "failed": failed,
+        }
+
+    def get_content_attachments(
+        self,
+        content_id: str,
+        start: int = 0,
+        limit: int = 50,
+        filename: str | None = None,
+        media_type: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        Get all attachments for Confluence content.
+
+        Args:
+            content_id: The Confluence content ID
+            start: Starting index for pagination
+            limit: Maximum number of results to return
+            filename: Optional filename filter (exact match)
+            media_type: Optional MIME type filter (exact match)
+
+        Returns:
+            A dictionary with attachment information
+        """
+        if not content_id:
+            logger.error("No content ID provided for getting attachments")
+            return {"success": False, "error": "No content ID provided"}
+
+        try:
+            logger.info(f"Fetching attachments for content {content_id}")
+
+            # Use v2 API for OAuth authentication, v1 API for token/basic auth
+            v2_adapter = self._v2_adapter
+            if v2_adapter:
+                logger.debug(
+                    f"Using v2 API for OAuth authentication to get attachments for '{content_id}'"
+                )
+                # V2 API supports server-side filtering
+                response = v2_adapter.get_page_attachments(
+                    page_id=content_id,
+                    start=start,
+                    limit=limit,
+                    filename=filename,
+                    media_type=media_type,
+                )
+            else:
+                logger.debug(
+                    f"Using v1 API for token/basic authentication to get attachments for '{content_id}'"
+                )
+                # V1 API doesn't support filtering - fetch all, then filter client-side
+                response = self.confluence.get_attachments_from_content(
+                    content_id, start=start, limit=limit
+                )
+
+            attachments = response.get("results", [])
+            total = response.get("size", 0)
+
+            # Apply client-side filtering for V1 API when filters are specified
+            if not v2_adapter and (filename or media_type):
+                filtered = []
+                for att in attachments:
+                    # Filter by filename (exact match)
+                    if filename and att.get("title") != filename:
+                        continue
+                    # Filter by media_type (exact match)
+                    if media_type and att.get("mediaType") != media_type:
+                        continue
+                    filtered.append(att)
+
+                attachments = filtered
+                total = len(filtered)
+                logger.debug(
+                    f"Client-side filtering: {len(filtered)} of {response.get('size', 0)} attachments matched"
+                )
+
+            logger.info(
+                f"Retrieved {len(attachments)} attachments for content {content_id}"
+            )
+
+            return {
+                "success": True,
+                "content_id": content_id,
+                "attachments": attachments,
+                "total": total,
+                "start": start,
+                "limit": limit,
+            }
+
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"Error getting attachments: {error_msg}")
+            return {"success": False, "error": error_msg}
+
+    def _upload_attachment_direct(
+        self,
+        content_id: str,
+        file_path: str,
+        filename: str,
+        comment: str | None,
+        minor_edit: bool,
+    ) -> dict[str, Any] | None:
+        """
+        Upload attachment using direct REST API call.
+
+        This method uses the Confluence REST API directly to support
+        the minorEdit parameter, which is not available in the
+        atlassian-python-api library's attach_file() method.
+
+        Args:
+            content_id: The Confluence content ID
+            file_path: Full path to the file
+            filename: Name of the file
+            comment: Optional comment for the attachment
+            minor_edit: Whether this is a minor edit
+
+        Returns:
+            Attachment metadata dict if successful, None otherwise
+        """
+        try:
+            with open(file_path, "rb") as file_handle:
+                return self._send_attachment_request(
+                    content_id, filename, file_handle, comment, minor_edit
+                )
+        except Exception as e:
+            logger.error(
+                f"Direct API upload failed: {type(e).__name__}: {e}", exc_info=True
+            )
+            # Propagate error details instead of swallowing them
+            raise
+
+    def _upload_attachment_from_bytes(
+        self,
+        content_id: str,
+        filename: str,
+        content: bytes,
+        comment: str | None,
+        minor_edit: bool,
+    ) -> dict[str, Any] | None:
+        """
+        Upload attachment from in-memory bytes using a direct REST API call.
+
+        Unlike ``_upload_attachment_direct`` this never touches the filesystem,
+        which is required when the server cannot read host file paths (for
+        example when running inside a container).
+
+        Args:
+            content_id: The Confluence content ID
+            filename: Name of the file (determines the attachment title/type)
+            content: Raw file bytes to upload
+            comment: Optional comment for the attachment
+            minor_edit: Whether this is a minor edit
+
+        Returns:
+            Attachment metadata dict if successful, None otherwise
+        """
+        try:
+            return self._send_attachment_request(
+                content_id, filename, content, comment, minor_edit
+            )
+        except Exception as e:
+            logger.error(
+                f"In-memory API upload failed: {type(e).__name__}: {e}",
+                exc_info=True,
+            )
+            raise
+
+    def _send_attachment_request(
+        self,
+        content_id: str,
+        filename: str,
+        file_obj: Any,
+        comment: str | None,
+        minor_edit: bool,
+    ) -> dict[str, Any]:
+        """
+        Send the multipart attachment upload request to the Confluence REST API.
+
+        This uses the REST API directly to support the ``minorEdit`` parameter,
+        which is not available in the atlassian-python-api library's
+        ``attach_file()`` method. ``file_obj`` may be any value accepted by the
+        ``requests`` library as multipart content (an open file handle or raw
+        ``bytes``).
+
+        Args:
+            content_id: The Confluence content ID
+            filename: Name of the file
+            file_obj: File-like object or raw bytes to upload
+            comment: Optional comment for the attachment
+            minor_edit: Whether this is a minor edit
+
+        Returns:
+            Attachment metadata dict.
+        """
+
+        def make_files(content: Any) -> dict[str, Any]:
+            files: dict[str, Any] = {"file": (filename, content)}
+            if comment:
+                files["comment"] = (None, comment, "text/plain; charset=utf-8")
+            return files
+
+        base_url = self._rest_base_url()
+        url = f"{base_url}/rest/api/content/{content_id}/child/attachment"
+
+        # Server/DC requires "no-check" (with hyphen) to bypass XSRF validation.
+        headers = {"X-Atlassian-Token": "no-check"}
+
+        data: dict[str, str] = {}
+        if minor_edit is not None:
+            data["minorEdit"] = str(minor_edit).lower()
+
+        # Use POST to create a new attachment on Server/DC. PUT on the list
+        # endpoint is not supported by Confluence Server/DC.
+        response = self.confluence._session.post(
+            url, headers=headers, files=make_files(file_obj), data=data
+        )
+
+        # Server/DC returns HTTP 400 for an existing attachment name. Look up the
+        # attachment ID and POST to its /data endpoint to create a new version.
+        if response.status_code == 400 and "same file name" in response.text:
+            logger.debug(
+                f"Attachment '{filename}' already exists on content {content_id}, "
+                "updating existing attachment version"
+            )
+            encoded_filename = urllib.parse.quote(filename, safe="")
+            att_list = self.confluence._session.get(
+                f"{url}?filename={encoded_filename}",
+                headers=headers,
+            )
+            att_list.raise_for_status()
+            att_results = att_list.json().get("results", [])
+            if att_results:
+                if hasattr(file_obj, "seek"):
+                    file_obj.seek(0)
+                att_id = att_results[0]["id"]
+                update_url = (
+                    f"{base_url}/rest/api/content/{content_id}"
+                    f"/child/attachment/{att_id}/data"
+                )
+                response = self.confluence._session.post(
+                    update_url,
+                    headers=headers,
+                    files=make_files(file_obj),
+                    data=data,
+                )
+
+        response.raise_for_status()
+
+        # Parse response
+        result = response.json()
+
+        # Return first result if it's a list
+        if isinstance(result, dict) and "results" in result:
+            results = result.get("results", [])
+            return results[0] if results else result
+        return result
+
+    def delete_attachment(self, attachment_id: str) -> dict[str, Any]:
+        """
+        Delete an attachment by ID.
+
+        Args:
+            attachment_id: The Confluence attachment ID
+
+        Returns:
+            A dictionary with deletion result
+        """
+        if not attachment_id:
+            logger.error("No attachment ID provided for deletion")
+            return {"success": False, "error": "No attachment ID provided"}
+
+        try:
+            logger.info(f"Deleting attachment {attachment_id}")
+
+            # Use v2 API for OAuth authentication, v1 API for token/basic auth
+            v2_adapter = self._v2_adapter
+            if v2_adapter:
+                logger.debug(
+                    f"Using v2 API for OAuth authentication to delete attachment '{attachment_id}'"
+                )
+                v2_adapter.delete_attachment(attachment_id)
+            else:
+                logger.debug(
+                    f"Using v1 API for token/basic authentication to delete attachment '{attachment_id}'"
+                )
+                # Use v1 API endpoint for deletion
+                base_url = self._rest_base_url()
+                url = f"{base_url}/rest/api/content/{attachment_id}"
+                response = self.confluence._session.delete(url)
+                response.raise_for_status()
+
+            logger.info(f"Successfully deleted attachment {attachment_id}")
+
+            return {
+                "success": True,
+                "attachment_id": attachment_id,
+                "message": "Attachment deleted successfully",
+            }
+
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"Error deleting attachment: {error_msg}")
+            return {"success": False, "error": error_msg}

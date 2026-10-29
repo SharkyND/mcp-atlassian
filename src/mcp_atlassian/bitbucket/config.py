@@ -36,6 +36,9 @@ class BitbucketConfig:
     no_proxy: str | None = None  # Comma-separated list of hosts to bypass proxy
     socks_proxy: str | None = None  # SOCKS proxy URL (optional)
     custom_headers: dict[str, str] | None = None  # Custom HTTP headers
+    passthrough_headers: list[str] | None = None
+    proxy_wpad_enable: bool = False
+    proxy_wpad_url: str | None = None
 
     @property
     def is_cloud(self) -> bool:

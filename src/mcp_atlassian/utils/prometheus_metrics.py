@@ -202,8 +202,9 @@ class MCPAtlassianMetrics:
         """
         if not self._metrics_enabled:
             return (
-                "# Prometheus metrics not available - "
-                "prometheus-client not installed\n",
+                (
+                    "# Prometheus metrics not available - prometheus-client not installed\n"
+                ),
                 "text/plain",
             )
 

@@ -1,0 +1,72 @@
+name: Security
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+
+jobs:
+  trufflehog:
+    name: Secret Scanning
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: TruffleHog secret scan
+        uses: trufflesecurity/trufflehog@27b0417c16317ca9a472a9a8092acce143b49c55 # v3.95.9
+        with:
+          version: 3.95.9
+          extra_args: --results=verified,unknown
+
+  dependencies-and-image:
+    name: Patched dependencies and container
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Block fixable high and critical source findings
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        with:
+          version: v0.74.0
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,misconfig
+          skip-dirs: .git,.venv,.cache,.local,.tools,dist,test-results
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+
+      - name: Build locked non-root image
+        run: docker build --tag mcp-atlassian:security .
+
+      - name: Verify real HTTP authentication with synthetic Jira
+        run: >-
+          docker run --rm --network none --read-only
+          --tmpfs /tmp:rw,nosuid,nodev,size=128m
+          --add-host synthetic-jira.test:127.0.0.1
+          --mount type=bind,source="${{ github.workspace }}/scripts/test_http_security.py",target=/fixture.py,readonly
+          --entrypoint python mcp-atlassian:security /fixture.py
+
+      - name: Block fixable high and critical runtime vulnerabilities
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        with:
+          version: v0.74.0
+          scan-type: image
+          image-ref: mcp-atlassian:security
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'

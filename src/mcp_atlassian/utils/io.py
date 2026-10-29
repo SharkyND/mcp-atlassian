@@ -1,70 +1,58 @@
 """I/O utility functions for MCP Atlassian."""
 
-from __future__ import annotations
-
 import os
-from typing import Final
+from pathlib import Path
 
-TRUTHY_VALUES: Final[set[str]] = {"true", "1", "yes", "y", "on"}
-FALSY_VALUES: Final[set[str]] = {"false", "0", "no", "n", "off"}
-
-
-def parse_extended_bool(value: str | bool | None) -> bool | None:
-    """Convert a string or boolean flag into a canonical bool value.
-
-    Returns:
-        True/False when the value is recognized, otherwise None.
-    """
-    if isinstance(value, bool):
-        return value
-
-    if value is None:
-        return None
-
-    normalized = value.strip().lower()
-    if not normalized:
-        return None
-
-    if normalized in TRUTHY_VALUES:
-        return True
-    if normalized in FALSY_VALUES:
-        return False
-    return None
-
-
-def get_env_read_only_flag() -> bool | None:
-    """Return the READ_ONLY_MODE environment flag, if provided."""
-    return parse_extended_bool(os.getenv("READ_ONLY_MODE"))
-
-
-def get_cli_read_only_flag() -> bool | None:
-    """Return the CLI read-only flag captured in CLI_READ_ONLY_MODE."""
-    return parse_extended_bool(os.getenv("CLI_READ_ONLY_MODE"))
-
-
-def resolve_read_only_mode(
-    cli_read_only: bool | None,
-    env_read_only: bool | None,
-    header_read_only: str | bool | None,
-) -> bool:
-    """Resolve read-only mode across CLI, environment, and request header."""
-    header_value = parse_extended_bool(header_read_only)
-    if header_value is not None:
-        return header_value
-
-    if env_read_only is not None:
-        return env_read_only
-
-    if cli_read_only is not None:
-        return cli_read_only
-
-    return False
+from mcp_atlassian.utils.env import is_env_extended_truthy
 
 
 def is_read_only_mode() -> bool:
-    """Check if the server is running in read-only mode by default."""
-    return resolve_read_only_mode(
-        cli_read_only=get_cli_read_only_flag(),
-        env_read_only=get_env_read_only_flag(),
-        header_read_only=None,
-    )
+    """Check if the server is running in read-only mode.
+
+    Read-only mode prevents all write operations (create, update, delete)
+    while allowing all read operations. This is useful for working with
+    production Atlassian instances where you want to prevent accidental
+    modifications.
+
+    Returns:
+        True if read-only mode is enabled, False otherwise
+    """
+    return is_env_extended_truthy("READ_ONLY_MODE", "false")
+
+
+def validate_safe_path(
+    path: str | os.PathLike[str],
+    base_dir: str | os.PathLike[str] | None = None,
+) -> Path:
+    """Validate that a path does not escape the base directory.
+
+    Resolves symlinks and normalizes the path to prevent path traversal
+    attacks (e.g., ``../../etc/passwd``).
+
+    Args:
+        path: The path to validate.
+        base_dir: The directory the path must stay within.
+            Defaults to the current working directory.
+
+    Returns:
+        The resolved, validated path.
+
+    Raises:
+        ValueError: If the resolved path escapes *base_dir*.
+    """
+    if base_dir is None:
+        base_dir = os.getcwd()
+
+    resolved_base = Path(base_dir).resolve(strict=False)
+    p = Path(path)
+    # Resolve relative paths against base_dir, not cwd
+    if not p.is_absolute():
+        p = resolved_base / p
+    resolved_path = p.resolve(strict=False)
+
+    if not resolved_path.is_relative_to(resolved_base):
+        raise ValueError(
+            f"Path traversal detected: {path} resolves outside {resolved_base}"
+        )
+
+    return resolved_path

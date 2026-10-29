@@ -2,10 +2,40 @@ import asyncio
 import logging
 import os
 import sys
+import threading
 from importlib.metadata import PackageNotFoundError, version
 
+from dotenv import dotenv_values, load_dotenv
+
+# Inject truststore BEFORE any requests/urllib3 imports to ensure the
+# OS-native trust store (e.g. Windows Certificate Store) is used for
+# SSL verification instead of the bundled certifi CA certificates.
+# This must happen before 'requests.adapters' is imported because that
+# module creates a preloaded SSLContext at import time.
+# Read from .env via dotenv_values() since load_dotenv() hasn't run yet.
+if os.getenv(
+    "MCP_ATLASSIAN_USE_SYSTEM_TRUSTSTORE",
+    dotenv_values().get("MCP_ATLASSIAN_USE_SYSTEM_TRUSTSTORE") or "true",
+).lower() not in ("false", "0", "no"):
+    try:
+        import truststore
+
+        truststore.inject_into_ssl()
+    except Exception:
+        logging.getLogger("mcp-atlassian").warning(
+            "Failed to inject OS trust store; falling back to bundled certificates",
+            exc_info=True,
+        )
+
 import click
-from dotenv import load_dotenv
+from fastmcp import settings as fastmcp_settings
+
+# Fix high CPU usage on Windows - use SelectorEventLoop instead of ProactorEventLoop
+# ProactorEventLoop uses IOCP which can cause busy-waiting when combined with
+# synchronous libraries (like requests) that use select() for socket operations.
+# This reduces idle CPU usage from ~3-5% per process to near zero.
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 from mcp_atlassian.utils.env import is_env_truthy
 from mcp_atlassian.utils.lifecycle import (
@@ -32,6 +62,58 @@ logging_stream = sys.stdout if is_env_truthy("MCP_LOGGING_STDOUT") else sys.stde
 logger = setup_logging(logging_level, logging_stream)
 
 
+async def _watch_parent_exit(stop_event: threading.Event) -> None:
+    parent_pid = os.getppid()
+    loop = asyncio.get_running_loop()
+
+    def _poll_parent_alive() -> None:
+        while not stop_event.wait(5):
+            current_ppid = os.getppid()
+            # On Unix, when the parent dies the child is reparented (ppid changes)
+            if current_ppid != parent_pid:
+                logger.info(
+                    "Parent process %d exited (reparented to %d). "
+                    "Shutting down STDIO server.",
+                    parent_pid,
+                    current_ppid,
+                )
+                return
+
+    await loop.run_in_executor(None, _poll_parent_alive)
+
+
+async def _run_stdio_with_stdin_guard(run_kwargs: dict[str, object]) -> None:
+    from mcp_atlassian.servers import main_mcp
+
+    parent_watch_stop = threading.Event()
+    server_task = asyncio.create_task(main_mcp.run_async(**run_kwargs))
+    parent_task = asyncio.create_task(_watch_parent_exit(parent_watch_stop))
+
+    done, pending = await asyncio.wait(
+        {server_task, parent_task},
+        return_when=asyncio.FIRST_COMPLETED,
+    )
+    parent_watch_stop.set()
+
+    if parent_task in done and not server_task.done():
+        logger.info("Parent process exited. Shutting down STDIO server.")
+        server_task.cancel()
+
+    for task in pending:
+        task.cancel()
+
+    await asyncio.gather(*pending, return_exceptions=True)
+
+    if server_task.done():
+        server_result = await asyncio.gather(server_task, return_exceptions=True)
+        if (
+            server_result
+            and isinstance(server_result[0], Exception)
+            and not isinstance(server_result[0], asyncio.CancelledError)
+        ):
+            raise server_result[0]
+
+
 @click.version_option(__version__, prog_name="mcp-atlassian")
 @click.command()
 @click.option(
@@ -53,6 +135,11 @@ logger = setup_logging(logging_level, logging_stream)
     type=click.Choice(["stdio", "sse", "streamable-http"]),
     default="stdio",
     help="Transport type (stdio, sse, or streamable-http)",
+)
+@click.option(
+    "--stateless",
+    is_flag=True,
+    help="Whether the server should be stateless (streamable-http only)",
 )
 @click.option(
     "--port",
@@ -117,6 +204,10 @@ logger = setup_logging(logging_level, logging_stream)
     help="Comma-separated list of tools to enable (enables all if not specified)",
 )
 @click.option(
+    "--toolsets",
+    help="Comma-separated toolset names to enable (all/default/specific names)",
+)
+@click.option(
     "--oauth-client-id",
     help="OAuth 2.0 client ID for Atlassian Cloud",
 )
@@ -146,6 +237,7 @@ def main(
     env_file: str | None,
     oauth_setup: bool,
     transport: str,
+    stateless: bool,
     port: int,
     host: str,
     path: str | None,
@@ -163,6 +255,7 @@ def main(
     jira_projects_filter: str | None,
     read_only: bool,
     enabled_tools: str | None,
+    toolsets: str | None,
     oauth_client_id: str | None,
     oauth_client_secret: str | None,
     oauth_redirect_uri: str | None,
@@ -174,9 +267,9 @@ def main(
 
     Supports both Atlassian Cloud and Jira Server/Data Center deployments.
     Authentication methods supported:
-    - Username and API token (Cloud)
+    - Username and API token (Cloud and Server/Data Center)
     - Personal Access Token (Server/Data Center)
-    - OAuth 2.0 (Cloud only)
+    - OAuth 2.0 (Cloud and Data Center)
     """
     # Logging level logic
     if verbose == 1:
@@ -242,6 +335,19 @@ def main(
         final_transport = "stdio"
     logger.debug(f"Final transport determined: {final_transport}")
 
+    # Stateless precedence
+    final_stateless = is_env_truthy("STATELESS", "false")
+    if click_ctx and was_option_provided(click_ctx, "stateless"):
+        final_stateless = stateless
+    logger.debug(f"Final stateless determined: {final_stateless}")
+
+    # Validate stateless is only used with streamable-http
+    if final_stateless and final_transport != "streamable-http":
+        logger.error(
+            "--stateless flag is only supported with streamable-http transport"
+        )
+        sys.exit(1)
+
     # Port precedence
     final_port = 8000
     if os.getenv("PORT") and os.getenv("PORT").isdigit():
@@ -264,12 +370,11 @@ def main(
         f"Final path for Streamable HTTP: {final_path if final_path else 'FastMCP default'}"
     )
 
-    cli_read_only_value = str(read_only).lower()
-    os.environ["CLI_READ_ONLY_MODE"] = cli_read_only_value
-
     # Set env vars for downstream config
     if click_ctx and was_option_provided(click_ctx, "enabled_tools"):
         os.environ["ENABLED_TOOLS"] = enabled_tools
+    if click_ctx and was_option_provided(click_ctx, "toolsets"):
+        os.environ["TOOLSETS"] = toolsets
     if click_ctx and was_option_provided(click_ctx, "confluence_url"):
         os.environ["CONFLUENCE_URL"] = confluence_url
     if click_ctx and was_option_provided(click_ctx, "confluence_username"):
@@ -299,8 +404,7 @@ def main(
     if click_ctx and was_option_provided(click_ctx, "oauth_access_token"):
         os.environ["ATLASSIAN_OAUTH_ACCESS_TOKEN"] = oauth_access_token
     if click_ctx and was_option_provided(click_ctx, "read_only"):
-        if os.getenv("READ_ONLY_MODE") is None:
-            os.environ["READ_ONLY_MODE"] = cli_read_only_value
+        os.environ["READ_ONLY_MODE"] = str(read_only).lower()
     if click_ctx and was_option_provided(click_ctx, "confluence_ssl_verify"):
         os.environ["CONFLUENCE_SSL_VERIFY"] = str(confluence_ssl_verify).lower()
     if click_ctx and was_option_provided(click_ctx, "confluence_spaces_filter"):
@@ -329,13 +433,11 @@ def main(
         log_display_path = final_path
         if log_display_path is None:
             if final_transport == "sse":
-                from fastmcp import settings
-
-                log_display_path = settings.sse_path or "/sse"
+                log_display_path = fastmcp_settings.sse_path or "/sse"
             else:
-                from fastmcp import settings
+                log_display_path = fastmcp_settings.streamable_http_path or "/mcp"
 
-                log_display_path = settings.streamable_http_path or "/mcp"
+        run_kwargs["stateless_http"] = final_stateless
 
         logger.info(
             f"Starting server with {final_transport.upper()} transport on http://{final_host}:{final_port}{log_display_path}"
@@ -356,10 +458,8 @@ def main(
     try:
         logger.debug("Starting asyncio event loop...")
 
-        # For stdio transport, don't monitor stdin as MCP server handles it internally
-        # This prevents race conditions where both try to read from the same stdin
         if final_transport == "stdio":
-            asyncio.run(main_mcp.run_async(**run_kwargs))
+            asyncio.run(_run_stdio_with_stdin_guard(run_kwargs))
         else:
             # For HTTP transports (SSE, streamable-http), don't use stdin monitoring
             # as it causes premature shutdown when the client closes stdin
@@ -370,7 +470,6 @@ def main(
             asyncio.run(main_mcp.run_async(**run_kwargs))
     except (KeyboardInterrupt, SystemExit) as e:
         logger.info(f"Server shutdown initiated: {type(e).__name__}")
-        raise
     except Exception as e:
         logger.error(f"Server encountered an error: {e}", exc_info=True)
         sys.exit(1)

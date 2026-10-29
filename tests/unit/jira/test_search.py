@@ -1,5 +1,6 @@
 """Tests for the Jira Search mixin."""
 
+from typing import Any
 from unittest.mock import ANY, MagicMock
 
 import pytest
@@ -52,95 +53,68 @@ class TestSearchMixin:
             "maxResults": 50,
         }
 
-    def test_search_issues_calls_cloud_endpoint(
-        self, search_mixin: SearchMixin, mock_issues_response
+    def test_search_issues_calls_v3_api_for_cloud(
+        self,
+        search_mixin: SearchMixin,
+        mock_issues_response,
     ):
-        """Ensure Jira Cloud uses the enhanced /search/jql endpoint."""
+        """Test that Cloud uses POST /rest/api/3/search/jql (v3 API)."""
+        # Setup: Mock config.is_cloud = True
         search_mixin.config.is_cloud = True
         search_mixin.config.projects_filter = None
         search_mixin.config.url = "https://test.example.com"
 
-        cloud_response = {
-            "issues": mock_issues_response["issues"],
-            "nextPageToken": None,
-            "isLast": True,
-        }
+        # Setup: Mock v3 API response
+        search_mixin.jira.post = MagicMock(return_value=mock_issues_response)
+        search_mixin.jira.jql = MagicMock(return_value=mock_issues_response)
 
-        search_mixin.jira.resource_url.side_effect = lambda path: path
-        search_mixin.jira.get.reset_mock()
-        search_mixin.jira.get.return_value = cloud_response
-
+        # Act
         jql_query = "project = TEST"
         result = search_mixin.search_issues(jql_query, limit=10, start=0)
 
+        # Assert: Basic result verification
         assert isinstance(result, JiraSearchResult)
-        assert len(result.issues) == len(mock_issues_response["issues"])
-        assert result.next_page_token is None
-        assert result.is_last is True
+        assert len(result.issues) > 0
 
-        search_mixin.jira.get.assert_called_once()
-        called_path = search_mixin.jira.get.call_args[0][0]
-        params = search_mixin.jira.get.call_args[1]["params"]
+        # Assert: v3 API (POST) was called for Cloud
+        search_mixin.jira.post.assert_called_once()
+        call_args = search_mixin.jira.post.call_args
+        assert call_args[0][0] == "rest/api/3/search/jql"
+        assert call_args[1]["json"]["jql"] == jql_query
 
-        assert called_path == "search/jql"
-        assert params["jql"] == jql_query
-        assert params["maxResults"] == 10
-        assert "fields" in params
-
+        # Assert: v2 API (jql) was NOT called
         search_mixin.jira.jql.assert_not_called()
 
-    def test_search_issues_calls_server_endpoint(
-        self, search_mixin: SearchMixin, mock_issues_response
+    def test_search_issues_calls_jql_for_server(
+        self,
+        search_mixin: SearchMixin,
+        mock_issues_response,
     ):
-        """Ensure Jira Server/Data Center uses the classic search endpoint."""
+        """Test that Server/DC uses jql method (v2 API)."""
+        # Setup: Mock config.is_cloud = False
         search_mixin.config.is_cloud = False
         search_mixin.config.projects_filter = None
         search_mixin.config.url = "https://test.example.com"
 
+        # Setup: Mock response
+        search_mixin.jira.post = MagicMock(return_value=mock_issues_response)
         search_mixin.jira.jql = MagicMock(return_value=mock_issues_response)
 
+        # Act
         jql_query = "project = TEST"
         result = search_mixin.search_issues(jql_query, limit=10, start=0)
 
+        # Assert: Basic result verification
         assert isinstance(result, JiraSearchResult)
-        assert len(result.issues) == len(mock_issues_response["issues"])
+        assert len(result.issues) > 0
 
+        # Assert: jql method was called for Server/DC
         search_mixin.jira.jql.assert_called_once_with(
             jql_query, fields=ANY, start=0, limit=10, expand=None
         )
-        search_mixin.jira.get.assert_not_called()
 
-    def test_search_issues_cloud_handles_pagination(self, search_mixin: SearchMixin):
-        """Verify Cloud pagination stops at the requested limit and tracks tokens."""
-        search_mixin.config.is_cloud = True
-        search_mixin.config.projects_filter = None
-        search_mixin.config.url = "https://test.example.com"
-        search_mixin.jira.resource_url.side_effect = lambda path: path
-
-        page_one_issue = {
-            "id": "10001",
-            "key": "TEST-1",
-            "fields": {"summary": "Issue one"},
-        }
-        page_two_issue = {
-            "id": "10002",
-            "key": "TEST-2",
-            "fields": {"summary": "Issue two"},
-        }
-
-        search_mixin.jira.get.side_effect = [
-            {"issues": [page_one_issue], "nextPageToken": "token-123", "isLast": False},
-            {"issues": [page_two_issue], "nextPageToken": None, "isLast": True},
-        ]
-
-        result = search_mixin.search_issues("project = TEST", limit=2)
-
-        assert isinstance(result, JiraSearchResult)
-        assert len(result.issues) == 2
-        assert result.next_page_token is None
-        assert result.is_last is True
-        assert result.total == 2
-        assert search_mixin.jira.get.call_count == 2
+        # Assert: v3 API (POST) was NOT called
+        search_mixin.jira.post.assert_not_called()
 
     def test_search_issues_basic(self, search_mixin: SearchMixin):
         """Test basic search functionality."""
@@ -281,7 +255,7 @@ class TestSearchMixin:
         # Verify results
         assert isinstance(result, JiraSearchResult)
         assert len(result.issues) == 0
-        assert result.total == 0
+        assert result.total == -1
 
     def test_search_issues_with_error(self, search_mixin: SearchMixin):
         """Test search with API error."""
@@ -314,10 +288,10 @@ class TestSearchMixin:
         search_mixin.jira.jql.return_value = mock_issues
         search_mixin.config.url = "https://example.atlassian.net"
 
-        # Test with single project filter
+        # Test with single project filter (non-reserved keys are not quoted)
         result = search_mixin.search_issues("text ~ 'test'", projects_filter="TEST")
         search_mixin.jira.jql.assert_called_with(
-            "(text ~ 'test') AND project = \"TEST\"",
+            "(text ~ 'test') AND (project = TEST)",
             fields=ANY,
             start=0,
             limit=50,
@@ -329,7 +303,7 @@ class TestSearchMixin:
         # Test with multiple project filter
         result = search_mixin.search_issues("text ~ 'test'", projects_filter="TEST,DEV")
         search_mixin.jira.jql.assert_called_with(
-            '(text ~ \'test\') AND project IN ("TEST", "DEV")',
+            "(text ~ 'test') AND (project IN (TEST, DEV))",
             fields=ANY,
             start=0,
             limit=50,
@@ -361,10 +335,10 @@ class TestSearchMixin:
         search_mixin.config.url = "https://example.atlassian.net"
         search_mixin.config.projects_filter = "TEST,DEV"
 
-        # Test with config filter
+        # Test with config filter (non-reserved keys are not quoted)
         result = search_mixin.search_issues("text ~ 'test'")
         search_mixin.jira.jql.assert_called_with(
-            '(text ~ \'test\') AND project IN ("TEST", "DEV")',
+            "(text ~ 'test') AND (project IN (TEST, DEV))",
             fields=ANY,
             start=0,
             limit=50,
@@ -373,10 +347,11 @@ class TestSearchMixin:
         assert len(result.issues) == 1
         assert result.total == 1
 
-        # Test with override
+        # A projects_filter arg narrows within the config allowlist (hard boundary):
+        # the config filter is still ANDed, it cannot be replaced.
         result = search_mixin.search_issues("text ~ 'test'", projects_filter="OVERRIDE")
         search_mixin.jira.jql.assert_called_with(
-            "(text ~ 'test') AND project = \"OVERRIDE\"",
+            "((text ~ 'test') AND (project IN (TEST, DEV))) AND (project = OVERRIDE)",
             fields=ANY,
             start=0,
             limit=50,
@@ -385,12 +360,13 @@ class TestSearchMixin:
         assert len(result.issues) == 1
         assert result.total == 1
 
-        # Test with override - multiple projects
+        # Same with a multi-project narrowing arg.
         result = search_mixin.search_issues(
             "text ~ 'test'", projects_filter="OVER1,OVER2"
         )
         search_mixin.jira.jql.assert_called_with(
-            '(text ~ \'test\') AND project IN ("OVER1", "OVER2")',
+            "((text ~ 'test') AND (project IN (TEST, DEV))) "
+            "AND (project IN (OVER1, OVER2))",
             fields=ANY,
             start=0,
             limit=50,
@@ -529,7 +505,7 @@ class TestSearchMixin:
 
         with pytest.raises(Exception) as e:
             search_mixin.get_board_issues("1000", jql="", limit=20)
-        assert str(e.value).startswith("Error searching issues for board with JQL")
+        assert "API Error content" in str(e.value)
 
     def test_get_sprint_issues(self, search_mixin: SearchMixin):
         """Test get_sprint_issues method."""
@@ -553,10 +529,23 @@ class TestSearchMixin:
             "startAt": 0,
             "maxResults": 50,
         }
-        search_mixin.jira.get_sprint_issues.return_value = mock_issues
+
+        # Mock search_issues since get_sprint_issues now uses it internally
+        search_result = JiraSearchResult.from_api_response(
+            mock_issues, base_url=search_mixin.config.url
+        )
+        search_mixin.search_issues = MagicMock(return_value=search_result)
 
         # Call the method
         result = search_mixin.get_sprint_issues("10001")
+
+        # Verify that search_issues was called with correct JQL
+        search_mixin.search_issues.assert_called_once_with(
+            jql="sprint = 10001",
+            fields=None,
+            start=0,
+            limit=50,
+        )
 
         # Verify results
         assert isinstance(result, JiraSearchResult)
@@ -579,20 +568,91 @@ class TestSearchMixin:
         assert issue.priority.name == "High"
 
     def test_get_sprint_issues_exception(self, search_mixin: SearchMixin):
-        search_mixin.jira.get_sprint_issues.side_effect = Exception("API Error")
+        search_mixin.search_issues = MagicMock(side_effect=Exception("API Error"))
 
         with pytest.raises(Exception) as e:
             search_mixin.get_sprint_issues("10001")
         assert "API Error" in str(e.value)
 
     def test_get_sprint_issues_http_error(self, search_mixin: SearchMixin):
-        search_mixin.jira.get_sprint_issues.side_effect = requests.HTTPError(
-            response=MagicMock(content="API Error content")
+        search_mixin.search_issues = MagicMock(
+            side_effect=requests.HTTPError(
+                response=MagicMock(content="API Error content")
+            )
         )
 
         with pytest.raises(Exception) as e:
             search_mixin.get_sprint_issues("10001")
-        assert str(e.value).startswith("Error searching issues for sprint")
+        assert "Error searching issues for sprint" in str(e.value)
+
+    def test_get_sprint_issues_with_fields_parameter(self, search_mixin: SearchMixin):
+        """Test get_sprint_issues method properly passes fields parameter to search_issues."""
+        mock_issues = {
+            "issues": [
+                {
+                    "id": "10001",
+                    "key": "TEST-123",
+                    "fields": {
+                        "summary": "Test issue with custom field",
+                        "assignee": {
+                            "displayName": "Test User",
+                            "emailAddress": "test@example.com",
+                            "active": True,
+                        },
+                        "customfield_10049": "Custom value",
+                        "issuetype": {"name": "Bug"},
+                        "status": {"name": "Open"},
+                        "description": "Issue description",
+                        "created": "2024-01-01T10:00:00.000+0000",
+                        "updated": "2024-01-01T11:00:00.000+0000",
+                        "priority": {"name": "High"},
+                    },
+                }
+            ],
+            "total": 1,
+            "startAt": 0,
+            "maxResults": 50,
+        }
+
+        # Mock search_issues to return a result with requested_fields set
+        search_result = JiraSearchResult.from_api_response(
+            mock_issues,
+            base_url=search_mixin.config.url,
+            requested_fields="summary,assignee,customfield_10049",
+        )
+        search_mixin.search_issues = MagicMock(return_value=search_result)
+
+        # Call the method with specific fields
+        result = search_mixin.get_sprint_issues(
+            "10001", fields="summary,assignee,customfield_10049"
+        )
+
+        # Verify that search_issues was called with correct parameters
+        search_mixin.search_issues.assert_called_once_with(
+            jql="sprint = 10001",
+            fields="summary,assignee,customfield_10049",
+            start=0,
+            limit=50,
+        )
+
+        # Verify results
+        assert isinstance(result, JiraSearchResult)
+        assert len(result.issues) == 1
+        issue = result.issues[0]
+
+        # Convert to simplified dict to check field filtering
+        simplified = issue.to_simplified_dict()
+
+        # These fields should be included (plus id and key which are always included)
+        assert "id" in simplified
+        assert "key" in simplified
+        assert "summary" in simplified
+        assert "assignee" in simplified
+        assert "customfield_10049" in simplified
+
+        assert simplified["customfield_10049"] == {"value": "Custom value"}
+        assert "assignee" in simplified
+        assert simplified["assignee"]["display_name"] == "Test User"
 
     @pytest.mark.parametrize("is_cloud", [True, False])
     def test_search_issues_with_projects_filter_jql_construction(
@@ -606,45 +666,40 @@ class TestSearchMixin:
         )
         search_mixin.config.url = "https://test.example.com"
 
-        if is_cloud:
-            search_mixin.jira.resource_url.side_effect = lambda path: path
-            search_mixin.jira.get = MagicMock(
-                return_value={
-                    "issues": mock_issues_response["issues"],
-                    "nextPageToken": None,
-                    "isLast": True,
-                }
-            )
-        else:
-            search_mixin.jira.jql = MagicMock(return_value=mock_issues_response)
+        # Setup mock response for both API methods
+        search_mixin.jira.post = MagicMock(return_value=mock_issues_response)
+        search_mixin.jira.jql = MagicMock(return_value=mock_issues_response)
 
-        def assert_called_with_jql(expected_jql: str) -> None:
+        # Helper to get the JQL from the appropriate mock
+        def get_jql_from_call():
             if is_cloud:
-                assert search_mixin.jira.get.called
-                _, kwargs = search_mixin.jira.get.call_args
-                params = kwargs["params"]
-                assert params["jql"] == expected_jql
+                return search_mixin.jira.post.call_args[1]["json"]["jql"]
             else:
-                search_mixin.jira.jql.assert_called_with(
-                    expected_jql, fields=ANY, start=ANY, limit=ANY, expand=ANY
-                )
+                return search_mixin.jira.jql.call_args[0][0]
 
+        # Act: Single project filter (non-reserved keys are not quoted)
         search_mixin.search_issues("text ~ 'test'", projects_filter="TEST")
-        assert_called_with_jql("(text ~ 'test') AND project = \"TEST\"")
-        if is_cloud:
-            search_mixin.jira.get.reset_mock()
-        else:
-            search_mixin.jira.jql.reset_mock()
 
+        # Assert: JQL verification
+        assert get_jql_from_call() == "(text ~ 'test') AND (project = TEST)"
+
+        # Reset mocks for next call
+        search_mixin.jira.post.reset_mock()
+        search_mixin.jira.jql.reset_mock()
+
+        # Act: Multiple projects filter
         search_mixin.search_issues("text ~ 'test'", projects_filter="TEST, DEV")
-        assert_called_with_jql('(text ~ \'test\') AND project IN ("TEST", "DEV")')
-        if is_cloud:
-            search_mixin.jira.get.reset_mock()
-        else:
-            search_mixin.jira.jql.reset_mock()
+        # Assert: JQL verification
+        assert get_jql_from_call() == "(text ~ 'test') AND (project IN (TEST, DEV))"
 
+        # Reset mocks for next call
+        search_mixin.jira.post.reset_mock()
+        search_mixin.jira.jql.reset_mock()
+
+        # Act: Call with both JQL and filter — the allowlist is always ANDed, so a
+        # caller-supplied project clause cannot escape the configured filter.
         search_mixin.search_issues("project = OTHER", projects_filter="TEST")
-        assert_called_with_jql("project = OTHER")
+        assert get_jql_from_call() == "(project = OTHER) AND (project = TEST)"
 
     @pytest.mark.parametrize("is_cloud", [True, False])
     def test_search_issues_with_config_projects_filter_jql_construction(
@@ -656,37 +711,34 @@ class TestSearchMixin:
         search_mixin.config.projects_filter = "CONF1,CONF2"  # Set config filter
         search_mixin.config.url = "https://test.example.com"
 
-        if is_cloud:
-            search_mixin.jira.resource_url.side_effect = lambda path: path
-            search_mixin.jira.get = MagicMock(
-                return_value={
-                    "issues": mock_issues_response["issues"],
-                    "nextPageToken": None,
-                    "isLast": True,
-                }
-            )
-        else:
-            search_mixin.jira.jql = MagicMock(return_value=mock_issues_response)
+        # Setup mock response for both API methods
+        search_mixin.jira.post = MagicMock(return_value=mock_issues_response)
+        search_mixin.jira.jql = MagicMock(return_value=mock_issues_response)
 
-        def assert_called(expected_jql: str) -> None:
+        # Helper to get the JQL from the appropriate mock
+        def get_jql_from_call():
             if is_cloud:
-                assert search_mixin.jira.get.called
-                _, kwargs = search_mixin.jira.get.call_args
-                assert kwargs["params"]["jql"] == expected_jql
+                return search_mixin.jira.post.call_args[1]["json"]["jql"]
             else:
-                search_mixin.jira.jql.assert_called_with(
-                    expected_jql, fields=ANY, start=ANY, limit=ANY, expand=ANY
-                )
+                return search_mixin.jira.jql.call_args[0][0]
 
+        # Act: Use config filter (non-reserved keys are not quoted)
         search_mixin.search_issues("text ~ 'test'")
-        assert_called('(text ~ \'test\') AND project IN ("CONF1", "CONF2")')
-        if is_cloud:
-            search_mixin.jira.get.reset_mock()
-        else:
-            search_mixin.jira.jql.reset_mock()
+        # Assert: JQL verification
+        assert get_jql_from_call() == (
+            "(text ~ 'test') AND (project IN (CONF1, CONF2))"
+        )
 
+        # Reset mocks for next call
+        search_mixin.jira.post.reset_mock()
+        search_mixin.jira.jql.reset_mock()
+
+        # Act: a projects_filter arg narrows within the config allowlist; it cannot
+        # replace it, so the config filter is still ANDed (hard boundary).
         search_mixin.search_issues("text ~ 'test'", projects_filter="OVERRIDE")
-        assert_called("(text ~ 'test') AND project = \"OVERRIDE\"")
+        assert get_jql_from_call() == (
+            "((text ~ 'test') AND (project IN (CONF1, CONF2))) AND (project = OVERRIDE)"
+        )
 
     @pytest.mark.parametrize("is_cloud", [True, False])
     def test_search_issues_with_empty_jql_and_projects_filter(
@@ -698,44 +750,36 @@ class TestSearchMixin:
         search_mixin.config.projects_filter = None
         search_mixin.config.url = "https://test.example.com"
 
-        if is_cloud:
-            search_mixin.jira.resource_url.side_effect = lambda path: path
-            search_mixin.jira.get = MagicMock(
-                return_value={
-                    "issues": mock_issues_response["issues"],
-                    "nextPageToken": None,
-                    "isLast": True,
-                }
-            )
-        else:
-            search_mixin.jira.jql = MagicMock(return_value=mock_issues_response)
+        # Setup mock response for both API methods
+        search_mixin.jira.post = MagicMock(return_value=mock_issues_response)
+        search_mixin.jira.jql = MagicMock(return_value=mock_issues_response)
 
-        def assert_called(expected_jql: str) -> None:
+        # Helper to get the JQL from the appropriate mock
+        def get_jql_from_call():
             if is_cloud:
-                assert search_mixin.jira.get.called
-                _, kwargs = search_mixin.jira.get.call_args
-                assert kwargs["params"]["jql"] == expected_jql
+                return search_mixin.jira.post.call_args[1]["json"]["jql"]
             else:
-                search_mixin.jira.jql.assert_called_with(
-                    expected_jql, fields=ANY, start=ANY, limit=ANY, expand=ANY
-                )
+                return search_mixin.jira.jql.call_args[0][0]
 
+        # Test 1: Empty string JQL with single project (non-reserved, not quoted)
         search_mixin.search_issues("", projects_filter="PROJ1")
-        assert_called('project = "PROJ1"')
-        if is_cloud:
-            search_mixin.jira.get.reset_mock()
-        else:
-            search_mixin.jira.jql.reset_mock()
+        assert get_jql_from_call() == "project = PROJ1"
 
+        # Reset mocks
+        search_mixin.jira.post.reset_mock()
+        search_mixin.jira.jql.reset_mock()
+
+        # Test 2: Empty string JQL with multiple projects
         search_mixin.search_issues("", projects_filter="PROJ1,PROJ2")
-        assert_called('project IN ("PROJ1", "PROJ2")')
-        if is_cloud:
-            search_mixin.jira.get.reset_mock()
-        else:
-            search_mixin.jira.jql.reset_mock()
+        assert get_jql_from_call() == "project IN (PROJ1, PROJ2)"
 
+        # Reset mocks
+        search_mixin.jira.post.reset_mock()
+        search_mixin.jira.jql.reset_mock()
+
+        # Test 3: None JQL with projects filter
         result = search_mixin.search_issues(None, projects_filter="PROJ1")
-        assert_called('project = "PROJ1"')
+        assert get_jql_from_call() == "project = PROJ1"
         assert isinstance(result, JiraSearchResult)
 
     @pytest.mark.parametrize("is_cloud", [True, False])
@@ -748,52 +792,567 @@ class TestSearchMixin:
         search_mixin.config.projects_filter = None
         search_mixin.config.url = "https://test.example.com"
 
-        if is_cloud:
-            search_mixin.jira.resource_url.side_effect = lambda path: path
-            search_mixin.jira.get = MagicMock(
-                return_value={
-                    "issues": mock_issues_response["issues"],
-                    "nextPageToken": None,
-                    "isLast": True,
-                }
-            )
-        else:
-            search_mixin.jira.jql = MagicMock(return_value=mock_issues_response)
+        # Setup mock response for both API methods
+        search_mixin.jira.post = MagicMock(return_value=mock_issues_response)
+        search_mixin.jira.jql = MagicMock(return_value=mock_issues_response)
 
-        def assert_order_by(expected_jql: str) -> None:
+        # Helper to get the JQL from the appropriate mock
+        def get_jql_from_call():
             if is_cloud:
-                assert search_mixin.jira.get.called
-                _, kwargs = search_mixin.jira.get.call_args
-                assert kwargs["params"]["jql"] == expected_jql
+                return search_mixin.jira.post.call_args[1]["json"]["jql"]
             else:
-                search_mixin.jira.jql.assert_called_with(
-                    expected_jql, fields=ANY, start=ANY, limit=ANY, expand=ANY
-                )
+                return search_mixin.jira.jql.call_args[0][0]
 
+        # Test 1: ORDER BY with single project (non-reserved, not quoted)
         search_mixin.search_issues("ORDER BY created DESC", projects_filter="PROJ1")
-        assert_order_by('project = "PROJ1" ORDER BY created DESC')
-        if is_cloud:
-            search_mixin.jira.get.reset_mock()
-        else:
-            search_mixin.jira.jql.reset_mock()
+        assert get_jql_from_call() == "project = PROJ1 ORDER BY created DESC"
 
+        # Reset mocks
+        search_mixin.jira.post.reset_mock()
+        search_mixin.jira.jql.reset_mock()
+
+        # Test 2: ORDER BY with multiple projects
         search_mixin.search_issues(
             "ORDER BY created DESC", projects_filter="PROJ1,PROJ2"
         )
-        assert_order_by('project IN ("PROJ1", "PROJ2") ORDER BY created DESC')
-        if is_cloud:
-            search_mixin.jira.get.reset_mock()
-        else:
-            search_mixin.jira.jql.reset_mock()
+        assert get_jql_from_call() == "project IN (PROJ1, PROJ2) ORDER BY created DESC"
 
+        # Reset mocks
+        search_mixin.jira.post.reset_mock()
+        search_mixin.jira.jql.reset_mock()
+
+        # Test 3: Case insensitive ORDER BY
         search_mixin.search_issues("order by updated ASC", projects_filter="PROJ1")
-        assert_order_by('project = "PROJ1" order by updated ASC')
-        if is_cloud:
-            search_mixin.jira.get.reset_mock()
-        else:
-            search_mixin.jira.jql.reset_mock()
+        assert get_jql_from_call() == "project = PROJ1 order by updated ASC"
 
+        # Reset mocks
+        search_mixin.jira.post.reset_mock()
+        search_mixin.jira.jql.reset_mock()
+
+        # Test 4: ORDER BY with extra spaces
         search_mixin.search_issues(
             "  ORDER BY priority DESC  ", projects_filter="PROJ1"
         )
-        assert_order_by('project = "PROJ1"   ORDER BY priority DESC  ')
+        assert get_jql_from_call() == "project = PROJ1   ORDER BY priority DESC  "
+
+    @pytest.mark.parametrize("is_cloud", [True, False])
+    def test_search_issues_jql_reserved_word_quoted(
+        self, search_mixin: SearchMixin, mock_issues_response, is_cloud
+    ):
+        """Test that reserved JQL words in project keys are auto-quoted."""
+        search_mixin.config.is_cloud = is_cloud
+        search_mixin.config.projects_filter = None
+        search_mixin.config.url = "https://test.example.com"
+
+        search_mixin.jira.post = MagicMock(return_value=mock_issues_response)
+        search_mixin.jira.jql = MagicMock(return_value=mock_issues_response)
+
+        def get_jql_from_call():
+            if is_cloud:
+                return search_mixin.jira.post.call_args[1]["json"]["jql"]
+            else:
+                return search_mixin.jira.jql.call_args[0][0]
+
+        # project = IF → IF gets quoted
+        search_mixin.search_issues("project = IF AND status = Open")
+        assert get_jql_from_call() == 'project = "IF" AND status = Open'
+
+        search_mixin.jira.post.reset_mock()
+        search_mixin.jira.jql.reset_mock()
+
+        # project IN with reserved words
+        search_mixin.search_issues("project IN (IF, AND, TEST)")
+        assert get_jql_from_call() == 'project IN ("IF", "AND", TEST)'
+
+        search_mixin.jira.post.reset_mock()
+        search_mixin.jira.jql.reset_mock()
+
+        # Non-reserved project key — no change
+        search_mixin.search_issues("project = TEST AND status = Open")
+        assert get_jql_from_call() == "project = TEST AND status = Open"
+
+    @pytest.mark.parametrize("is_cloud", [True, False])
+    def test_search_issues_none_jql_with_projects_filter(
+        self, search_mixin: SearchMixin, mock_issues_response, is_cloud
+    ):
+        """Test that jql=None with projects_filter still works after sanitize."""
+        search_mixin.config.is_cloud = is_cloud
+        search_mixin.config.projects_filter = None
+        search_mixin.config.url = "https://test.example.com"
+
+        search_mixin.jira.post = MagicMock(return_value=mock_issues_response)
+        search_mixin.jira.jql = MagicMock(return_value=mock_issues_response)
+
+        def get_jql_from_call():
+            if is_cloud:
+                return search_mixin.jira.post.call_args[1]["json"]["jql"]
+            else:
+                return search_mixin.jira.jql.call_args[0][0]
+
+        result = search_mixin.search_issues(None, projects_filter="PROJ1")
+        assert isinstance(result, JiraSearchResult)
+        assert get_jql_from_call() == "project = PROJ1"
+
+    def test_get_board_issues_jql_reserved_word_quoted(self, search_mixin: SearchMixin):
+        """Test that reserved JQL words are quoted in get_board_issues JQL."""
+        mock_issues = {
+            "issues": [
+                {
+                    "id": "10001",
+                    "key": "IF-1",
+                    "fields": {
+                        "summary": "Test",
+                        "issuetype": {"name": "Bug"},
+                        "status": {"name": "Open"},
+                    },
+                }
+            ],
+            "total": 1,
+            "startAt": 0,
+            "maxResults": 50,
+        }
+        search_mixin.jira.get_issues_for_board.return_value = mock_issues
+
+        search_mixin.get_board_issues("1000", jql="project = IF", limit=20)
+        call_kwargs = search_mixin.jira.get_issues_for_board.call_args
+        assert call_kwargs[1]["jql"] == 'project = "IF"'
+
+    @pytest.mark.parametrize("is_cloud", [True, False])
+    def test_search_issues_with_trailing_order_by_and_projects_filter(
+        self, search_mixin: SearchMixin, mock_issues_response, is_cloud
+    ):
+        """Test that JQL with trailing ORDER BY correctly extracts and appends it after project filter."""
+        # Setup
+        search_mixin.config.is_cloud = is_cloud
+        search_mixin.config.projects_filter = None
+        search_mixin.config.url = "https://test.example.com"
+
+        # Setup mock response for both API methods
+        search_mixin.jira.post = MagicMock(return_value=mock_issues_response)
+        search_mixin.jira.jql = MagicMock(return_value=mock_issues_response)
+
+        # Helper to get the JQL from the appropriate mock
+        def get_jql_from_call():
+            if is_cloud:
+                return search_mixin.jira.post.call_args[1]["json"]["jql"]
+            else:
+                return search_mixin.jira.jql.call_args[0][0]
+
+        # Test 1: Query with trailing ORDER BY - should extract and append after project filter
+        search_mixin.search_issues(
+            'assignee = "testuser" ORDER BY updated DESC', projects_filter="PROJ1"
+        )
+        assert (
+            get_jql_from_call()
+            == '(assignee = "testuser") AND (project = PROJ1) ORDER BY updated DESC'
+        )
+
+        # Reset mocks
+        search_mixin.jira.post.reset_mock()
+        search_mixin.jira.jql.reset_mock()
+
+        # Test 2: Query with trailing ORDER BY and multiple projects
+        search_mixin.search_issues(
+            'status = "Done" ORDER BY created ASC', projects_filter="PROJ1,PROJ2"
+        )
+        assert (
+            get_jql_from_call() == '(status = "Done") AND (project IN (PROJ1, PROJ2)) '
+            "ORDER BY created ASC"
+        )
+
+        # Reset mocks
+        search_mixin.jira.post.reset_mock()
+        search_mixin.jira.jql.reset_mock()
+
+        # Test 3: Query with case-insensitive trailing order by
+        search_mixin.search_issues(
+            "priority = High order by updated desc", projects_filter="PROJ1"
+        )
+        assert (
+            get_jql_from_call()
+            == "(priority = High) AND (project = PROJ1) order by updated desc"
+        )
+
+    # Tests for JQL injection prevention in projects filter (PR #949)
+
+    @pytest.mark.parametrize("is_cloud", [True, False])
+    def test_projects_filter_cannot_inject_or_outside_config_allowlist(
+        self,
+        search_mixin: SearchMixin,
+        mock_issues_response: dict,
+        is_cloud: bool,
+    ) -> None:
+        """A caller filter must remain one literal inside the configured boundary."""
+        search_mixin.config.is_cloud = is_cloud
+        search_mixin.config.projects_filter = "ALLOWED"
+        search_mixin.config.url = "https://test.example.com"
+        search_mixin.jira.post = MagicMock(return_value=mock_issues_response)
+        search_mixin.jira.jql = MagicMock(return_value=mock_issues_response)
+
+        search_mixin.search_issues(
+            "status = Open", projects_filter="X OR project = OUTSIDE"
+        )
+
+        if is_cloud:
+            jql = search_mixin.jira.post.call_args.kwargs["json"]["jql"]
+        else:
+            jql = search_mixin.jira.jql.call_args.args[0]
+        assert jql == (
+            "((status = Open) AND (project = ALLOWED)) "
+            'AND (project = "X OR project = OUTSIDE")'
+        )
+
+    @pytest.mark.parametrize(
+        "malicious_filter",
+        [
+            'PROJ") OR 1=1 --',
+            "PROJ\\",
+            'PROJ\\"injection',
+        ],
+        ids=[
+            "double-quote-injection",
+            "backslash-injection",
+            "backslash-and-quote-injection",
+        ],
+    )
+    @pytest.mark.parametrize("is_cloud", [True, False])
+    def test_search_issues_projects_filter_handles_special_chars(
+        self,
+        search_mixin: SearchMixin,
+        mock_issues_response: dict,
+        malicious_filter: str,
+        is_cloud: bool,
+    ):
+        """Regression: projects filter with special chars must not cause errors.
+
+        PR #949 added inline escaping to prevent JQL injection through the
+        projects_filter parameter. This test verifies that malicious inputs
+        containing backslashes and double-quotes are handled without errors
+        and produce a JQL string with a project clause.
+        """
+        search_mixin.config.is_cloud = is_cloud
+        search_mixin.config.projects_filter = None
+        search_mixin.config.url = "https://test.example.com"
+
+        search_mixin.jira.post = MagicMock(return_value=mock_issues_response)
+        search_mixin.jira.jql = MagicMock(return_value=mock_issues_response)
+
+        def get_jql_from_call() -> str:
+            if is_cloud:
+                return search_mixin.jira.post.call_args[1]["json"]["jql"]
+            else:
+                return search_mixin.jira.jql.call_args[0][0]
+
+        # Should not raise any exceptions
+        search_mixin.search_issues("status = Open", projects_filter=malicious_filter)
+        jql = get_jql_from_call()
+
+        # The JQL should contain a project clause (escaping was applied)
+        assert "project" in jql.lower()
+        # The original query should still be present
+        assert "status = Open" in jql
+
+    def test_search_issues_cloud_with_page_token(
+        self,
+        search_mixin: SearchMixin,
+        mock_issues_response,
+    ):
+        """Test that page_token is used as the initial nextPageToken on Cloud."""
+        search_mixin.config.is_cloud = True
+        search_mixin.config.projects_filter = None
+        search_mixin.config.url = "https://test.example.com"
+
+        # Return issues without nextPageToken (single page)
+        search_mixin.jira.post = MagicMock(return_value=mock_issues_response)
+
+        result = search_mixin.search_issues(
+            "project = TEST", limit=10, page_token="initial_token_abc"
+        )
+
+        # Verify v3 API was called with the page token
+        assert isinstance(result, JiraSearchResult)
+        call_args = search_mixin.jira.post.call_args
+        request_body = call_args[1]["json"]
+        assert request_body["nextPageToken"] == "initial_token_abc"
+
+    def test_search_issues_cloud_exposes_remaining_token(
+        self,
+        search_mixin: SearchMixin,
+    ):
+        """Test that remaining nextPageToken is exposed in the result on Cloud."""
+        search_mixin.config.is_cloud = True
+        search_mixin.config.projects_filter = None
+        search_mixin.config.url = "https://test.example.com"
+
+        # First response returns issues + a nextPageToken.
+        # The loop should stop because we reach the limit (2 issues >= limit of 2).
+        response_page = {
+            "issues": [
+                {
+                    "id": "10001",
+                    "key": "TEST-1",
+                    "fields": {"summary": "Issue 1", "status": {"name": "Open"}},
+                },
+                {
+                    "id": "10002",
+                    "key": "TEST-2",
+                    "fields": {"summary": "Issue 2", "status": {"name": "Open"}},
+                },
+            ],
+            "nextPageToken": "remaining_token_xyz",
+        }
+        search_mixin.jira.post = MagicMock(return_value=response_page)
+
+        result = search_mixin.search_issues("project = TEST", limit=2)
+
+        assert isinstance(result, JiraSearchResult)
+        assert result.next_page_token == "remaining_token_xyz"
+        assert len(result.issues) == 2
+
+    def test_search_issues_cloud_preserves_names_map(
+        self,
+        search_mixin: SearchMixin,
+    ):
+        """Cloud v3 search keeps field display names for custom fields."""
+        search_mixin.config.is_cloud = True
+        search_mixin.config.projects_filter = None
+        search_mixin.config.url = "https://test.example.com"
+
+        response_page = {
+            "issues": [
+                {
+                    "id": "10001",
+                    "key": "TEST-1",
+                    "fields": {
+                        "summary": "Issue 1",
+                        "customfield_10001": 13,
+                    },
+                },
+            ],
+            "names": {"customfield_10001": "Story Points"},
+        }
+        search_mixin.jira.post = MagicMock(return_value=response_page)
+
+        result = search_mixin.search_issues(
+            "key = TEST-1",
+            fields="*all",
+            limit=1,
+            expand="names",
+        )
+
+        assert isinstance(result, JiraSearchResult)
+        assert result.issues[0].custom_fields["customfield_10001"]["name"] == (
+            "Story Points"
+        )
+        display_result = result.to_display_name_dict()
+        issue = display_result["issues"][0]
+        assert issue["Story Points"]["value"] == 13
+        assert "customfield_10001" not in issue
+
+    def test_search_issues_cloud_no_remaining_token(
+        self,
+        search_mixin: SearchMixin,
+    ):
+        """Test that next_page_token is None when no more pages on Cloud."""
+        search_mixin.config.is_cloud = True
+        search_mixin.config.projects_filter = None
+        search_mixin.config.url = "https://test.example.com"
+
+        # Response without nextPageToken → end of results
+        response_page = {
+            "issues": [
+                {
+                    "id": "10001",
+                    "key": "TEST-1",
+                    "fields": {"summary": "Issue 1", "status": {"name": "Open"}},
+                },
+            ],
+        }
+        search_mixin.jira.post = MagicMock(return_value=response_page)
+
+        result = search_mixin.search_issues("project = TEST", limit=10)
+
+        assert isinstance(result, JiraSearchResult)
+        assert result.next_page_token is None
+
+    def test_search_issues_cloud_multipage_maxresults_alignment(
+        self,
+        search_mixin: SearchMixin,
+    ):
+        """Test that maxResults shrinks on subsequent pages to avoid over-fetching.
+
+        With limit=150 and API max of 100, the second request should ask for
+        only 50 (150-100) so the returned nextPageToken aligns with the last
+        issue actually returned to the caller.
+        """
+        search_mixin.config.is_cloud = True
+        search_mixin.config.projects_filter = None
+        search_mixin.config.url = "https://test.example.com"
+
+        def make_issues(start: int, count: int) -> list[dict[str, Any]]:
+            return [
+                {
+                    "id": str(start + i),
+                    "key": f"TEST-{start + i}",
+                    "fields": {
+                        "summary": f"Issue {start + i}",
+                        "status": {"name": "Open"},
+                    },
+                }
+                for i in range(count)
+            ]
+
+        page1 = {"issues": make_issues(1, 100), "nextPageToken": "token_page2"}
+        page2 = {"issues": make_issues(101, 50), "nextPageToken": "token_page3"}
+
+        # Capture maxResults at call time since request_body dict is mutated
+        captured_max_results: list[int] = []
+
+        def capture_post(*args: Any, **kwargs: Any) -> dict[str, Any]:
+            captured_max_results.append(kwargs["json"]["maxResults"])
+            return [page1, page2][len(captured_max_results) - 1]
+
+        search_mixin.jira.post = MagicMock(side_effect=capture_post)
+
+        result = search_mixin.search_issues("project = TEST", limit=150)
+
+        assert len(result.issues) == 150
+        assert result.next_page_token == "token_page3"
+
+        # Verify maxResults per request: first=100, second=50
+        assert captured_max_results == [100, 50]
+
+    def test_search_issues_server_ignores_page_token(
+        self,
+        search_mixin: SearchMixin,
+        mock_issues_response,
+    ):
+        """Test that page_token is ignored on Server/DC."""
+        search_mixin.config.is_cloud = False
+        search_mixin.config.projects_filter = None
+        search_mixin.config.url = "https://test.example.com"
+
+        search_mixin.jira.jql = MagicMock(return_value=mock_issues_response)
+
+        result = search_mixin.search_issues(
+            "project = TEST", limit=10, page_token="should_be_ignored"
+        )
+
+        # Should use jql (v2 API), not post (v3 API)
+        assert isinstance(result, JiraSearchResult)
+        search_mixin.jira.jql.assert_called_once_with(
+            "project = TEST", fields=ANY, start=0, limit=10, expand=None
+        )
+        # The result should not have a next_page_token from Server/DC
+        assert result.next_page_token is None
+
+
+class TestSearchFilterAndInjectionRegression:
+    """Regression — project/space filter bypass (GHSA-w66g, GHSA-rqwg) and JQL
+    injection (GHSA-6rrj) for Jira search.
+
+    Filter bypass: ``search_issues`` applies ``config.projects_filter``, but
+    ``get_board_issues`` never did — board issues escaped the project allowlist.
+    JQL injection: ``get_sprint_issues`` interpolated ``sprint_id`` straight into
+    JQL (``f"sprint = {sprint_id}"``), so a non-numeric value injected JQL.
+
+    Assertions follow the weakest fix-agnostic invariant: the filter tests assert
+    the project key appears *somewhere* in the outgoing JQL (not an exact string);
+    the injection test asserts a non-numeric sprint_id is rejected (numeric-only
+    contract), with ``search_issues`` mocked so the only thing that can reject it
+    is sprint_id validation.
+    """
+
+    @pytest.fixture
+    def search_mixin(self, jira_fetcher: JiraFetcher) -> SearchMixin:
+        """SearchMixin with a mocked Jira client and config (Server/DC default)."""
+        mixin = jira_fetcher
+        mixin._clean_text = MagicMock(side_effect=lambda text: text if text else "")
+        mixin.config = MagicMock()
+        mixin.config.is_cloud = False
+        mixin.config.projects_filter = None
+        mixin.config.url = "https://example.atlassian.net"
+        return mixin
+
+    @pytest.mark.security_regression
+    def test_get_board_issues_applies_projects_filter(
+        self,
+        search_mixin: SearchMixin,
+        mock_issues_response: dict,
+    ) -> None:
+        """Board issues must be restricted to the configured projects_filter."""
+        search_mixin.config.projects_filter = "SECPROJ"
+        search_mixin.jira.get_issues_for_board.return_value = mock_issues_response
+
+        search_mixin.get_board_issues("123", jql="status = Open")
+
+        sent_jql = search_mixin.jira.get_issues_for_board.call_args.kwargs.get(
+            "jql", ""
+        )
+        assert "SECPROJ" in sent_jql, (
+            "board issues must be constrained to the configured projects_filter; "
+            f"outgoing JQL was {sent_jql!r}"
+        )
+
+    @pytest.fixture
+    def mock_issues_response(self) -> dict:
+        """Minimal valid Jira board response so from_api_response succeeds."""
+        return {
+            "issues": [],
+            "total": 0,
+            "startAt": 0,
+            "maxResults": 50,
+        }
+
+    @pytest.mark.security_regression
+    def test_get_sprint_issues_rejects_non_numeric_sprint_id(
+        self,
+        search_mixin: SearchMixin,
+    ) -> None:
+        """A non-numeric sprint_id (injection payload) must be rejected."""
+        # search_issues is mocked, so the ONLY thing that can reject the payload is
+        # validation of sprint_id itself — pinning fix-7b's numeric-only contract.
+        search_mixin.search_issues = MagicMock(return_value=MagicMock())
+
+        with pytest.raises(Exception):
+            search_mixin.get_sprint_issues("1 OR project = SECRET")
+
+    @pytest.mark.security_regression
+    def test_projects_filter_not_bypassed_by_caller_project_clause(
+        self, search_mixin: SearchMixin, mock_issues_response: dict
+    ) -> None:
+        """A caller-supplied project clause must not escape the config allowlist.
+
+        The old code skipped adding the filter when the query already named a
+        project, so `project = EVIL` bypassed JIRA_PROJECTS_FILTER entirely.
+        """
+        search_mixin.config.projects_filter = "SECPROJ"
+        search_mixin.jira.jql.return_value = mock_issues_response
+
+        search_mixin.search_issues("project = EVIL")
+
+        sent_jql = search_mixin.jira.jql.call_args[0][0]
+        assert "SECPROJ" in sent_jql, (
+            "config projects_filter must be ANDed even when the caller already "
+            f"names a project; JQL was {sent_jql!r}"
+        )
+
+    @pytest.mark.security_regression
+    def test_projects_filter_param_cannot_replace_config_allowlist(
+        self, search_mixin: SearchMixin, mock_issues_response: dict
+    ) -> None:
+        """The projects_filter tool arg may narrow, not replace, the config allowlist.
+
+        Previously ``projects_filter or config.projects_filter`` let a caller pass
+        projects_filter="SECRET" to drop the operator's allowlist entirely.
+        """
+        search_mixin.config.projects_filter = "SECPROJ"
+        search_mixin.jira.jql.return_value = mock_issues_response
+
+        search_mixin.search_issues("text ~ 'x'", projects_filter="SECRET")
+
+        sent_jql = search_mixin.jira.jql.call_args[0][0]
+        assert "SECPROJ" in sent_jql, (
+            "config allowlist must still be applied even when a projects_filter arg "
+            f"is supplied; JQL was {sent_jql!r}"
+        )

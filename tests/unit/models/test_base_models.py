@@ -6,8 +6,8 @@ from typing import Any
 
 import pytest
 
-from mcp_atlassian.models.base import ApiModel, TimestampMixin
-from mcp_atlassian.models.constants import EMPTY_STRING
+from src.mcp_atlassian.models.base import ApiModel, TimestampMixin
+from src.mcp_atlassian.models.constants import EMPTY_STRING
 
 
 class TestApiModel:
@@ -45,23 +45,23 @@ class TestApiModel:
 class TestTimestampMixin:
     """Tests for the TimestampMixin utility class."""
 
-    def test_format_timestamp_valid(self):
+    def test_format_timestamp_valid(self, pacific_timezone):
         """Test formatting a valid ISO 8601 timestamp."""
         timestamp = "2024-01-01T12:34:56.789+0000"
         formatter = TimestampMixin()
 
         result = formatter.format_timestamp(timestamp)
 
-        assert result == "2024-01-01 12:34:56"
+        assert result == "2024-01-01 04:34:56 PST"
 
-    def test_format_timestamp_with_z(self):
+    def test_format_timestamp_with_z(self, pacific_timezone):
         """Test formatting a timestamp with Z (UTC) timezone."""
-        timestamp = "2024-01-01T12:34:56.789Z"
+        timestamp = "2024-07-01T12:34:56.789Z"
         formatter = TimestampMixin()
 
         result = formatter.format_timestamp(timestamp)
 
-        assert result == "2024-01-01 12:34:56"
+        assert result == "2024-07-01 05:34:56 PDT"
 
     def test_format_timestamp_none(self):
         """Test formatting a None timestamp."""
@@ -80,22 +80,53 @@ class TestTimestampMixin:
 
         assert result == invalid_timestamp  # Should return the original string
 
-    def test_format_timestamp_plus_without_colon(self):
-        """Handle timezone offsets without colon (positive)."""
-        formatter = TimestampMixin()
-        result = formatter.format_timestamp("2024-01-01T12:34:56.000+0530")
-        assert result == "2024-01-01 12:34:56"
+    def test_format_timestamp_overflow_returns_original(self):
+        """Regression test for #1354: sentinel dates must not crash Confluence tools."""
+        from unittest.mock import patch
 
-    def test_format_timestamp_minus_without_colon(self):
-        """Handle timezone offsets without colon (negative)."""
+        timestamp = "9999-12-31T23:59:59.000+0000"
         formatter = TimestampMixin()
-        result = formatter.format_timestamp("2024-01-01T12:34:56.000-0400")
-        assert result == "2024-01-01 12:34:56"
 
-    def test_format_timestamp_empty_string(self):
-        """Empty strings should return EMPTY_STRING."""
+        with patch("src.mcp_atlassian.models.base.parse_date", return_value=None):
+            result = formatter.format_timestamp(timestamp)
+
+        assert result == timestamp
+
+    def test_is_valid_timestamp_overflow_returns_false(self):
+        """Regression test for #1354: overflow timestamps are treated as invalid."""
+        from unittest.mock import patch
+
+        timestamp = "9999-12-31T23:59:59.000+0000"
         formatter = TimestampMixin()
-        assert formatter.format_timestamp("") == EMPTY_STRING
+
+        with patch("src.mcp_atlassian.models.base.parse_date", return_value=None):
+            assert formatter.is_valid_timestamp(timestamp) is False
+
+    def test_format_timestamp_epoch_overflow_returns_original(self):
+        """Regression test for #1354: out-of-range epoch strings do not crash."""
+        formatter = TimestampMixin()
+        overflow_epoch = "253402300800000"
+
+        result = formatter.format_timestamp(overflow_epoch)
+
+        assert result == overflow_epoch
+        assert formatter.is_valid_timestamp(overflow_epoch) is False
+
+    def test_format_timestamp_local_timezone_overflow_returns_original(self):
+        """Regression test for platform errors during local timezone conversion."""
+        from unittest.mock import MagicMock, patch
+
+        timestamp = "9999-12-31T23:59:59.000+0000"
+        parsed_timestamp = MagicMock()
+        parsed_timestamp.astimezone.side_effect = OverflowError(
+            "timestamp too large to convert to C _PyTime_t"
+        )
+
+        with patch(
+            "src.mcp_atlassian.models.base.parse_date",
+            return_value=parsed_timestamp,
+        ):
+            assert TimestampMixin.format_timestamp(timestamp) == timestamp
 
     def test_is_valid_timestamp_valid(self):
         """Test validating a valid ISO 8601 timestamp."""
@@ -123,13 +154,3 @@ class TestTimestampMixin:
         formatter = TimestampMixin()
 
         assert formatter.is_valid_timestamp(invalid_timestamp) is False
-
-    def test_is_valid_timestamp_minus_offset(self):
-        """Ensure timestamps with negative offsets are supported."""
-        formatter = TimestampMixin()
-        assert formatter.is_valid_timestamp("2024-01-01T12:34:56.000-0500") is True
-
-    def test_is_valid_timestamp_empty_string(self):
-        """Empty strings should be invalid."""
-        formatter = TimestampMixin()
-        assert formatter.is_valid_timestamp("") is False

@@ -1,0 +1,296 @@
+---
+title: "Troubleshooting"
+description: "Fix auth errors (401/403), field issues, rate limiting, SSL problems, and debug MCP Atlassian connections"
+---
+
+## Common Issues
+
+<AccordionGroup>
+  <Accordion title="Authentication Failures (Cloud)">
+    - Ensure you're using API tokens, not your account password
+    - Verify the token hasn't expired
+    - Check that `JIRA_USERNAME` / `CONFLUENCE_USERNAME` is your email address
+  </Accordion>
+
+  <Accordion title="Authentication Failures (Server/Data Center)">
+    - Verify your Personal Access Token is valid and not expired
+    - For older Confluence servers, try basic auth with `CONFLUENCE_USERNAME` and `CONFLUENCE_API_TOKEN` (where token is your password)
+  </Accordion>
+
+  <Accordion title="SSL Certificate Issues">
+    mcp-atlassian uses the OS native trust store by default (via
+    [truststore](https://truststore.readthedocs.io/)), so certificates
+    signed by enterprise CAs installed in Windows Certificate Store,
+    macOS Keychain, or the Linux system CA bundle are trusted
+    automatically.
+
+    If you still see SSL errors with **self-signed** certificates that
+    are **not** in the OS trust store, disable verification:
+
+    ```bash
+    JIRA_SSL_VERIFY=false
+    CONFLUENCE_SSL_VERIFY=false
+    ```
+
+    To disable the OS trust store integration (fall back to the bundled
+    certifi CA bundle):
+
+    ```bash
+    MCP_ATLASSIAN_USE_SYSTEM_TRUSTSTORE=false
+    ```
+  </Accordion>
+
+  <Accordion title="Permission Errors">
+    Ensure your Atlassian account has sufficient permissions to access the spaces/projects you're targeting.
+  </Accordion>
+
+</AccordionGroup>
+
+## Debugging
+
+### Enable Verbose Logging
+
+```bash
+# Standard verbose
+MCP_VERBOSE=true
+
+# Debug level (includes request details)
+MCP_VERY_VERBOSE=true
+
+# Log to stdout instead of stderr
+MCP_LOGGING_STDOUT=true
+```
+
+### View Logs
+
+<Tabs>
+  <Tab title="macOS">
+    ```bash
+    tail -n 20 -f ~/Library/Logs/Claude/mcp*.log
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```cmd
+    type %APPDATA%\Claude\logs\mcp*.log | more
+    ```
+  </Tab>
+</Tabs>
+
+### MCP Inspector
+
+Test your configuration interactively:
+
+```bash
+# With uvx
+npx @modelcontextprotocol/inspector uvx mcp-atlassian
+
+# With local development version
+npx @modelcontextprotocol/inspector uv --directory /path/to/mcp-atlassian run mcp-atlassian
+```
+
+## Debugging Custom Headers
+
+### Verify Headers Are Applied
+
+1. Enable debug logging:
+   ```bash
+   MCP_VERY_VERBOSE=true
+   MCP_LOGGING_STDOUT=true
+   ```
+
+2. Check logs for header confirmation:
+   ```
+   DEBUG Custom headers applied: {'X-Forwarded-User': '***', 'X-ALB-Token': '***'}
+   ```
+
+### Correct Header Format
+
+```bash
+# Correct
+JIRA_CUSTOM_HEADERS=X-Custom=value1,X-Other=value2
+
+# Incorrect (extra quotes)
+JIRA_CUSTOM_HEADERS="X-Custom=value1,X-Other=value2"
+
+# Incorrect (colon instead of equals)
+JIRA_CUSTOM_HEADERS=X-Custom: value1,X-Other: value2
+
+# Incorrect (spaces around equals)
+JIRA_CUSTOM_HEADERS=X-Custom = value1
+```
+
+<Note>
+Header values containing sensitive information are automatically masked in logs.
+</Note>
+
+## Authentication Errors
+
+<AccordionGroup>
+  <Accordion title="401 Unauthorized — API Token">
+    **Cause:** Invalid or expired API token.
+
+    **Fix:**
+    1. Verify your API token at [id.atlassian.com/manage-profile/security/api-tokens](https://id.atlassian.com/manage-profile/security/api-tokens)
+    2. Ensure `JIRA_USERNAME` matches the email associated with the token
+    3. Check that the token hasn't been revoked
+
+    ```bash
+    # Test your credentials
+    curl -u "your.email@example.com:your_api_token" \
+      "https://your-instance.atlassian.net/rest/api/2/myself"
+    ```
+  </Accordion>
+
+  <Accordion title="401 Unauthorized — Confluence attachment / image download (Cloud)">
+    **Symptom:** Reading pages works, but `confluence_get_page_images` returns
+    `downloaded: 0` (every image `"Fetch failed"`) and `confluence_download_attachment` /
+    `confluence_download_content_attachments` fail. Logs show
+    `401 ... /wiki/download/attachments/...`.
+
+    **Cause:** Confluence Cloud removed the legacy `/download/attachments/...` endpoint
+    (changelog [CHANGE-2735](https://developer.atlassian.com/cloud/confluence/changelog/) /
+    ["Deprecation of /download/attachments/ APIs"](https://community.developer.atlassian.com/t/deprecation-of-download-attachments-apis/94448)).
+    It now returns 401 for API-token / scoped-token auth, while metadata endpoints keep working.
+
+    **Fix:** On Cloud this is handled automatically — downloads use the v1 REST endpoint
+    `/rest/api/content/{id}/child/attachment/{aid}/download`. To force the behaviour, set
+    `CONFLUENCE_ATTACHMENT_DOWNLOAD_USE_V1=true` (or `false` to keep the legacy link).
+  </Accordion>
+
+  <Accordion title="401 Unauthorized — Personal Access Token (PAT)">
+    **Cause:** Invalid PAT or PAT doesn't have required permissions.
+
+    **Fix:**
+    1. Create a new PAT in your Jira/Confluence profile settings
+    2. Ensure the PAT has sufficient permissions for the operations you need
+    3. Note: Server/DC limits PAT count (max 10 per user)
+
+    ```bash
+    # Test PAT authentication
+    curl -H "Authorization: Bearer your_pat_token" \
+      "https://jira.your-company.com/rest/api/2/myself"
+    ```
+  </Accordion>
+
+  <Accordion title="403 Forbidden">
+    **Cause:** Your account doesn't have permission for the requested operation.
+
+    **Fix:**
+    - Verify your Jira/Confluence project permissions
+    - For write operations, ensure your account has edit permissions
+    - For admin-only fields, you may need project admin access
+    - Check if `READ_ONLY_MODE=true` is blocking write tools
+  </Accordion>
+
+  <Accordion title="OAuth Token Expired">
+    **Cause:** OAuth access token has expired and refresh failed.
+
+    **Fix:**
+    1. Re-run the OAuth setup: `mcp-atlassian --oauth-setup`
+    2. Ensure your app has `offline_access` scope for refresh tokens
+    3. Check if the OAuth app is still active in your Atlassian developer console
+  </Accordion>
+</AccordionGroup>
+
+## Field and Data Errors
+
+<AccordionGroup>
+  <Accordion title="Field 'customfield_XXXXX' not found">
+    **Cause:** Custom field ID doesn't exist or isn't available on the issue type.
+
+    **Fix:**
+    1. Use `jira_search_fields` to find the correct field ID
+    2. Check if the field is available on the target issue type's screen
+    3. Custom field IDs differ between Cloud and Server/DC instances
+
+    ```json
+    jira_search_fields: {"keyword": "story points"}
+    ```
+  </Accordion>
+
+  <Accordion title="Issue type not found or not available">
+    **Cause:** The specified issue type doesn't exist in the project.
+
+    **Fix:**
+    - Use `jira_get_all_projects` to see available issue types per project
+    - Issue type names are case-sensitive
+    - Some issue types (e.g., "Epic") may require specific project configurations
+  </Accordion>
+
+  <Accordion title="Attachment too large">
+    **Cause:** File exceeds the 50MB attachment limit.
+
+    **Fix:**
+    - MCP Atlassian limits inline attachment downloads to 50MB
+    - For larger files, access attachments directly via the Jira/Confluence web UI
+    - Consider compressing files before uploading
+  </Accordion>
+</AccordionGroup>
+
+## Rate Limiting
+
+<AccordionGroup>
+  <Accordion title="429 Too Many Requests">
+    **Cause:** You've exceeded the Atlassian API rate limit.
+
+    **Fix:**
+    - Atlassian Cloud: ~100 requests per minute per user (varies)
+    - Server/DC: depends on instance configuration
+    - Add delays between bulk operations
+    - Use batch tools (`jira_batch_create_issues`, `jira_batch_get_changelogs`) instead of individual calls
+    - Consider using `ENABLED_TOOLS` to limit which tools are available
+  </Accordion>
+</AccordionGroup>
+
+## Connection Issues
+
+<AccordionGroup>
+  <Accordion title="SSL Certificate Verification Failed">
+    **Cause:** Server/DC instance uses a self-signed or internal CA certificate.
+
+    **Fix:**
+    ```bash
+    # Disable SSL verification (not recommended for production)
+    JIRA_SSL_VERIFY=false
+    CONFLUENCE_SSL_VERIFY=false
+    ```
+
+    For mTLS (mutual TLS) authentication, set either a combined cert/key PEM:
+    ```bash
+    JIRA_CLIENT_CERT=/path/to/client-combined.pem
+    ```
+
+    Or set separate certificate and key files:
+    ```bash
+    JIRA_CLIENT_CERT=/path/to/client-cert.pem
+    JIRA_CLIENT_KEY=/path/to/client-key.pem
+    ```
+  </Accordion>
+
+  <Accordion title="Connection Timeout">
+    **Cause:** Atlassian instance is unreachable or slow to respond.
+
+    **Fix:**
+    - Default timeout is 75 seconds
+    - Increase timeout for slow instances:
+    ```bash
+    JIRA_TIMEOUT=120
+    CONFLUENCE_TIMEOUT=120
+    ```
+    - Check if a proxy is required:
+    ```bash
+    HTTPS_PROXY=https://proxy.example.com:8443
+    ```
+    - If your network uses PAC/WPAD, enable it explicitly:
+    ```bash
+    ATLASSIAN_PROXY_WPAD_ENABLE=true
+    ATLASSIAN_PROXY_WPAD_URL=http://wpad/wpad.dat
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Getting Help
+
+- Check [GitHub Issues](https://github.com/sooperset/mcp-atlassian/issues) for known problems
+- Review [SECURITY.md](https://github.com/sooperset/mcp-atlassian/blob/main/SECURITY.md) for security-related concerns
+- Open a new issue with debug logs if the problem persists

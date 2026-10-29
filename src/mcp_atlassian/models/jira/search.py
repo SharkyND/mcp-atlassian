@@ -25,7 +25,6 @@ class JiraSearchResult(ApiModel):
     max_results: int = 0
     issues: list[JiraIssue] = Field(default_factory=list)
     next_page_token: str | None = None
-    is_last: bool | None = None
 
     @classmethod
     def from_api_response(
@@ -50,21 +49,29 @@ class JiraSearchResult(ApiModel):
 
         issues = []
         issues_data = data.get("issues", [])
+        # The 'names' map (field ID → display name) lives at the top level
+        # of search responses.  Propagate it into each issue dict so that
+        # JiraIssue.from_api_response can populate display names.
+        top_level_names = data.get("names")
+        base_url = kwargs.get("base_url")
         if isinstance(issues_data, list):
+            base_url = kwargs.get("base_url")
             for issue_data in issues_data:
                 if issue_data:
+                    if top_level_names and isinstance(issue_data, dict):
+                        issue_data = {**issue_data, "names": top_level_names}
                     requested_fields = kwargs.get("requested_fields")
                     issues.append(
                         JiraIssue.from_api_response(
-                            issue_data, requested_fields=requested_fields
+                            issue_data,
+                            base_url=base_url,
+                            requested_fields=requested_fields,
                         )
                     )
 
         raw_total = data.get("total")
         raw_start_at = data.get("startAt")
         raw_max_results = data.get("maxResults")
-        raw_next_page_token = data.get("nextPageToken")
-        raw_is_last = data.get("isLast")
 
         try:
             total = int(raw_total) if raw_total is not None else -1
@@ -81,24 +88,14 @@ class JiraSearchResult(ApiModel):
         except (ValueError, TypeError):
             max_results = -1
 
-        if raw_total is None:
-            if raw_next_page_token in (None, "") and (
-                raw_is_last is True or raw_is_last is None
-            ):
-                total = len(issues)
-            else:
-                total = -1
-
-        if raw_start_at is None:
-            start_at = 0
+        next_page_token = data.get("nextPageToken")
 
         return cls(
             total=total,
             start_at=start_at,
             max_results=max_results,
             issues=issues,
-            next_page_token=raw_next_page_token,
-            is_last=raw_is_last,
+            next_page_token=next_page_token,
         )
 
     @model_validator(mode="after")
@@ -116,11 +113,24 @@ class JiraSearchResult(ApiModel):
 
     def to_simplified_dict(self) -> dict[str, Any]:
         """Convert to simplified dictionary for API response."""
-        return {
+        result: dict[str, Any] = {
             "total": self.total,
             "start_at": self.start_at,
             "max_results": self.max_results,
             "issues": [issue.to_simplified_dict() for issue in self.issues],
-            "next_page_token": self.next_page_token,
-            "is_last": self.is_last,
         }
+        if self.next_page_token is not None:
+            result["next_page_token"] = self.next_page_token
+        return result
+
+    def to_display_name_dict(self) -> dict[str, Any]:
+        """Like ``to_simplified_dict`` but with display-name keys on each issue."""
+        result: dict[str, Any] = {
+            "total": self.total,
+            "start_at": self.start_at,
+            "max_results": self.max_results,
+            "issues": [issue.to_display_name_dict() for issue in self.issues],
+        }
+        if self.next_page_token is not None:
+            result["next_page_token"] = self.next_page_token
+        return result

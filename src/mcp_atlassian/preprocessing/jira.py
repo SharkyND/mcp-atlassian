@@ -4,30 +4,131 @@ import logging
 import re
 from typing import Any
 
-from .base import BasePreprocessor
+from .base import BasePreprocessor, _extract_blocks, _restore_blocks
 
 logger = logging.getLogger("mcp-atlassian")
+
+_ISSUE_KEY_PATTERN = r"[A-Z][A-Z0-9_]+-\d+(?:-\d+)*"
+
+
+def _convert_panel(params: str | None, content: str) -> str:
+    """Convert a Jira {panel} block to markdown."""
+    title = ""
+    if params:
+        title_match = re.search(r"title=([^|}]+)", params)
+        if title_match:
+            title = title_match.group(1).strip()
+    content = content.strip()
+    if title:
+        return f"\n**{title}**\n{content}\n"
+    return f"\n{content}\n"
 
 
 class JiraPreprocessor(BasePreprocessor):
     """Handles text preprocessing for Jira content."""
 
-    def __init__(self, base_url: str = "", **kwargs: Any) -> None:
+    # Step 1: Valid JIRA languages (official list)
+    # Source: https://jira.atlassian.com/browse/JRASERVER-21067 (JIRA 7.5.0+)
+    # and JIRA v9.12.12 release notes
+    # Official documentation: https://jira.atlassian.com/secure/WikiRendererHelpAction.jspa
+    VALID_JIRA_LANGUAGES = {
+        # Core languages from JIRA 7.5.0+
+        "actionscript",
+        "actionscript3",
+        "ada",
+        "applescript",
+        "bash",
+        "sh",  # alias for bash
+        "c",
+        "c#",
+        "csharp",  # alias for c#
+        "cs",  # alias for c#
+        "c++",
+        "cpp",  # alias for c++
+        "css",
+        "sass",  # CSS preprocessor
+        "less",  # CSS preprocessor
+        "coldfusion",
+        "delphi",
+        "diff",
+        "patch",  # alias for diff
+        "erlang",
+        "erl",  # alias for erlang
+        "go",
+        "groovy",
+        "haskell",
+        "html",
+        "xml",
+        "java",
+        "javafx",
+        "javascript",
+        "js",  # alias for javascript
+        "json",
+        "lua",
+        "nyan",
+        "objc",
+        "objective-c",  # alias for objc
+        "perl",
+        "php",
+        "powershell",
+        "ps1",  # alias for powershell
+        "python",
+        "py",  # alias for python
+        "r",
+        "rainbow",
+        "ruby",
+        "rb",  # alias for ruby
+        "scala",
+        "sql",
+        "swift",
+        "visualbasic",
+        "vb",  # alias for visualbasic
+        "yaml",
+        "yml",  # alias for yaml
+        "none",  # plain text, no highlighting
+    }
+
+    # Step 2: Mapping for unsupported languages to closest valid JIRA alternative
+    # Only map to actual JIRA languages; unmapped languages will return None → {code}
+    LANGUAGE_MAPPING = {
+        # Dockerfile → bash (similar shell syntax)
+        "dockerfile": "bash",
+        "docker": "bash",
+        # TypeScript → javascript
+        "typescript": "javascript",
+        "ts": "javascript",
+        "tsx": "javascript",
+        # JSX/React → javascript
+        "jsx": "javascript",
+        # Kotlin → java (JVM-based language)
+        "kotlin": "java",
+        "kt": "java",
+        # Build files → bash
+        "makefile": "bash",
+        "make": "bash",
+        "cmake": "bash",
+    }
+
+    def __init__(
+        self, base_url: str = "", disable_translation: bool = False, **kwargs: Any
+    ) -> None:
         """
         Initialize the Jira text preprocessor.
 
         Args:
             base_url: Base URL for Jira API
+            disable_translation: If True, disable markup translation between formats
             **kwargs: Additional arguments for the base class
         """
         super().__init__(base_url=base_url, **kwargs)
+        self.disable_translation = disable_translation
 
     def clean_jira_text(self, text: str) -> str:
         """
         Clean Jira text content by:
         1. Processing user mentions and links
-        2. Converting Jira markup to markdown
-        3. Converting HTML/wiki markup to markdown
+        2. Converting Jira markup to markdown (if translation enabled)
+        3. Converting HTML/wiki markup to markdown (if translation enabled)
         """
         if not text:
             return ""
@@ -39,11 +140,13 @@ class JiraPreprocessor(BasePreprocessor):
         # Process Jira smart links
         text = self._process_smart_links(text)
 
-        # First convert any Jira markup to Markdown
-        text = self.jira_to_markdown(text)
+        # Convert markup only if translation is enabled
+        if not self.disable_translation:
+            # First convert any Jira markup to Markdown
+            text = self.jira_to_markdown(text)
 
-        # Then convert any remaining HTML to markdown
-        text = self._convert_html_to_markdown(text)
+            # Then convert any remaining HTML to markdown
+            text = self._convert_html_to_markdown(text)
 
         return text.strip()
 
@@ -71,7 +174,7 @@ class JiraPreprocessor(BasePreprocessor):
     def _process_smart_links(self, text: str) -> str:
         """Process Jira/Confluence smart links."""
         # Pattern matches: [text|url|smart-link]
-        link_pattern = r"\[([^\[\]\|]*)\|([^\[\]\|]*)\|smart-link\]"
+        link_pattern = r"\[(.*?)\|(.*?)\|smart-link\]"
         matches = re.finditer(link_pattern, text)
 
         for match in matches:
@@ -80,7 +183,9 @@ class JiraPreprocessor(BasePreprocessor):
             link_url = match.group(2)
 
             # Extract issue key if it's a Jira issue link
-            issue_key_match = re.search(r"browse/([A-Z]+-\d+)", link_url)
+            issue_key_match = re.search(
+                rf"browse/({_ISSUE_KEY_PATTERN})(?=$|[/?#])", link_url
+            )
             # Check if it's a Confluence wiki link
             confluence_match = re.search(
                 r"wiki/spaces/.+?/pages/\d+/(.+?)(?:\?|$)", link_url
@@ -93,7 +198,9 @@ class JiraPreprocessor(BasePreprocessor):
             elif confluence_match:
                 url_title = confluence_match.group(1)
                 readable_title = url_title.replace("+", " ")
-                readable_title = re.sub(r"^[A-Z]+-\d+\s+", "", readable_title)
+                readable_title = re.sub(
+                    rf"^{_ISSUE_KEY_PATTERN}\s+", "", readable_title
+                )
                 text = text.replace(full_match, f"[{readable_title}]({link_url})")
             else:
                 clean_url = link_url.split("?")[0]
@@ -109,20 +216,70 @@ class JiraPreprocessor(BasePreprocessor):
             input_text: Text in Jira markup format
 
         Returns:
-            Text in Markdown format
+            Text in Markdown format (or original text if translation disabled)
         """
         if not input_text:
             return ""
 
-        # Block quotes
-        output = re.sub(r"^bq\.(.*?)$", r"> \1\n", input_text, flags=re.MULTILINE)
+        if self.disable_translation:
+            return input_text
 
-        # Text formatting (bold, italic) - safe version
+        output = input_text
+
+        # Protect code/noformat/inline-code blocks from downstream
+        # transformations by replacing them with placeholders.
+        #
+        # Trade-off: when {quote} wraps a {code} block, the code
+        # content is extracted *before* the {quote} handler runs.
+        # The {quote} handler prefixes each remaining line with
+        # "> " but cannot reach inside the already-extracted block.
+        # After restoration the opening fence line may carry "> "
+        # while inner code lines do not, breaking blockquote
+        # continuity.  This is intentional: protecting code content
+        # from markup corruption is more important than preserving
+        # blockquote indentation around code fences.
+        code_blocks: list[str] = []
+        inline_codes: list[str] = []
+
+        def _jira_code_to_md(match: re.Match[str]) -> str:
+            lang = match.group(1) or ""
+            content = match.group(2)
+            return f"```{lang}\n{content}\n```"
+
+        output = _extract_blocks(
+            output,
+            r"\{code(?::([a-z]+))?\}([\s\S]*?)\{code\}",
+            _jira_code_to_md,
+            code_blocks,
+            "CODEBLOCK",
+            flags=re.MULTILINE,
+        )
+        output = _extract_blocks(
+            output,
+            r"\{noformat\}([\s\S]*?)\{noformat\}",
+            lambda m: f"```\n{m.group(1)}\n```",
+            code_blocks,
+            "CODEBLOCK",
+        )
+        output = _extract_blocks(
+            output,
+            r"\{\{([^}]+)\}\}",
+            lambda m: f"`{m.group(1)}`",
+            inline_codes,
+            "INLINECODE",
+        )
+
+        # Block quotes
+        output = re.sub(r"^bq\.(.*?)$", r"> \1\n", output, flags=re.MULTILINE)
+
+        # Text formatting (bold, italic)
         output = re.sub(
-            r"([*_]{1,3})([^*_]+)\1",
-            lambda match: ("**" if match.group(1) == "*" else "*")
-            + match.group(2)
-            + ("**" if match.group(1) == "*" else "*"),
+            r"([*_])(.*?)\1",
+            lambda match: (
+                ("**" if match.group(1) == "*" else "*")
+                + match.group(2)
+                + ("**" if match.group(1) == "*" else "*")
+            ),
             output,
         )
 
@@ -142,11 +299,12 @@ class JiraPreprocessor(BasePreprocessor):
             flags=re.MULTILINE,
         )
 
-        # Inline code
-        output = re.sub(r"\{\{([^}]+)\}\}", r"`\1`", output)
-
-        # Citation (safe version: match anything except '?')
-        output = re.sub(r"\?\?([^?]+)\?\?", r"<cite>\1</cite>", output)
+        # Citation (non-overlapping alternation to avoid catastrophic backtracking)
+        output = re.sub(
+            r"\?\?([^?]+(?:\?[^?]+)*)\?\?",
+            r"<cite>\1</cite>",
+            output,
+        )
 
         # Inserted text
         output = re.sub(r"\+([^+]*)\+", r"<ins>\1</ins>", output)
@@ -160,17 +318,6 @@ class JiraPreprocessor(BasePreprocessor):
         # Strikethrough
         output = re.sub(r"-([^-]*)-", r"-\1-", output)
 
-        # Code blocks with optional language specification
-        output = re.sub(
-            r"\{code(?::([a-z]+))?\}([\s\S]*?)\{code\}",
-            r"```\1\n\2\n```",
-            output,
-            flags=re.MULTILINE,
-        )
-
-        # No format
-        output = re.sub(r"\{noformat\}([\s\S]*?)\{noformat\}", r"```\n\1\n```", output)
-
         # Quote blocks
         output = re.sub(
             r"\{quote\}([\s\S]*)\{quote\}",
@@ -181,25 +328,22 @@ class JiraPreprocessor(BasePreprocessor):
             flags=re.MULTILINE,
         )
 
-        # Images with alt text (multi-pass for safety)
-        def _replace_img_alt(match: re.Match) -> str:
-            img_path = match.group(1)
-            params = match.group(2)
-            alt_text = None
-            if params:
-                # Split params by comma, then trim spaces
-                for param in params.split(","):
-                    param = param.strip()
-                    if param.startswith("alt="):
-                        alt_text = param[4:]
-                        break
-            return f"![{alt_text if alt_text else ''}]({img_path})"
-
+        # Panel blocks - extract content, optionally show title as bold
         output = re.sub(
-            r"!([^|\n\s]+)\|([^!]*)!",
-            _replace_img_alt,
+            r"\{panel(?::([^}]*))?\}([\s\S]*?)\{panel\}",
+            lambda match: _convert_panel(match.group(1), match.group(2)),
+            output,
+            flags=re.MULTILINE,
+        )
+
+        # Images with alt text
+        output = re.sub(
+            r"!([^|\n\s]+)\|([^\n!]*)alt=([^\n!\,]+?)"
+            r"(,([^\n!]*))?!",
+            r"![\3](\1)",
             output,
         )
+
         # Images with other parameters (ignore them)
         output = re.sub(r"!([^|\n\s]+)\|([^\n!]*)!", r"![](\1)", output)
 
@@ -208,7 +352,7 @@ class JiraPreprocessor(BasePreprocessor):
 
         # Links
         output = re.sub(r"\[([^|]+)\|(.+?)\]", r"[\1](\2)", output)
-        output = re.sub(r"\[(.+?)\]([^\(]+)", r"<\1>\2", output)
+        output = re.sub(r"\[(.+?)\]([^\(])", r"\1\2", output)
 
         # Colored text
         output = re.sub(
@@ -233,71 +377,97 @@ class JiraPreprocessor(BasePreprocessor):
                 if header_cells > 0:
                     separator_line = "|" + "---|" * header_cells
                     lines.insert(i + 1, separator_line)
-                    i += 1  # Skip the newly inserted line in next iteration
+                    i += 1
 
             i += 1
 
         # Rejoin the lines
         output = "\n".join(lines)
 
+        # Restore code/noformat blocks and inline code
+        output = _restore_blocks(output, code_blocks, "CODEBLOCK")
+        output = _restore_blocks(output, inline_codes, "INLINECODE")
+
         return output
+
+    def _normalize_code_language(self, lang: str | None) -> str | None:
+        """
+        Normalize and map markdown code language to JIRA-supported language.
+
+        Step 3: Default handling - unmapped languages return None for plain {code}
+
+        Args:
+            lang: Language identifier from markdown code block
+
+        Returns:
+            Valid JIRA language string, or None for plain {code} block
+        """
+        if not lang:
+            return None
+
+        lang_lower = lang.lower()
+
+        # Step 1: Check if already valid JIRA language
+        if lang_lower in self.VALID_JIRA_LANGUAGES:
+            return lang_lower
+
+        # Step 2: Check language mapping
+        if lang_lower in self.LANGUAGE_MAPPING:
+            return self.LANGUAGE_MAPPING[lang_lower]
+
+        # Step 3: Default - unmapped language returns None for plain {code}
+        return None
 
     def markdown_to_jira(self, input_text: str) -> str:
         """
-        Convert Markdown text to Jira markup format.
+        Convert Markdown syntax to Jira markup syntax.
 
         Args:
             input_text: Text in Markdown format
 
         Returns:
-            Text in Jira markup format
+            Text in Jira markup format (or original text if translation disabled)
         """
         if not input_text:
             return ""
 
-        # Save code blocks to prevent recursive processing
-        code_blocks = []
-        inline_codes = []
+        if self.disable_translation:
+            return input_text
 
-        # Extract code blocks
-        def save_code_block(match: re.Match) -> str:
-            """
-            Process and save a code block.
+        code_blocks: list[str] = []
+        inline_codes: list[str] = []
 
-            Args:
-                match: Regex match object containing the code block
-
-            Returns:
-                Jira-formatted code block
-            """
+        def _md_code_to_jira(match: re.Match[str]) -> str:
             syntax = match.group(1) or ""
             content = match.group(2)
+            jira_lang = self._normalize_code_language(syntax)
             code = "{code"
-            if syntax:
-                code += ":" + syntax
+            if jira_lang:
+                code += ":" + jira_lang
             code += "}" + content + "{code}"
-            code_blocks.append(code)
-            return str(code)  # Ensure we return a string
+            return code
 
-        # Extract inline code
-        def save_inline_code(match: re.Match) -> str:
-            """
-            Process and save inline code.
+        def _md_inline_to_jira(
+            match: re.Match[str],
+        ) -> str:
+            return "{{" + match.group(1) + "}}"
 
-            Args:
-                match: Regex match object containing the inline code
-
-            Returns:
-                Jira-formatted inline code
-            """
-            content = match.group(1)
-            code = "{{" + content + "}}"
-            inline_codes.append(code)
-            return str(code)  # Ensure we return a string
-
-        # Save code sections temporarily
-        output = re.sub(r"```(\w*)\n([\s\S]+?)```", save_code_block, input_text)
-        output = re.sub(r"`([^`]+)`", save_inline_code, output)
+        # Extract code blocks and inline code before
+        # any other transformations.
+        output = _extract_blocks(
+            input_text,
+            r"```(\w*)\n([\s\S]+?)```",
+            _md_code_to_jira,
+            code_blocks,
+            "CODEBLOCK",
+        )
+        output = _extract_blocks(
+            output,
+            r"`([^`]+)`",
+            _md_inline_to_jira,
+            inline_codes,
+            "INLINECODE",
+        )
 
         # Headers with = or - underlines
         output = re.sub(
@@ -307,70 +477,126 @@ class JiraPreprocessor(BasePreprocessor):
             flags=re.MULTILINE,
         )
 
-        # Headers with # prefix (safe version: avoid nested quantifiers)
+        # Headers with # prefix - require space after #
+        # to distinguish from Jira lists (issue #786)
         output = re.sub(
-            r"^(#+)([^\n]*)$",
-            lambda match: f"h{len(match.group(1))}." + match.group(2),
+            r"^([#]+) (.*)$",
+            lambda match: f"h{len(match.group(1))}. " + match.group(2),
             output,
             flags=re.MULTILINE,
         )
 
-        # Bold and italic
-        # Process double markers first (bold), then single markers (italic)
+        markdown_url_targets: list[str] = []
+
+        def store_markdown_url_target(target: str) -> str:
+            placeholder = f"\x00MARKDOWNURL{len(markdown_url_targets)}\x00"
+            markdown_url_targets.append(target)
+            return placeholder
+
+        def protect_markdown_link_target(match: re.Match[str]) -> str:
+            return (
+                match.group(1)
+                + store_markdown_url_target(match.group(2))
+                + match.group(3)
+            )
+
+        def protect_markdown_autolink_target(match: re.Match[str]) -> str:
+            return "<" + store_markdown_url_target(match.group(1)) + ">"
+
         output = re.sub(
-            r"\*\*([^*\n]+?)\*\*",
-            r"*\1*",
+            r"(!?\[[^\]\n]*\]\()([^)]+)(\))",
+            protect_markdown_link_target,
             output,
         )
         output = re.sub(
-            r"__([^_\n]+?)__",
-            r"*\1*",
-            output,
-        )
-        output = re.sub(
-            r"\*([^*\n]+?)\*",
-            r"_\1_",
-            output,
-        )
-        output = re.sub(
-            r"_([^_\n]+?)_",
-            r"_\1_",
+            r"<((?:[A-Za-z][A-Za-z0-9+.-]*:[^>\s]+|[^<>\s@]+@[^<>\s@]+))>",
+            protect_markdown_autolink_target,
             output,
         )
 
+        # Bold and italic - skip lines starting with
+        # asterisks+space (Jira list syntax, issue #786)
+        def escape_intraword_underscore_runs(match: re.Match[str]) -> str:
+            return r"\_" * len(match.group(0))
+
+        def convert_bold_italic_line(line: str) -> str:
+            # CommonMark treats underscores between two word characters as
+            # literal text, not emphasis. The Jira wiki renderer does not:
+            # it italicizes any ``_word_`` span, so identifiers such as
+            # snake_case, customfield_10101 or foo_bar_baz would render with
+            # spurious italics (and adjacent identifiers can pair into a
+            # cross-token italic span). Escape intraword underscore runs as
+            # ``\_`` so Jira renders them literally; genuine word-boundary
+            # ``_emphasis_``/``__strong__`` is left intact for conversion below.
+            line = re.sub(
+                r"(?<=[^\W_])_+(?=[^\W_])",
+                escape_intraword_underscore_runs,
+                line,
+            )
+            if re.match(r"^[*_]+\s", line):
+                return line
+            return re.sub(
+                r"([*_]+)(.*?)\1",
+                lambda m: (
+                    ("_" if len(m.group(1)) == 1 else "*")
+                    + m.group(2)
+                    + ("_" if len(m.group(1)) == 1 else "*")
+                ),
+                line,
+            )
+
+        lines = output.split("\n")
+        output = "\n".join(convert_bold_italic_line(line) for line in lines)
+        output = _restore_blocks(output, markdown_url_targets, "MARKDOWNURL")
+
         # Multi-level bulleted list
+        def bulleted_list_fn(match: re.Match[str]) -> str:
+            ident = len(match.group(1)) if match.group(1) else 0
+            level = ident // 2 + 1
+            return str("*" * level + " " + match.group(2))
+
         output = re.sub(
-            r"^(\s*)- (.*)$",
-            lambda match: (
-                "* " + match.group(2)
-                if not match.group(1)
-                else "  " * (len(match.group(1)) // 2) + "* " + match.group(2)
-            ),
+            r"^(\s+)?[-+*] (.*)$",
+            bulleted_list_fn,
             output,
             flags=re.MULTILINE,
         )
 
         # Multi-level numbered list
+        def numbered_list_fn(
+            match: re.Match[str],
+        ) -> str:
+            ident = len(match.group(1)) if match.group(1) else 0
+            level = ident // 2 + 1
+            return str("#" * level + " " + match.group(2))
+
         output = re.sub(
-            r"^(\s+)1\. (.*)$",
-            lambda match: "#" * (int(len(match.group(1)) / 4) + 2)
-            + " "
-            + match.group(2),
+            r"^(\s+)?\d+\. (.*)$",
+            numbered_list_fn,
             output,
             flags=re.MULTILINE,
         )
 
         # HTML formatting tags to Jira markup
-        tag_map = {"cite": "??", "del": "-", "ins": "+", "sup": "^", "sub": "~"}
+        tag_map = {
+            "cite": "??",
+            "del": "-",
+            "ins": "+",
+            "sup": "^",
+            "sub": "~",
+        }
 
         for tag, replacement in tag_map.items():
             output = re.sub(
-                rf"<{tag}>(.*?)<\/{tag}>", rf"{replacement}\1{replacement}", output
+                rf"<{tag}>(.*?)<\/{tag}>",
+                rf"{replacement}\1{replacement}",
+                output,
             )
 
         # Colored text
         output = re.sub(
-            r"<span style=\"color:(#[^\"]+)\">([\s\S]*?)</span>",
+            r"<span style=\"color:(#[^\"]+)\">"
+            r"([\s\S]*?)</span>",
             r"{color:\1}\2{color}",
             output,
             flags=re.MULTILINE,
@@ -383,25 +609,51 @@ class JiraPreprocessor(BasePreprocessor):
         output = re.sub(r"!\[\]\(([^)\n\s]+)\)", r"!\1!", output)
 
         # Images with alt text
-        output = re.sub(r"!\[([^\]\n]+)\]\(([^)\n\s]+)\)", r"!\2|alt=\1!", output)
+        output = re.sub(
+            r"!\[([^\]\n]+)\]\(([^)\n\s]+)\)",
+            r"!\2|alt=\1!",
+            output,
+        )
 
         # Links
         output = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r"[\1|\2]", output)
         output = re.sub(r"<([^>]+)>", r"[\1]", output)
 
         # Convert markdown tables to Jira table format
+        # Issue #1343: parse full table blocks (header + separator + data rows),
+        # strip whitespace from each cell, convert header to ||cell|| and data
+        # rows to |cell|.
         lines = output.split("\n")
         i = 0
         while i < len(lines):
-            if i < len(lines) - 1 and re.match(r"\|[-\s|]+\|", lines[i + 1]):
-                # Convert header row to Jira format
-                lines[i] = lines[i].replace("|", "||")
-                # Remove the separator line
-                lines.pop(i + 1)
+            # Look for a header row followed by a markdown separator line
+            if (
+                i < len(lines) - 1
+                and re.match(r"^\|[-\s|:]+\|$", lines[i + 1])
+                and re.match(r"^\|.*\|$", lines[i])
+            ):
+                # Header row
+                header_cells = [cell.strip() for cell in lines[i].split("|")[1:-1]]
+                lines[i] = "||" + "||".join(header_cells) + "||"
+                lines.pop(i + 1)  # drop separator
+
+                # Consume data rows while they look like table rows
+                while i < len(lines) and re.match(
+                    r"^\|.*\|$", lines[i + 1] if i + 1 < len(lines) else ""
+                ):
+                    data_cells = [
+                        cell.strip() for cell in lines[i + 1].split("|")[1:-1]
+                    ]
+                    lines[i + 1] = "|" + "|".join(data_cells) + "|"
+                    i += 1
             i += 1
 
         # Rejoin the lines
         output = "\n".join(lines)
+
+        # Restore code blocks and inline code
+        output = _restore_blocks(output, code_blocks, "CODEBLOCK")
+        output = _restore_blocks(output, inline_codes, "INLINECODE")
 
         return output
 

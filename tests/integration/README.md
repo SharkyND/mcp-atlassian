@@ -148,6 +148,7 @@ import pytest
 from tests.utils.base import BaseAuthTest
 from tests.utils.mocks import MockEnvironment
 
+
 @pytest.mark.integration
 class TestNewIntegration(BaseAuthTest):
     def test_feature(self):

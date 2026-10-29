@@ -74,6 +74,21 @@ class TestConfluenceConfigCustomHeaders:
             config = ConfluenceConfig.from_env()
             assert config.custom_headers == {}
 
+    def test_passthrough_headers(self):
+        """Test ConfluenceConfig parsing of passthrough header names."""
+        with patch.dict(
+            os.environ,
+            {
+                "CONFLUENCE_URL": "https://test.atlassian.net/wiki",
+                "CONFLUENCE_USERNAME": "test_user",
+                "CONFLUENCE_API_TOKEN": "test_token",
+                "CONFLUENCE_PASSTHROUGH_HEADERS": "X-SSO-User, X-Request-ID,x-sso-user",
+            },
+            clear=True,
+        ):
+            config = ConfluenceConfig.from_env()
+            assert config.passthrough_headers == ["X-SSO-User", "X-Request-ID"]
+
 
 class TestConfluenceClientCustomHeaders:
     """Test ConfluenceClient custom headers application."""
@@ -109,8 +124,9 @@ class TestConfluenceClientCustomHeaders:
 
         client = ConfluenceClient(config=config)
 
-        # Verify no custom headers were applied
-        assert mock_session.headers == {}
+        # Only the default User-Agent should be present; no custom headers added.
+        assert set(mock_session.headers.keys()) == {"User-Agent"}
+        assert mock_session.headers["User-Agent"].startswith("mcp-atlassian/")
 
     def test_custom_headers_applied_to_session(self, monkeypatch):
         """Test that custom headers are applied to the Confluence session."""

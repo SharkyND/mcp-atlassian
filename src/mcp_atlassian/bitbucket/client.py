@@ -11,10 +11,11 @@ from urllib3.util.retry import Retry
 from mcp_atlassian.exceptions import MCPAtlassianAuthenticationError
 from mcp_atlassian.utils.logging import (
     get_masked_session_headers,
-    mask_sensitive,
 )
 from mcp_atlassian.utils.oauth import configure_oauth_session
 from mcp_atlassian.utils.ssl import configure_ssl_verification
+from mcp_atlassian.utils.ssrf_adapter import mount_ssrf_pinning
+from mcp_atlassian.utils.urls import make_ssrf_redirect_hook
 
 from .cloud import BitbucketCloudClient
 from .config import BitbucketConfig
@@ -88,7 +89,7 @@ class BitbucketClient:
             logger.debug(
                 f"Initializing Bitbucket client with PAT as Basic auth password. "
                 f"URL: {self.config.url}, Username: {self.config.username}, "
-                f"PAT (masked): {mask_sensitive(str(self.config.personal_token))}"
+                "PAT authentication selected"
             )
             self.bitbucket = Bitbucket(
                 url=self.config.url,
@@ -149,6 +150,10 @@ class BitbucketClient:
             logger.debug(
                 f"Added custom headers: {get_masked_session_headers(self.config.custom_headers)}"
             )
+
+        # Protect every HTTP request, including direct Cloud calls and stdio.
+        self.bitbucket._session.hooks["response"].append(make_ssrf_redirect_hook())
+        mount_ssrf_pinning(self.bitbucket._session)
 
     def get_pull_request_activities(
         self, workspace: str, repository: str, pull_request_id: int

@@ -5,13 +5,15 @@ repos:
     -   id: trailing-whitespace
     -   id: end-of-file-fixer
     -   id: check-yaml
-        exclude: ^charts/.*/templates/.*\.yaml$
+        # The check-yaml hook validates that files are well-formed YAML,
+        # but Helm templates are only valid YAML after Helm processes them.
+        exclude: ^(helm|charts/mcp-atlassian)/templates/
     -   id: check-added-large-files
     -   id: check-toml
     -   id: debug-statements
 
 -   repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.9.7
+    rev: v0.17.3
     hooks:
     -   id: ruff-format
     -   id: ruff
@@ -22,7 +24,7 @@ repos:
         ]
 
 -   repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.8.0
+    rev: v2.4.0
     hooks:
     -   id: mypy
         # TODO: Fix these type errors in future PRs:
@@ -50,8 +52,9 @@ repos:
             'types-requests',
             'types-setuptools',
             'types-urllib3',
-            'types-cachetools',
-            'atlassian-python-api',
+            'types-cachetools==6.2.0.20251022',  # pin: newer stubs make TTLCache 3-arg
+            'types-PyYAML',
+            'atlassian-python-api>=4.0.0,<5.0.0',
             'beautifulsoup4',
             'httpx',
             'python-dotenv',

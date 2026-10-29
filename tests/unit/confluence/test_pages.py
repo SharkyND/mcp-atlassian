@@ -1,10 +1,11 @@
 """Unit tests for the PagesMixin class."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 
 from mcp_atlassian.confluence.pages import PagesMixin
+from mcp_atlassian.confluence.utils import extract_emoji_from_property
 from mcp_atlassian.models.confluence import ConfluencePage
 
 
@@ -37,7 +38,8 @@ class TestPagesMixin:
 
         # Assert
         pages_mixin.confluence.get_page_by_id.assert_called_once_with(
-            page_id=page_id, expand="body.storage,version,space,children.attachment"
+            page_id=page_id,
+            expand="body.storage,version,space,children.attachment,history",
         )
 
         # Verify result structure
@@ -300,6 +302,57 @@ class TestPagesMixin:
             assert result.title == title
             assert result.content == "Page content"
 
+    def test_create_page_with_live_subtype_uses_v2_for_cloud_basic_auth(
+        self, pages_mixin
+    ):
+        """Test creating a Live Doc uses the v2 API for Cloud basic auth."""
+        space_key = "PROJ"
+        title = "Live Doc Test Page"
+        body = "<p>Live content</p>"
+        parent_id = "987654321"
+
+        with patch(
+            "mcp_atlassian.confluence.pages.ConfluenceV2Adapter"
+        ) as mock_v2_adapter_class:
+            mock_v2_adapter = MagicMock()
+            mock_v2_adapter_class.return_value = mock_v2_adapter
+            mock_v2_adapter.create_page.return_value = {
+                "id": "live_123456789",
+                "title": title,
+                "subtype": "live",
+            }
+
+            with patch.object(
+                pages_mixin,
+                "get_page_content",
+                return_value=ConfluencePage(
+                    id="live_123456789",
+                    title=title,
+                    content="Live page content",
+                    space={"key": space_key, "name": "Project"},
+                ),
+            ):
+                result = pages_mixin.create_page(
+                    space_key,
+                    title,
+                    body,
+                    parent_id,
+                    is_markdown=False,
+                    subtype="live",
+                )
+
+                mock_v2_adapter.create_page.assert_called_once_with(
+                    space_key=space_key,
+                    title=title,
+                    body=body,
+                    parent_id=parent_id,
+                    representation="storage",
+                    subtype="live",
+                )
+                pages_mixin.confluence.create_page.assert_not_called()
+                assert isinstance(result, ConfluencePage)
+                assert result.id == "live_123456789"
+
     def test_create_page_error(self, pages_mixin):
         """Test error handling when creating a page."""
         # Arrange
@@ -473,10 +526,72 @@ class TestPagesMixin:
             pages_mixin.delete_page(page_id)
 
     def test_get_page_children_success(self, pages_mixin):
-        """Test successfully getting child pages."""
+        """Test successfully getting child pages and folders."""
         # Arrange
         parent_id = "123456"
-        pages_mixin.config.url = "https://example.atlassian.net/wiki"
+        pages_mixin.config.url = "https://confluence.example.com"
+
+        # Mock the response from get_page_child_by_type for pages
+        child_pages_data = {
+            "results": [
+                {
+                    "id": "789012",
+                    "title": "Child Page 1",
+                    "type": "page",
+                    "space": {"key": "DEMO"},
+                    "version": {"number": 1},
+                },
+                {
+                    "id": "345678",
+                    "title": "Child Page 2",
+                    "type": "page",
+                    "space": {"key": "DEMO"},
+                    "version": {"number": 3},
+                },
+            ]
+        }
+        # Mock the response for folders
+        child_folders_data = {
+            "results": [
+                {
+                    "id": "111222",
+                    "title": "Child Folder 1",
+                    "type": "folder",
+                    "space": {"key": "DEMO"},
+                    "version": {"number": 1},
+                },
+            ]
+        }
+
+        # Mock to return pages first, then folders
+        pages_mixin.confluence.get_page_child_by_type.side_effect = [
+            child_pages_data,
+            child_folders_data,
+        ]
+
+        # Act
+        results = pages_mixin.get_page_children(
+            page_id=parent_id, limit=10, expand="version"
+        )
+
+        # Assert - should be called twice (once for pages, once for folders)
+        assert pages_mixin.confluence.get_page_child_by_type.call_count == 2
+
+        # Verify the results include both pages and folders
+        assert len(results) == 3
+        assert isinstance(results[0], ConfluencePage)
+        assert results[0].id == "789012"
+        assert results[0].title == "Child Page 1"
+        assert results[1].id == "345678"
+        assert results[1].title == "Child Page 2"
+        assert results[2].id == "111222"
+        assert results[2].title == "Child Folder 1"
+
+    def test_get_page_children_without_folders(self, pages_mixin):
+        """Test getting child pages only (without folders)."""
+        # Arrange
+        parent_id = "123456"
+        pages_mixin.config.url = "https://confluence.example.com"
 
         # Mock the response from get_page_child_by_type
         child_pages_data = {
@@ -487,39 +602,29 @@ class TestPagesMixin:
                     "space": {"key": "DEMO"},
                     "version": {"number": 1},
                 },
-                {
-                    "id": "345678",
-                    "title": "Child Page 2",
-                    "space": {"key": "DEMO"},
-                    "version": {"number": 3},
-                },
             ]
         }
         pages_mixin.confluence.get_page_child_by_type.return_value = child_pages_data
 
         # Act
         results = pages_mixin.get_page_children(
-            page_id=parent_id, limit=10, expand="version"
+            page_id=parent_id, limit=10, expand="version", include_folders=False
         )
 
-        # Assert
+        # Assert - should only be called once (for pages only)
         pages_mixin.confluence.get_page_child_by_type.assert_called_once_with(
             page_id=parent_id, type="page", start=0, limit=10, expand="version"
         )
 
         # Verify the results
-        assert len(results) == 2
-        assert isinstance(results[0], ConfluencePage)
+        assert len(results) == 1
         assert results[0].id == "789012"
-        assert results[0].title == "Child Page 1"
-        assert results[1].id == "345678"
-        assert results[1].title == "Child Page 2"
 
     def test_get_page_children_with_content(self, pages_mixin):
         """Test getting child pages with content."""
         # Arrange
         parent_id = "123456"
-        pages_mixin.config.url = "https://example.atlassian.net/wiki"
+        pages_mixin.config.url = "https://confluence.example.com"
 
         # Mock the response with body content
         child_pages_data = {
@@ -533,7 +638,13 @@ class TestPagesMixin:
                 }
             ]
         }
-        pages_mixin.confluence.get_page_child_by_type.return_value = child_pages_data
+        # Mock empty folders response
+        child_folders_data = {"results": []}
+
+        pages_mixin.confluence.get_page_child_by_type.side_effect = [
+            child_pages_data,
+            child_folders_data,
+        ]
 
         # Mock the preprocessor
         pages_mixin.preprocessor.process_html_content.return_value = (
@@ -553,14 +664,16 @@ class TestPagesMixin:
             "<p>This is some content</p>",
             space_key="DEMO",
             confluence_client=pages_mixin.confluence,
+            content_id="789012",
         )
 
     def test_get_page_children_empty(self, pages_mixin):
         """Test getting child pages when there are none."""
         # Arrange
         parent_id = "123456"
+        pages_mixin.config.url = "https://confluence.example.com"
 
-        # Mock empty response
+        # Mock empty response for both pages and folders
         pages_mixin.confluence.get_page_child_by_type.return_value = {"results": []}
 
         # Act
@@ -573,17 +686,319 @@ class TestPagesMixin:
         """Test error handling when getting child pages."""
         # Arrange
         parent_id = "123456"
+        pages_mixin.config.url = "https://confluence.example.com"
 
-        # Mock an exception
+        # Mock an exception on the first call (pages)
         pages_mixin.confluence.get_page_child_by_type.side_effect = Exception(
             "API Error"
         )
 
+        # Act/Assert
+        with pytest.raises(Exception, match="API Error"):
+            pages_mixin.get_page_children(page_id=parent_id)
+
+    def test_get_page_children_cloud_uses_v2_direct_children(self, pages_mixin):
+        """Test Cloud OAuth child lookup uses the v2 direct-children endpoint."""
+        parent_id = "123456"
+        pages_mixin.config = MagicMock(url="https://example.atlassian.net/wiki")
+        pages_mixin.config.auth_type = "oauth"
+        pages_mixin.config.is_cloud = True
+
+        mock_v2_adapter = MagicMock()
+        mock_v2_adapter.get_page_direct_children.return_value = {
+            "results": [
+                {
+                    "id": "789012",
+                    "title": "Child Page 1",
+                    "type": "page",
+                    "space": {"id": "42", "key": "TEST", "name": "Test Space"},
+                    "spaceId": "42",
+                    "status": "current",
+                },
+                {
+                    "id": "111222",
+                    "title": "Child Folder 1",
+                    "type": "folder",
+                    "space": {"id": "42", "key": "TEST", "name": "Test Space"},
+                    "spaceId": "42",
+                    "status": "current",
+                },
+            ]
+        }
+
+        with patch.object(
+            PagesMixin, "_page_children_v2_adapter", new_callable=PropertyMock
+        ) as mock_prop:
+            mock_prop.return_value = mock_v2_adapter
+            results = pages_mixin.get_page_children(page_id=parent_id, limit=10)
+
+        mock_v2_adapter.get_page_direct_children.assert_called_once_with(
+            page_id=parent_id,
+            limit=10,
+            cursor=None,
+        )
+        assert len(results) == 2
+        assert results[0].type == "page"
+        assert results[1].type == "folder"
+        assert results[0].space is not None
+        assert results[0].space.key == "TEST"
+        assert results[0].space.name == "Test Space"
+        assert results[0].url == (
+            "https://example.atlassian.net/wiki/spaces/TEST/pages/789012"
+        )
+
+    def test_get_page_children_cloud_basic_uses_v2_direct_children(self, pages_mixin):
+        """Test all Cloud auth modes use the v2 direct-children endpoint."""
+        parent_id = "123456"
+        pages_mixin.config = MagicMock(url="https://example.atlassian.net/wiki")
+        pages_mixin.config.auth_type = "basic"
+        pages_mixin.config.is_cloud = True
+        pages_mixin.confluence.url = "https://example.atlassian.net/wiki"
+
+        mock_v2_adapter = MagicMock()
+        mock_v2_adapter.get_page_direct_children.return_value = {
+            "results": [
+                {
+                    "id": "789012",
+                    "title": "Child Page 1",
+                    "type": "page",
+                    "space": {"id": "42", "key": "TEST", "name": "Test Space"},
+                    "spaceId": "42",
+                    "status": "current",
+                }
+            ]
+        }
+
+        with patch(
+            "mcp_atlassian.confluence.pages.ConfluenceV2Adapter",
+            return_value=mock_v2_adapter,
+        ) as adapter_cls:
+            results = pages_mixin.get_page_children(page_id=parent_id, limit=10)
+
+        adapter_cls.assert_called_once_with(
+            session=pages_mixin.confluence._session,
+            base_url="https://example.atlassian.net/wiki",
+        )
+        mock_v2_adapter.get_page_direct_children.assert_called_once_with(
+            page_id=parent_id,
+            limit=10,
+            cursor=None,
+        )
+        pages_mixin.confluence.get_page_child_by_type.assert_not_called()
+        assert len(results) == 1
+        assert results[0].id == "789012"
+
+    def test_get_page_children_cloud_filters_folders_when_disabled(self, pages_mixin):
+        """Test Cloud OAuth child lookup filters folders client-side."""
+        pages_mixin.config = MagicMock(url="https://example.atlassian.net/wiki")
+        pages_mixin.config.auth_type = "oauth"
+        pages_mixin.config.is_cloud = True
+
+        mock_v2_adapter = MagicMock()
+        mock_v2_adapter.get_page_direct_children.return_value = {
+            "results": [
+                {"id": "1", "title": "Page Child", "type": "page"},
+                {"id": "2", "title": "Folder Child", "type": "folder"},
+            ]
+        }
+
+        with patch.object(
+            PagesMixin, "_page_children_v2_adapter", new_callable=PropertyMock
+        ) as mock_prop:
+            mock_prop.return_value = mock_v2_adapter
+            results = pages_mixin.get_page_children(
+                page_id="123456", include_folders=False
+            )
+
+        assert len(results) == 1
+        assert results[0].type == "page"
+
+    def test_get_page_children_cloud_filters_to_pages_and_folders(self, pages_mixin):
+        """Test v2 direct children keep the tool scoped to pages and folders."""
+        pages_mixin.config = MagicMock(url="https://example.atlassian.net/wiki")
+        pages_mixin.config.auth_type = "oauth"
+        pages_mixin.config.is_cloud = True
+
+        mock_v2_adapter = MagicMock()
+        mock_v2_adapter.get_page_direct_children.return_value = {
+            "results": [
+                {"id": "1", "title": "Page Child", "type": "page"},
+                {"id": "2", "title": "Database Child", "type": "database"},
+                {"id": "3", "title": "Folder Child", "type": "folder"},
+                {"id": "4", "title": "Whiteboard Child", "type": "whiteboard"},
+            ]
+        }
+
+        with patch.object(
+            PagesMixin, "_page_children_v2_adapter", new_callable=PropertyMock
+        ) as mock_prop:
+            mock_prop.return_value = mock_v2_adapter
+            results = pages_mixin.get_page_children(page_id="123456")
+
+        assert [page.id for page in results] == ["1", "3"]
+        assert [page.type for page in results] == ["page", "folder"]
+
+    def test_get_page_children_cloud_emulates_start_with_v2_cursor(self, pages_mixin):
+        """Test numeric start pagination is translated to v2 cursor traversal."""
+        pages_mixin.config = MagicMock(url="https://example.atlassian.net/wiki")
+        pages_mixin.config.auth_type = "oauth"
+        pages_mixin.config.is_cloud = True
+
+        mock_v2_adapter = MagicMock()
+        mock_v2_adapter.get_page_direct_children.side_effect = [
+            {
+                "results": [
+                    {"id": "1", "title": "First", "type": "page"},
+                    {"id": "2", "title": "Second", "type": "page"},
+                ],
+                "_links": {
+                    "next": ("/wiki/api/v2/pages/123456/direct-children?cursor=abc123")
+                },
+            },
+            {
+                "results": [
+                    {"id": "3", "title": "Third", "type": "page"},
+                    {"id": "4", "title": "Fourth", "type": "page"},
+                ],
+            },
+        ]
+
+        with patch.object(
+            PagesMixin, "_page_children_v2_adapter", new_callable=PropertyMock
+        ) as mock_prop:
+            mock_prop.return_value = mock_v2_adapter
+            results = pages_mixin.get_page_children(page_id="123456", start=1, limit=2)
+
+        assert [page.id for page in results] == ["2", "3"]
+        assert mock_v2_adapter.get_page_direct_children.call_args_list[0].kwargs == {
+            "page_id": "123456",
+            "limit": 2,
+            "cursor": None,
+        }
+        assert mock_v2_adapter.get_page_direct_children.call_args_list[1].kwargs == {
+            "page_id": "123456",
+            "limit": 2,
+            "cursor": "abc123",
+        }
+
+    def test_get_page_children_cloud_fetches_page_content_when_requested(
+        self, pages_mixin
+    ):
+        """Test v2 direct children fetch page details when body content is requested."""
+        pages_mixin.config = MagicMock(url="https://example.atlassian.net/wiki")
+        pages_mixin.config.auth_type = "oauth"
+        pages_mixin.config.is_cloud = True
+
+        mock_v2_adapter = MagicMock()
+        mock_v2_adapter.get_page_direct_children.return_value = {
+            "results": [
+                {
+                    "id": "789012",
+                    "title": "Child Page",
+                    "type": "page",
+                    "space": {"id": "42", "key": "TEST", "name": "Test Space"},
+                    "spaceId": "42",
+                    "status": "current",
+                }
+            ]
+        }
+        mock_v2_adapter.get_page.return_value = {
+            "id": "789012",
+            "title": "Child Page",
+            "type": "page",
+            "space": {"id": "42", "key": "TEST", "name": "Test Space"},
+            "body": {"storage": {"value": "<p>Cloud content</p>"}},
+            "version": {"number": 1},
+        }
+        pages_mixin.preprocessor.process_html_content.return_value = (
+            "<p>Cloud content</p>",
+            "Cloud content",
+        )
+
+        with patch.object(
+            PagesMixin, "_page_children_v2_adapter", new_callable=PropertyMock
+        ) as mock_prop:
+            mock_prop.return_value = mock_v2_adapter
+            results = pages_mixin.get_page_children(
+                page_id="123456", expand="body.storage"
+            )
+
+        assert len(results) == 1
+        assert results[0].content == "Cloud content"
+        mock_v2_adapter.get_page.assert_called_once_with(
+            page_id="789012",
+            expand="body.storage,version,space",
+        )
+        pages_mixin.preprocessor.process_html_content.assert_called_once_with(
+            "<p>Cloud content</p>",
+            space_key="TEST",
+            confluence_client=pages_mixin.confluence,
+            content_id="789012",
+        )
+
+    def test_get_page_children_cloud_partial_space_uses_expandable_fallback(
+        self, pages_mixin
+    ):
+        """Test partial space payloads still produce correct Cloud space metadata."""
+        pages_mixin.config = MagicMock(url="https://example.atlassian.net/wiki")
+        pages_mixin.config.auth_type = "oauth"
+        pages_mixin.config.is_cloud = True
+
+        mock_v2_adapter = MagicMock()
+        mock_v2_adapter.get_page_direct_children.return_value = {
+            "results": [
+                {
+                    "id": "2645262347",
+                    "title": "AS_008 Import",
+                    "type": "page",
+                    "status": "current",
+                    "space": {"id": "42"},
+                    "_expandable": {"space": "/rest/api/space/IOT"},
+                }
+            ]
+        }
+
+        with patch.object(
+            PagesMixin, "_page_children_v2_adapter", new_callable=PropertyMock
+        ) as mock_prop:
+            mock_prop.return_value = mock_v2_adapter
+            results = pages_mixin.get_page_children(page_id="123456")
+
+        assert len(results) == 1
+        assert results[0].space is not None
+        assert results[0].space.key == "IOT"
+        assert results[0].url == (
+            "https://example.atlassian.net/wiki/spaces/IOT/pages/2645262347"
+        )
+
+    def test_get_page_children_folder_error_graceful(self, pages_mixin):
+        """Test that folder fetch errors don't fail the whole operation."""
+        # Arrange
+        parent_id = "123456"
+        pages_mixin.config.url = "https://confluence.example.com"
+
+        # Mock pages success, folders failure
+        child_pages_data = {
+            "results": [
+                {
+                    "id": "789012",
+                    "title": "Child Page 1",
+                    "space": {"key": "DEMO"},
+                    "version": {"number": 1},
+                },
+            ]
+        }
+        pages_mixin.confluence.get_page_child_by_type.side_effect = [
+            child_pages_data,
+            Exception("Folder API not supported"),
+        ]
+
         # Act
         results = pages_mixin.get_page_children(page_id=parent_id)
 
-        # Assert - should return empty list on error, not raise exception
-        assert len(results) == 0
+        # Assert - should still return pages even if folder fetch fails
+        assert len(results) == 1
+        assert results[0].id == "789012"
 
     def test_get_page_success(self, pages_mixin):
         """Test successful page retrieval."""
@@ -609,7 +1024,8 @@ class TestPagesMixin:
 
         # Verify the API call
         pages_mixin.confluence.get_page_by_id.assert_called_once_with(
-            page_id=page_id, expand="body.storage,version,space,children.attachment"
+            page_id=page_id,
+            expand="body.storage,version,space,children.attachment,history",
         )
 
         # Verify the result
@@ -661,7 +1077,7 @@ class TestPagesMixin:
             # Assert
             # Verify markdown was converted
             pages_mixin.preprocessor.markdown_to_confluence_storage.assert_called_once_with(
-                markdown_body, enable_heading_anchors=False
+                markdown_body, enable_heading_anchors=False, table_layout=None
             )
 
             # Verify create_page was called with the converted content
@@ -748,7 +1164,7 @@ class TestPagesMixin:
             # Assert
             # Verify markdown was converted
             pages_mixin.preprocessor.markdown_to_confluence_storage.assert_called_once_with(
-                markdown_body, enable_heading_anchors=False
+                markdown_body, enable_heading_anchors=False, table_layout=None
             )
 
             # Verify update_page was called with the converted content
@@ -844,6 +1260,304 @@ class TestPagesMixin:
             assert isinstance(result, ConfluencePage)
             assert result.id == "v1_123456789"
             assert result.title == title
+
+    @pytest.mark.parametrize(
+        "body",
+        [None, {"storage": None}, {"storage": {"value": None}}],
+        ids=["body=None", "storage=None", "value=None"],
+    )
+    def test_get_page_content_missing_body_regression(self, pages_mixin, body):
+        """Regression test for #760: handle missing body.storage.value."""
+        pages_mixin.confluence.get_page_by_id.return_value = {
+            "id": "123456",
+            "title": "Test",
+            "space": {"key": "TEST"},
+            "body": body,
+            "version": {"number": 1},
+        }
+        pages_mixin.config.url = "https://example.atlassian.net/wiki"
+        result = pages_mixin.get_page_content("123456")
+        assert isinstance(result, ConfluencePage)
+        assert result.id == "123456"
+
+    def test_get_page_by_title_missing_body_regression(self, pages_mixin):
+        """Regression test for #760: get_page_by_title handles None body."""
+        pages_mixin.confluence.get_page_by_title.return_value = {
+            "id": "123456",
+            "title": "Test",
+            "space": {"key": "TEST"},
+            "body": None,
+            "version": {"number": 1},
+        }
+        pages_mixin.config.url = "https://example.atlassian.net/wiki"
+        result = pages_mixin.get_page_by_title("TEST", "Test")
+        assert isinstance(result, ConfluencePage)
+
+    def test_get_space_pages_missing_body_regression(self, pages_mixin):
+        """Regression test for #760: get_space_pages handles None body."""
+        pages_mixin.confluence.get_all_pages_from_space.return_value = [
+            {
+                "id": "1",
+                "title": "A",
+                "space": {"key": "T"},
+                "body": None,
+                "version": {"number": 1},
+            },
+            {
+                "id": "2",
+                "title": "B",
+                "space": {"key": "T"},
+                "body": {"storage": None},
+                "version": {"number": 1},
+            },
+        ]
+        pages_mixin.config.url = "https://example.atlassian.net/wiki"
+        results = pages_mixin.get_space_pages("T")
+        assert len(results) == 2
+
+    def test_get_page_history_success_v1(self, pages_mixin):
+        """Test successfully retrieving a historical page version using v1 API with markdown."""
+        # Arrange
+        page_id = "987654321"
+        version = 2
+        pages_mixin.config.url = "https://example.atlassian.net/wiki"
+
+        # Mock the v1 API response for historical page
+        historical_page_data = {
+            "id": page_id,
+            "title": "Historical Meeting Notes",
+            "space": {"key": "PROJ", "name": "Project Space"},
+            "version": {"number": version},
+            "body": {
+                "storage": {
+                    "value": "<h2>Historical Content</h2><p>This is historical content</p>"
+                }
+            },
+            "children": {"attachment": {"results": []}},
+        }
+        pages_mixin.confluence.get_page_by_id.return_value = historical_page_data
+
+        # Mock the preprocessor
+        pages_mixin.preprocessor.process_html_content.return_value = (
+            "<h2>Historical Content</h2><p>This is historical content</p>",
+            "## Historical Content\n\nThis is historical content",
+        )
+
+        # Mock emoji to return None
+        pages_mixin.confluence.get_page_properties.return_value = {"results": []}
+
+        # Act
+        result = pages_mixin.get_page_history(
+            page_id, version, convert_to_markdown=True
+        )
+
+        # Assert - verify v1 API was called with correct parameters
+        pages_mixin.confluence.get_page_by_id.assert_called_once_with(
+            page_id=page_id,
+            status="historical",
+            version=version,
+            expand="body.storage,version,space,children.attachment,history",
+        )
+
+        # Verify result is a ConfluencePage
+        assert isinstance(result, ConfluencePage)
+        assert result.id == page_id
+        assert result.title == "Historical Meeting Notes"
+        assert result.version.number == version
+        assert result.content == "## Historical Content\n\nThis is historical content"
+        assert result.space.key == "PROJ"
+
+    def test_get_page_history_html_v1(self, pages_mixin):
+        """Test retrieving historical version with HTML format (convert_to_markdown=False)."""
+        # Arrange
+        page_id = "987654321"
+        version = 3
+        pages_mixin.config.url = "https://example.atlassian.net/wiki"
+
+        historical_page_data = {
+            "id": page_id,
+            "title": "HTML Historical Page",
+            "space": {"key": "PROJ"},
+            "version": {"number": version},
+            "body": {"storage": {"value": "<p>HTML content</p>"}},
+            "children": {"attachment": {"results": []}},
+        }
+        pages_mixin.confluence.get_page_by_id.return_value = historical_page_data
+
+        pages_mixin.preprocessor.process_html_content.return_value = (
+            "<p>Processed HTML content</p>",
+            "Processed markdown",
+        )
+        pages_mixin.confluence.get_page_properties.return_value = {"results": []}
+
+        # Act
+        result = pages_mixin.get_page_history(
+            page_id, version, convert_to_markdown=False
+        )
+
+        # Assert - HTML should be used instead of markdown
+        assert isinstance(result, ConfluencePage)
+        assert result.content == "<p>Processed HTML content</p>"
+        assert result.version.number == version
+
+    def test_get_page_history_with_attachments_v1(self, pages_mixin):
+        """Test that attachments are included in historical version."""
+        # Arrange
+        page_id = "987654321"
+        version = 2
+        pages_mixin.config.url = "https://example.atlassian.net/wiki"
+
+        historical_page_data = {
+            "id": page_id,
+            "title": "Page with Attachments",
+            "space": {"key": "PROJ"},
+            "version": {"number": version},
+            "body": {"storage": {"value": "<p>Content</p>"}},
+            "children": {
+                "attachment": {
+                    "results": [
+                        {
+                            "id": "att123",
+                            "title": "document.pdf",
+                            "extensions": {"mediaType": "application/pdf"},
+                        }
+                    ]
+                }
+            },
+        }
+        pages_mixin.confluence.get_page_by_id.return_value = historical_page_data
+
+        pages_mixin.preprocessor.process_html_content.return_value = (
+            "<p>Content</p>",
+            "Content",
+        )
+        pages_mixin.confluence.get_page_properties.return_value = {"results": []}
+
+        # Act
+        result = pages_mixin.get_page_history(page_id, version)
+
+        # Assert
+        assert isinstance(result, ConfluencePage)
+        assert result.attachments is not None
+        assert len(result.attachments) == 1
+        assert result.attachments[0].id == "att123"
+        assert result.attachments[0].title == "document.pdf"
+
+    def test_get_page_history_missing_body_v1(self, pages_mixin):
+        """Regression test for #760: handle missing body.storage.value gracefully."""
+        # Arrange
+        page_id = "987654321"
+        version = 1
+        pages_mixin.config.url = "https://example.atlassian.net/wiki"
+
+        # Mock historical page with missing body
+        historical_page_data = {
+            "id": page_id,
+            "title": "Page Without Body",
+            "space": {"key": "PROJ"},
+            "version": {"number": version},
+            "body": None,  # Missing body
+            "children": {"attachment": {"results": []}},
+        }
+        pages_mixin.confluence.get_page_by_id.return_value = historical_page_data
+
+        # Mock preprocessor to return empty strings for missing body
+        pages_mixin.preprocessor.process_html_content.return_value = ("", "")
+        pages_mixin.confluence.get_page_properties.return_value = {"results": []}
+
+        # Act - should not raise exception
+        result = pages_mixin.get_page_history(page_id, version)
+
+        # Assert - empty content should be handled gracefully
+        assert isinstance(result, ConfluencePage)
+        assert result.id == page_id
+        assert result.content == ""
+
+    def test_get_page_history_auth_error_v1(self, pages_mixin):
+        """Test that authentication errors raise MCPAtlassianAuthenticationError."""
+        # Arrange
+        page_id = "987654321"
+        version = 1
+
+        from requests.exceptions import HTTPError
+
+        from mcp_atlassian.exceptions import MCPAtlassianAuthenticationError
+
+        # Create a mock HTTP error response with 401
+        mock_response = MagicMock()
+        mock_response.status_code = 401
+        http_error = HTTPError()
+        http_error.response = mock_response
+
+        pages_mixin.confluence.get_page_by_id.side_effect = http_error
+
+        # Act/Assert
+        with pytest.raises(
+            MCPAtlassianAuthenticationError,
+            match="Authentication failed for Confluence API",
+        ):
+            pages_mixin.get_page_history(page_id, version)
+
+    def test_get_page_history_http_error_v1(self, pages_mixin):
+        """Test that non-auth HTTP errors are propagated."""
+        # Arrange
+        page_id = "987654321"
+        version = 1
+
+        from requests.exceptions import HTTPError
+
+        # Create a mock HTTP error response with 500
+        mock_response = MagicMock()
+        mock_response.status_code = 500
+        http_error = HTTPError("Internal Server Error")
+        http_error.response = mock_response
+
+        pages_mixin.confluence.get_page_by_id.side_effect = http_error
+
+        # Act/Assert - should propagate the HTTPError
+        with pytest.raises(HTTPError, match="Internal Server Error"):
+            pages_mixin.get_page_history(page_id, version)
+
+    def test_get_page_history_includes_emoji_v1(self, pages_mixin):
+        """Test that emoji is fetched and included in historical version result."""
+        # Arrange
+        page_id = "987654321"
+        version = 1
+        pages_mixin.config.url = "https://example.atlassian.net/wiki"
+
+        historical_page_data = {
+            "id": page_id,
+            "title": "Page with Emoji",
+            "space": {"key": "PROJ"},
+            "version": {"number": version},
+            "body": {"storage": {"value": "<p>Content with emoji</p>"}},
+            "children": {"attachment": {"results": []}},
+        }
+        pages_mixin.confluence.get_page_by_id.return_value = historical_page_data
+
+        # Mock preprocessor
+        pages_mixin.preprocessor.process_html_content.return_value = (
+            "<p>Content with emoji</p>",
+            "Content with emoji",
+        )
+
+        # Mock emoji properties
+        pages_mixin.confluence.get_page_properties.return_value = {
+            "results": [
+                {
+                    "key": "emoji-title-published",
+                    "value": {"fallback": "📖"},
+                },
+            ]
+        }
+
+        # Act
+        result = pages_mixin.get_page_history(page_id, version)
+
+        # Assert - emoji should be included
+        assert isinstance(result, ConfluencePage)
+        assert result.emoji == "📖"
+        assert result.version.number == version
 
 
 class TestPagesOAuthMixin:
@@ -1050,6 +1764,9 @@ class TestPagesOAuthMixin:
                 "version": {"number": 3},
             }
 
+            # Mock get_page_emoji
+            mock_v2_adapter.get_page_emoji.return_value = None
+
             # Mock the preprocessor
             oauth_pages_mixin.preprocessor.process_html_content.return_value = (
                 "<p>Processed HTML</p>",
@@ -1063,7 +1780,8 @@ class TestPagesOAuthMixin:
 
             # Assert that v2 API was used instead of v1
             mock_v2_adapter.get_page.assert_called_once_with(
-                page_id=page_id, expand="body.storage,version,space,children.attachment"
+                page_id=page_id,
+                expand="body.storage,version,space,children.attachment,history",
             )
 
             # Verify v1 API was NOT called
@@ -1074,6 +1792,8 @@ class TestPagesOAuthMixin:
                 "<p>OAuth page content</p>",
                 space_key="PROJ",
                 confluence_client=oauth_pages_mixin.confluence,
+                content_id=page_id,
+                attachments=[],
             )
 
             # Verify result is a ConfluencePage with correct data
@@ -1108,3 +1828,1767 @@ class TestPagesOAuthMixin:
 
             # Verify result
             assert result is True
+
+    def test_get_page_history_oauth_uses_v2_api(self, oauth_pages_mixin):
+        """Test that OAuth authentication uses v2 API for getting page history."""
+        # Arrange
+        page_id = "oauth_history_123"
+        version = 2
+
+        # Mock the v2 adapter
+        with patch(
+            "mcp_atlassian.confluence.pages.ConfluenceV2Adapter"
+        ) as mock_v2_adapter_class:
+            mock_v2_adapter = MagicMock()
+            mock_v2_adapter_class.return_value = mock_v2_adapter
+
+            # Mock v2 API response for historical page
+            mock_v2_adapter.get_page_by_version.return_value = {
+                "id": page_id,
+                "title": "OAuth Historical Page",
+                "space": {"key": "OAUTH", "name": "OAuth Space"},
+                "version": {"number": version},
+                "body": {
+                    "storage": {"value": "<h2>OAuth Historical</h2><p>Content</p>"}
+                },
+                "children": {"attachment": {"results": []}},
+            }
+
+            # Mock emoji
+            mock_v2_adapter.get_page_emoji.return_value = None
+
+            # Mock preprocessor
+            oauth_pages_mixin.preprocessor.process_html_content.return_value = (
+                "<h2>OAuth Historical</h2><p>Content</p>",
+                "## OAuth Historical\n\nContent",
+            )
+
+            # Act
+            result = oauth_pages_mixin.get_page_history(
+                page_id, version, convert_to_markdown=True
+            )
+
+            # Assert that v2 API was used instead of v1
+            mock_v2_adapter.get_page_by_version.assert_called_once_with(
+                page_id=page_id,
+                version=version,
+                expand="body.storage,version,space,children.attachment,history",
+            )
+
+            # Verify v1 API was NOT called
+            oauth_pages_mixin.confluence.get_page_by_id.assert_not_called()
+
+            # Verify result
+            assert isinstance(result, ConfluencePage)
+            assert result.id == page_id
+            assert result.title == "OAuth Historical Page"
+            assert result.version.number == version
+            assert result.content == "## OAuth Historical\n\nContent"
+            assert result.space.key == "OAUTH"
+
+    def test_get_page_history_oauth_success(self, oauth_pages_mixin):
+        """Test successfully retrieving historical version with OAuth."""
+        # Arrange
+        page_id = "oauth_hist_456"
+        version = 3
+
+        with patch(
+            "mcp_atlassian.confluence.pages.ConfluenceV2Adapter"
+        ) as mock_v2_adapter_class:
+            mock_v2_adapter = MagicMock()
+            mock_v2_adapter_class.return_value = mock_v2_adapter
+
+            mock_v2_adapter.get_page_by_version.return_value = {
+                "id": page_id,
+                "title": "OAuth Page Version 3",
+                "space": {"key": "PROJ", "name": "Project"},
+                "version": {"number": version},
+                "body": {"storage": {"value": "<p>Version 3 content</p>"}},
+                "children": {"attachment": {"results": []}},
+            }
+
+            mock_v2_adapter.get_page_emoji.return_value = None
+            oauth_pages_mixin.preprocessor.process_html_content.return_value = (
+                "<p>Version 3 content</p>",
+                "Version 3 content",
+            )
+
+            # Act
+            result = oauth_pages_mixin.get_page_history(page_id, version)
+
+            # Assert
+            assert isinstance(result, ConfluencePage)
+            assert result.id == page_id
+            assert result.version.number == version
+            assert result.content == "Version 3 content"
+            assert result.space.key == "PROJ"
+
+    def test_get_page_history_oauth_html(self, oauth_pages_mixin):
+        """Test retrieving historical version with HTML format using OAuth."""
+        # Arrange
+        page_id = "oauth_html_789"
+        version = 1
+
+        with patch(
+            "mcp_atlassian.confluence.pages.ConfluenceV2Adapter"
+        ) as mock_v2_adapter_class:
+            mock_v2_adapter = MagicMock()
+            mock_v2_adapter_class.return_value = mock_v2_adapter
+
+            mock_v2_adapter.get_page_by_version.return_value = {
+                "id": page_id,
+                "title": "OAuth HTML Version",
+                "space": {"key": "PROJ"},
+                "version": {"number": version},
+                "body": {"storage": {"value": "<h1>HTML</h1>"}},
+                "children": {"attachment": {"results": []}},
+            }
+
+            mock_v2_adapter.get_page_emoji.return_value = None
+            oauth_pages_mixin.preprocessor.process_html_content.return_value = (
+                "<h1>Processed HTML</h1>",
+                "Processed markdown",
+            )
+
+            # Act - get HTML instead of markdown
+            result = oauth_pages_mixin.get_page_history(
+                page_id, version, convert_to_markdown=False
+            )
+
+            # Assert - should return HTML
+            assert isinstance(result, ConfluencePage)
+            assert result.content == "<h1>Processed HTML</h1>"
+            assert result.version.number == version
+
+    def test_get_page_history_oauth_missing_body(self, oauth_pages_mixin):
+        """Test handling missing body with v2 API."""
+        # Arrange
+        page_id = "oauth_no_body_123"
+        version = 1
+
+        with patch(
+            "mcp_atlassian.confluence.pages.ConfluenceV2Adapter"
+        ) as mock_v2_adapter_class:
+            mock_v2_adapter = MagicMock()
+            mock_v2_adapter_class.return_value = mock_v2_adapter
+
+            # Mock historical page with missing body
+            mock_v2_adapter.get_page_by_version.return_value = {
+                "id": page_id,
+                "title": "OAuth No Body",
+                "space": {"key": "PROJ"},
+                "version": {"number": version},
+                "body": None,
+                "children": {"attachment": {"results": []}},
+            }
+
+            mock_v2_adapter.get_page_emoji.return_value = None
+            # Mock preprocessor to return empty strings for missing body
+            oauth_pages_mixin.preprocessor.process_html_content.return_value = ("", "")
+
+            # Act - should not raise exception
+            result = oauth_pages_mixin.get_page_history(page_id, version)
+
+            # Assert - empty content should be handled gracefully
+            assert isinstance(result, ConfluencePage)
+            assert result.id == page_id
+            assert result.content == ""
+
+    def test_get_page_history_includes_emoji_oauth(self, oauth_pages_mixin):
+        """Test that emoji is fetched and included in historical version with OAuth."""
+        # Arrange
+        page_id = "oauth_emoji_hist_123"
+        version = 2
+
+        with patch(
+            "mcp_atlassian.confluence.pages.ConfluenceV2Adapter"
+        ) as mock_v2_adapter_class:
+            mock_v2_adapter = MagicMock()
+            mock_v2_adapter_class.return_value = mock_v2_adapter
+
+            mock_v2_adapter.get_page_by_version.return_value = {
+                "id": page_id,
+                "title": "OAuth Emoji History",
+                "space": {"key": "PROJ", "name": "Project"},
+                "version": {"number": version},
+                "body": {"storage": {"value": "<p>Content</p>"}},
+                "children": {"attachment": {"results": []}},
+            }
+
+            # Mock emoji
+            mock_v2_adapter.get_page_emoji.return_value = "🔥"
+
+            oauth_pages_mixin.preprocessor.process_html_content.return_value = (
+                "<p>Content</p>",
+                "Content",
+            )
+
+            # Act
+            result = oauth_pages_mixin.get_page_history(page_id, version)
+
+            # Assert - emoji should be included
+            assert isinstance(result, ConfluencePage)
+            assert result.emoji == "🔥"
+            assert result.version.number == version
+
+
+class TestPageEmoji:
+    """Tests for page title emoji functionality."""
+
+    @pytest.fixture
+    def pages_mixin(self, confluence_client):
+        """Create a PagesMixin instance for testing."""
+        with patch(
+            "mcp_atlassian.confluence.pages.ConfluenceClient.__init__"
+        ) as mock_init:
+            mock_init.return_value = None
+            mixin = PagesMixin()
+            mixin.confluence = confluence_client.confluence
+            mixin.config = confluence_client.config
+            mixin.preprocessor = confluence_client.preprocessor
+            return mixin
+
+    def test_extract_emoji_from_property_with_fallback(self, pages_mixin):
+        """Test extracting emoji from property with fallback attribute."""
+        value = {"id": "1f4dd", "shortName": ":memo:", "fallback": "📝"}
+        result = extract_emoji_from_property(value)
+        assert result == "📝"
+
+    def test_extract_emoji_from_property_with_shortname(self, pages_mixin):
+        """Test extracting emoji from property with shortName when no fallback."""
+        value = {"id": "1f4dd", "shortName": ":memo:"}
+        result = extract_emoji_from_property(value)
+        assert result == ":memo:"
+
+    def test_extract_emoji_from_property_with_id(self, pages_mixin):
+        """Test extracting emoji from property using hex id conversion."""
+        value = {"id": "1f4dd"}  # Memo emoji code point
+        result = extract_emoji_from_property(value)
+        assert result == "📝"
+
+    def test_extract_emoji_from_property_string(self, pages_mixin):
+        """Test extracting emoji from string property value."""
+        result = extract_emoji_from_property("🚀")
+        assert result == "🚀"
+
+    def test_extract_emoji_from_property_none(self, pages_mixin):
+        """Test extracting emoji from None value."""
+        result = extract_emoji_from_property(None)
+        assert result is None
+
+    def test_extract_emoji_from_property_empty_dict(self, pages_mixin):
+        """Test extracting emoji from empty dict."""
+        result = extract_emoji_from_property({})
+        assert result is None
+
+    def test_get_page_emoji_v1_api(self, pages_mixin):
+        """Test getting page emoji via v1 API (non-OAuth)."""
+        # Mock the properties API response
+        pages_mixin.confluence.get_page_properties.return_value = {
+            "results": [
+                {
+                    "key": "emoji-title-published",
+                    "value": {"id": "1f680", "shortName": ":rocket:", "fallback": "🚀"},
+                },
+            ]
+        }
+
+        result = pages_mixin._get_page_emoji("123456")
+        assert result == "🚀"
+        pages_mixin.confluence.get_page_properties.assert_called_once_with("123456")
+
+    def test_get_page_emoji_draft_fallback(self, pages_mixin):
+        """Test getting page emoji from draft when published not available."""
+        pages_mixin.confluence.get_page_properties.return_value = {
+            "results": [
+                {
+                    "key": "emoji-title-draft",
+                    "value": {"fallback": "📋"},
+                },
+            ]
+        }
+
+        result = pages_mixin._get_page_emoji("123456")
+        assert result == "📋"
+
+    def test_get_page_emoji_no_emoji(self, pages_mixin):
+        """Test getting page emoji when none is set."""
+        pages_mixin.confluence.get_page_properties.return_value = {
+            "results": [
+                {"key": "some-other-property", "value": "something"},
+            ]
+        }
+
+        result = pages_mixin._get_page_emoji("123456")
+        assert result is None
+
+    def test_get_page_emoji_empty_properties(self, pages_mixin):
+        """Test getting page emoji with empty properties."""
+        pages_mixin.confluence.get_page_properties.return_value = {"results": []}
+
+        result = pages_mixin._get_page_emoji("123456")
+        assert result is None
+
+    def test_get_page_emoji_api_error(self, pages_mixin):
+        """Test that API errors return None gracefully."""
+        pages_mixin.confluence.get_page_properties.side_effect = Exception("API Error")
+
+        result = pages_mixin._get_page_emoji("123456")
+        assert result is None
+
+    def test_get_page_content_includes_emoji(self, pages_mixin):
+        """Test that get_page_content includes emoji in result."""
+        page_id = "987654321"
+        pages_mixin.config.url = "https://example.atlassian.net/wiki"
+
+        # Mock the emoji properties
+        pages_mixin.confluence.get_page_properties.return_value = {
+            "results": [
+                {
+                    "key": "emoji-title-published",
+                    "value": {"fallback": "📖"},
+                },
+            ]
+        }
+
+        result = pages_mixin.get_page_content(page_id, convert_to_markdown=True)
+
+        assert isinstance(result, ConfluencePage)
+        assert result.emoji == "📖"
+
+    def test_get_page_by_title_includes_emoji(self, pages_mixin):
+        """Test that get_page_by_title includes emoji in result."""
+        space_key = "DEMO"
+        title = "Example Page"
+
+        pages_mixin.confluence.get_page_by_title.return_value = {
+            "id": "987654321",
+            "title": title,
+            "space": {"key": space_key},
+            "body": {"storage": {"value": "<p>Example content</p>"}},
+            "version": {"number": 1},
+        }
+
+        pages_mixin.preprocessor.process_html_content.return_value = (
+            "<p>Processed HTML</p>",
+            "Processed Markdown",
+        )
+
+        # Mock the emoji properties
+        pages_mixin.confluence.get_page_properties.return_value = {
+            "results": [
+                {
+                    "key": "emoji-title-published",
+                    "value": {"fallback": "✨"},
+                },
+            ]
+        }
+
+        result = pages_mixin.get_page_by_title(space_key, title)
+
+        assert result is not None
+        assert result.emoji == "✨"
+
+    def test_set_page_emoji_success(self, pages_mixin):
+        """Test successfully setting a page emoji."""
+        page_id = "set_emoji_123"
+
+        # Mock set_page_property for creating new property
+        pages_mixin.confluence.get_page_properties.return_value = {"results": []}
+        pages_mixin.confluence.set_page_property.return_value = {
+            "key": "emoji-title-published"
+        }
+
+        result = pages_mixin._set_page_emoji(page_id, "🚀")
+
+        assert result is True
+        # Emoji 🚀 has Unicode code point U+1F680 - Confluence expects just the hex string
+        # Both published and draft properties should be set
+        assert pages_mixin.confluence.set_page_property.call_count == 2
+        pages_mixin.confluence.set_page_property.assert_any_call(
+            page_id,
+            {"key": "emoji-title-published", "value": "1f680"},
+        )
+        pages_mixin.confluence.set_page_property.assert_any_call(
+            page_id,
+            {"key": "emoji-title-draft", "value": "1f680"},
+        )
+
+    def test_set_page_emoji_update_existing(self, pages_mixin):
+        """Test updating an existing page emoji."""
+        page_id = "update_emoji_123"
+
+        # The v1 API doesn't need to fetch existing properties - it just sets the value
+        pages_mixin.confluence.set_page_property.return_value = {
+            "key": "emoji-title-published"
+        }
+
+        result = pages_mixin._set_page_emoji(page_id, "🎉")
+
+        assert result is True
+        # Emoji 🎉 has Unicode code point U+1F389 - Confluence expects just the hex string
+        # Both published and draft properties should be set
+        assert pages_mixin.confluence.set_page_property.call_count == 2
+        pages_mixin.confluence.set_page_property.assert_any_call(
+            page_id,
+            {"key": "emoji-title-published", "value": "1f389"},
+        )
+        pages_mixin.confluence.set_page_property.assert_any_call(
+            page_id,
+            {"key": "emoji-title-draft", "value": "1f389"},
+        )
+
+    def test_set_page_emoji_remove(self, pages_mixin):
+        """Test removing a page emoji by setting to None."""
+        page_id = "remove_emoji_123"
+
+        # Mock existing emoji property
+        pages_mixin.confluence.get_page_properties.return_value = {
+            "results": [
+                {
+                    "key": "emoji-title-published",
+                    "value": {"fallback": "📝"},
+                    "version": {"number": 1},
+                }
+            ]
+        }
+        pages_mixin.confluence.delete_page_property.return_value = True
+
+        result = pages_mixin._set_page_emoji(page_id, None)
+
+        assert result is True
+        # Both published and draft properties should be deleted
+        assert pages_mixin.confluence.delete_page_property.call_count == 2
+        pages_mixin.confluence.delete_page_property.assert_any_call(
+            page_id, "emoji-title-published"
+        )
+        pages_mixin.confluence.delete_page_property.assert_any_call(
+            page_id, "emoji-title-draft"
+        )
+
+    def test_set_page_emoji_remove_nonexistent(self, pages_mixin):
+        """Test removing emoji when none exists still succeeds."""
+        page_id = "no_emoji_123"
+
+        # Mock delete returning an error (property doesn't exist)
+        pages_mixin.confluence.delete_page_property.side_effect = Exception(
+            "Property not found"
+        )
+
+        result = pages_mixin._set_page_emoji(page_id, None)
+
+        # Should succeed even if property doesn't exist (exception caught)
+        assert result is True
+        # Both published and draft properties should be attempted to delete
+        assert pages_mixin.confluence.delete_page_property.call_count == 2
+        pages_mixin.confluence.delete_page_property.assert_any_call(
+            page_id, "emoji-title-published"
+        )
+        pages_mixin.confluence.delete_page_property.assert_any_call(
+            page_id, "emoji-title-draft"
+        )
+
+    def test_set_page_emoji_failure(self, pages_mixin):
+        """Test handling failure when setting emoji."""
+        page_id = "fail_emoji_123"
+
+        pages_mixin.confluence.get_page_properties.return_value = {"results": []}
+        pages_mixin.confluence.set_page_property.side_effect = Exception("API error")
+
+        result = pages_mixin._set_page_emoji(page_id, "💥")
+
+        assert result is False
+
+
+class TestPageEmojiOAuth:
+    """Tests for page emoji with OAuth authentication."""
+
+    @pytest.fixture
+    def oauth_pages_mixin(self, oauth_confluence_client):
+        """Create a PagesMixin instance for OAuth testing."""
+        with patch(
+            "mcp_atlassian.confluence.pages.ConfluenceClient.__init__"
+        ) as mock_init:
+            mock_init.return_value = None
+            mixin = PagesMixin()
+            mixin.confluence = oauth_confluence_client.confluence
+            mixin.config = oauth_confluence_client.config
+            mixin.preprocessor = oauth_confluence_client.preprocessor
+            return mixin
+
+    def test_get_page_emoji_oauth_uses_v2_api(self, oauth_pages_mixin):
+        """Test that OAuth authentication uses v2 API for getting page emoji."""
+        page_id = "oauth_emoji_123"
+
+        with patch(
+            "mcp_atlassian.confluence.pages.ConfluenceV2Adapter"
+        ) as mock_v2_adapter_class:
+            mock_v2_adapter = MagicMock()
+            mock_v2_adapter_class.return_value = mock_v2_adapter
+            mock_v2_adapter.get_page_emoji.return_value = "🎉"
+
+            result = oauth_pages_mixin._get_page_emoji(page_id)
+
+            mock_v2_adapter.get_page_emoji.assert_called_once_with(page_id)
+            assert result == "🎉"
+
+    def test_get_page_content_oauth_includes_emoji(self, oauth_pages_mixin):
+        """Test that OAuth get_page_content includes emoji in result."""
+        page_id = "oauth_get_123"
+
+        with patch(
+            "mcp_atlassian.confluence.pages.ConfluenceV2Adapter"
+        ) as mock_v2_adapter_class:
+            mock_v2_adapter = MagicMock()
+            mock_v2_adapter_class.return_value = mock_v2_adapter
+
+            mock_v2_adapter.get_page.return_value = {
+                "id": page_id,
+                "title": "OAuth Test Page",
+                "body": {"storage": {"value": "<p>OAuth page content</p>"}},
+                "space": {"key": "PROJ", "name": "Project"},
+                "version": {"number": 3},
+            }
+            mock_v2_adapter.get_page_emoji.return_value = "🔥"
+
+            oauth_pages_mixin.preprocessor.process_html_content.return_value = (
+                "<p>Processed HTML</p>",
+                "Processed OAuth content",
+            )
+
+            result = oauth_pages_mixin.get_page_content(
+                page_id, convert_to_markdown=True
+            )
+
+            assert isinstance(result, ConfluencePage)
+            assert result.emoji == "🔥"
+
+    def test_set_page_emoji_oauth_uses_v2_api(self, oauth_pages_mixin):
+        """Test that OAuth authentication uses v2 API for setting page emoji."""
+        page_id = "oauth_set_emoji_123"
+
+        with patch(
+            "mcp_atlassian.confluence.pages.ConfluenceV2Adapter"
+        ) as mock_v2_adapter_class:
+            mock_v2_adapter = MagicMock()
+            mock_v2_adapter_class.return_value = mock_v2_adapter
+            mock_v2_adapter.set_page_emoji.return_value = True
+
+            result = oauth_pages_mixin._set_page_emoji(page_id, "🚀")
+
+            mock_v2_adapter.set_page_emoji.assert_called_once_with(page_id, "🚀")
+            assert result is True
+
+    def test_set_page_emoji_oauth_remove(self, oauth_pages_mixin):
+        """Test that OAuth can remove emoji by setting to None."""
+        page_id = "oauth_remove_emoji_123"
+
+        with patch(
+            "mcp_atlassian.confluence.pages.ConfluenceV2Adapter"
+        ) as mock_v2_adapter_class:
+            mock_v2_adapter = MagicMock()
+            mock_v2_adapter_class.return_value = mock_v2_adapter
+            mock_v2_adapter.set_page_emoji.return_value = True
+
+            result = oauth_pages_mixin._set_page_emoji(page_id, None)
+
+            mock_v2_adapter.set_page_emoji.assert_called_once_with(page_id, None)
+            assert result is True
+
+
+class TestMovePage:
+    """Tests for the move_page method."""
+
+    @pytest.fixture
+    def pages_mixin(self, confluence_client):
+        """Create a PagesMixin instance for testing."""
+        with patch(
+            "mcp_atlassian.confluence.pages.ConfluenceClient.__init__"
+        ) as mock_init:
+            mock_init.return_value = None
+            mixin = PagesMixin()
+            mixin.confluence = confluence_client.confluence
+            mixin.config = confluence_client.config
+            mixin.preprocessor = confluence_client.preprocessor
+            return mixin
+
+    def test_move_page_to_new_parent_same_space(self, pages_mixin):
+        """Test moving a page to a new parent within the same space."""
+        page_id = "111"
+        target_parent_id = "222"
+
+        # Mock get_page_by_id to return target page with space info
+        pages_mixin.confluence.get_page_by_id.return_value = {
+            "id": target_parent_id,
+            "title": "Target Parent",
+            "space": {"key": "PROJ", "name": "Project"},
+            "version": {"number": 1},
+            "body": {"storage": {"value": "<p>Parent content</p>"}},
+        }
+
+        # Mock move_page
+        pages_mixin.confluence.move_page.return_value = {"status": "ok"}
+
+        # Mock get_page_content for the re-fetch after move
+        mock_moved_page = ConfluencePage(
+            id=page_id,
+            title="Moved Page",
+            content="Moved content",
+            space={"key": "PROJ", "name": "Project"},
+            version={"number": 2},
+        )
+        with patch.object(
+            pages_mixin, "get_page_content", return_value=mock_moved_page
+        ):
+            result = pages_mixin.move_page(
+                page_id=page_id, target_parent_id=target_parent_id
+            )
+
+        # Verify move_page was called with the correct space_key from the target
+        pages_mixin.confluence.move_page.assert_called_once_with(
+            "PROJ", page_id, target_id=target_parent_id, position="append"
+        )
+        assert isinstance(result, ConfluencePage)
+        assert result.id == page_id
+
+    def test_move_page_to_different_space_root(self, pages_mixin):
+        """Test moving a page to the root of a different space."""
+        page_id = "111"
+        target_space_key = "NEWSPACE"
+
+        # Mock move_page
+        pages_mixin.confluence.move_page.return_value = {"status": "ok"}
+
+        # Mock get_page_content for the re-fetch after move
+        mock_moved_page = ConfluencePage(
+            id=page_id,
+            title="Moved Page",
+            content="Moved content",
+            space={"key": target_space_key, "name": "New Space"},
+            version={"number": 2},
+        )
+        with patch.object(
+            pages_mixin, "get_page_content", return_value=mock_moved_page
+        ):
+            result = pages_mixin.move_page(
+                page_id=page_id, target_space_key=target_space_key
+            )
+
+        # Verify move_page was called with target_space_key and no target_id
+        pages_mixin.confluence.move_page.assert_called_once_with(
+            target_space_key, page_id, target_id=None, position="append"
+        )
+        assert isinstance(result, ConfluencePage)
+        assert result.space.key == target_space_key
+
+    def test_move_page_with_both_parent_and_space(self, pages_mixin):
+        """Test moving a page with both target_parent_id and target_space_key."""
+        page_id = "111"
+        target_parent_id = "333"
+        target_space_key = "OTHERSPACE"
+
+        # Mock move_page
+        pages_mixin.confluence.move_page.return_value = {"status": "ok"}
+
+        # Mock get_page_content for the re-fetch after move
+        mock_moved_page = ConfluencePage(
+            id=page_id,
+            title="Cross-Space Moved",
+            content="Moved content",
+            space={"key": target_space_key, "name": "Other Space"},
+            version={"number": 2},
+        )
+        with patch.object(
+            pages_mixin, "get_page_content", return_value=mock_moved_page
+        ):
+            result = pages_mixin.move_page(
+                page_id=page_id,
+                target_parent_id=target_parent_id,
+                target_space_key=target_space_key,
+            )
+
+        # When both are given, use target_space_key directly (no need to look up)
+        pages_mixin.confluence.move_page.assert_called_once_with(
+            target_space_key, page_id, target_id=target_parent_id, position="append"
+        )
+        assert isinstance(result, ConfluencePage)
+        assert result.space.key == target_space_key
+
+    def test_move_page_validation_error_neither_provided(self, pages_mixin):
+        """Test that ValueError is raised when neither target is provided."""
+        with pytest.raises(ValueError, match="At least one of"):
+            pages_mixin.move_page(page_id="111")
+
+    def test_move_page_with_above_position(self, pages_mixin):
+        """Test moving a page with 'above' position (sibling ordering)."""
+        page_id = "111"
+        target_parent_id = "222"
+
+        pages_mixin.confluence.get_page_by_id.return_value = {
+            "id": target_parent_id,
+            "title": "Target Parent",
+            "space": {"key": "PROJ", "name": "Project"},
+            "version": {"number": 1},
+            "body": {"storage": {"value": "<p>content</p>"}},
+        }
+        pages_mixin.confluence.move_page.return_value = {"status": "ok"}
+
+        mock_moved_page = ConfluencePage(
+            id=page_id,
+            title="Moved Above Page",
+            content="Content",
+            space={"key": "PROJ", "name": "Project"},
+            version={"number": 2},
+        )
+        with patch.object(
+            pages_mixin, "get_page_content", return_value=mock_moved_page
+        ):
+            result = pages_mixin.move_page(
+                page_id=page_id,
+                target_parent_id=target_parent_id,
+                position="above",
+            )
+
+        pages_mixin.confluence.move_page.assert_called_once_with(
+            "PROJ", page_id, target_id=target_parent_id, position="above"
+        )
+        assert isinstance(result, ConfluencePage)
+
+    def test_move_page_api_error(self, pages_mixin):
+        """Test that API errors are propagated correctly."""
+        page_id = "111"
+        target_space_key = "BADSPACE"
+
+        pages_mixin.confluence.move_page.side_effect = Exception(
+            "API error: space not found"
+        )
+
+        with pytest.raises(Exception, match="Failed to move page"):
+            pages_mixin.move_page(page_id=page_id, target_space_key=target_space_key)
+
+    def test_move_page_uses_v2_adapter_for_oauth(self, pages_mixin):
+        """Test that move_page uses v2 adapter for OAuth authentication."""
+        page_id = "111"
+        target_parent_id = "222"
+
+        mock_v2_adapter = MagicMock()
+        mock_v2_adapter.move_page.return_value = None
+
+        mock_moved_page = ConfluencePage(
+            id=page_id,
+            title="OAuth Moved Page",
+            content="Content",
+            space={"key": "PROJ", "name": "Project"},
+            version={"number": 2},
+        )
+
+        with (
+            patch.object(
+                type(pages_mixin),
+                "_v2_adapter",
+                new_callable=lambda: property(lambda self: mock_v2_adapter),
+            ),
+            patch.object(pages_mixin, "get_page_content", return_value=mock_moved_page),
+        ):
+            result = pages_mixin.move_page(
+                page_id=page_id,
+                target_parent_id=target_parent_id,
+            )
+
+        # v2 adapter should be called instead of confluence.move_page
+        mock_v2_adapter.move_page.assert_called_once_with(
+            page_id=page_id,
+            position="append",
+            target_id=target_parent_id,
+        )
+        pages_mixin.confluence.move_page.assert_not_called()
+        assert isinstance(result, ConfluencePage)
+
+
+class TestGetPageVersionDiff:
+    """Tests for the get_page_version_diff method."""
+
+    @pytest.fixture
+    def pages_mixin(self, confluence_client):
+        """Create a PagesMixin instance for testing."""
+        with patch(
+            "mcp_atlassian.confluence.pages.ConfluenceClient.__init__"
+        ) as mock_init:
+            mock_init.return_value = None
+            mixin = PagesMixin()
+            mixin.confluence = confluence_client.confluence
+            mixin.config = confluence_client.config
+            mixin.preprocessor = confluence_client.preprocessor
+            return mixin
+
+    def _make_page(self, content: str, title: str = "Test Page") -> ConfluencePage:
+        """Create a ConfluencePage with given content."""
+        return ConfluencePage(
+            id="12345",
+            title=title,
+            content=content,
+        )
+
+    def test_diff_shows_additions_and_removals(self, pages_mixin):
+        """Test that diff output contains expected additions and removals."""
+        old_content = "Line 1\nLine 2\nLine 3"
+        new_content = "Line 1\nLine 2 modified\nLine 3\nLine 4"
+
+        pages_mixin.get_page_history = MagicMock(
+            side_effect=lambda page_id, version, convert_to_markdown=True: (
+                self._make_page(old_content)
+                if version == 1
+                else self._make_page(new_content)
+            )
+        )
+
+        result = pages_mixin.get_page_version_diff(
+            page_id="12345", from_version=1, to_version=2
+        )
+
+        assert result["page_id"] == "12345"
+        assert result["title"] == "Test Page"
+        assert result["from_version"] == 1
+        assert result["to_version"] == 2
+        diff = result["diff"]
+        assert "-Line 2" in diff
+        assert "+Line 2 modified" in diff
+        assert "+Line 4" in diff
+
+    def test_diff_identical_content(self, pages_mixin):
+        """Test that identical content produces empty diff."""
+        content = "Same content\nOn multiple lines"
+
+        pages_mixin.get_page_history = MagicMock(return_value=self._make_page(content))
+
+        result = pages_mixin.get_page_version_diff(
+            page_id="12345", from_version=1, to_version=2
+        )
+
+        assert result["page_id"] == "12345"
+        assert result["from_version"] == 1
+        assert result["to_version"] == 2
+        assert result["diff"] == ""
+
+    def test_versions_passed_correctly(self, pages_mixin):
+        """Test that from_version and to_version are passed to get_page_history."""
+        content = "Some content"
+        pages_mixin.get_page_history = MagicMock(return_value=self._make_page(content))
+
+        pages_mixin.get_page_version_diff(page_id="99999", from_version=3, to_version=7)
+
+        calls = pages_mixin.get_page_history.call_args_list
+        assert len(calls) == 2
+        assert calls[0].kwargs["page_id"] == "99999"
+        assert calls[0].kwargs["version"] == 3
+        assert calls[1].kwargs["page_id"] == "99999"
+        assert calls[1].kwargs["version"] == 7
+
+    def test_diff_complete_replacement(self, pages_mixin):
+        """Test diff when content is completely different."""
+        old_content = "Old line 1\nOld line 2"
+        new_content = "New line 1\nNew line 2"
+
+        pages_mixin.get_page_history = MagicMock(
+            side_effect=lambda page_id, version, convert_to_markdown=True: (
+                self._make_page(old_content)
+                if version == 1
+                else self._make_page(new_content)
+            )
+        )
+
+        result = pages_mixin.get_page_version_diff(
+            page_id="12345", from_version=1, to_version=2
+        )
+
+        diff = result["diff"]
+        assert "-Old line 1" in diff
+        assert "-Old line 2" in diff
+        assert "+New line 1" in diff
+        assert "+New line 2" in diff
+
+
+class TestPageWidth:
+    """Tests for page layout width functionality."""
+
+    @pytest.fixture
+    def pages_mixin(self, confluence_client):
+        """Create a PagesMixin instance for testing."""
+        with patch(
+            "mcp_atlassian.confluence.pages.ConfluenceClient.__init__"
+        ) as mock_init:
+            mock_init.return_value = None
+            mixin = PagesMixin()
+            mixin.confluence = confluence_client.confluence
+            mixin.config = confluence_client.config
+            mixin.preprocessor = confluence_client.preprocessor
+            return mixin
+
+    def test_get_page_width_full_width(self, pages_mixin):
+        """Test getting full-width page layout."""
+        page_id = "page_full_width_123"
+
+        mock_properties = {
+            "results": [{"key": "content-appearance-published", "value": "full-width"}]
+        }
+
+        with patch.object(pages_mixin.confluence, "get_page_properties") as mock_get:
+            mock_get.return_value = mock_properties
+
+            result = pages_mixin._get_page_width(page_id)
+
+            mock_get.assert_called_once_with(page_id)
+            assert result == "full-width"
+
+    def test_get_page_width_fixed_width(self, pages_mixin):
+        """Test getting max page layout."""
+        page_id = "page_fixed_width_123"
+
+        mock_properties = {
+            "results": [{"key": "content-appearance-draft", "value": "max"}]
+        }
+
+        with patch.object(pages_mixin.confluence, "get_page_properties") as mock_get:
+            mock_get.return_value = mock_properties
+
+            result = pages_mixin._get_page_width(page_id)
+
+            mock_get.assert_called_once_with(page_id)
+            assert result == "max"
+
+    def test_get_page_width_not_set(self, pages_mixin):
+        """Test getting page width when no property is set."""
+        page_id = "page_no_width_123"
+
+        mock_properties = {"results": [{"key": "other-property", "value": "value"}]}
+
+        with patch.object(pages_mixin.confluence, "get_page_properties") as mock_get:
+            mock_get.return_value = mock_properties
+
+            result = pages_mixin._get_page_width(page_id)
+
+            assert result is None
+
+    def test_set_page_width_full_width_new_property(self, pages_mixin):
+        """Test setting page to full-width when property doesn't exist yet."""
+        page_id = "page_set_full_123"
+
+        with (
+            patch.object(
+                pages_mixin.confluence,
+                "get_page_property",
+                side_effect=Exception("Not found"),
+            ),
+            patch.object(pages_mixin.confluence, "set_page_property") as mock_set,
+        ):
+            result = pages_mixin._set_page_width(page_id, "full-width")
+
+            assert mock_set.call_count == 2
+            calls = mock_set.call_args_list
+            assert calls[0][0][0] == page_id
+            assert calls[0][0][1]["key"] == "content-appearance-published"
+            assert calls[0][0][1]["value"] == "full-width"
+            assert "version" not in calls[0][0][1]
+            assert calls[1][0][1]["key"] == "content-appearance-draft"
+            assert result is True
+
+    def test_set_page_width_full_width_existing_property(self, pages_mixin):
+        """Test setting page to full-width when property already exists."""
+        page_id = "page_set_full_existing_123"
+
+        existing_property = {
+            "key": "content-appearance-published",
+            "value": "default",
+            "version": {"number": 3},
+        }
+
+        with (
+            patch.object(
+                pages_mixin.confluence,
+                "get_page_property",
+                return_value=existing_property,
+            ),
+            patch.object(pages_mixin.confluence, "update_page_property") as mock_update,
+        ):
+            result = pages_mixin._set_page_width(page_id, "full-width")
+
+            assert mock_update.call_count == 2
+            calls = mock_update.call_args_list
+            assert calls[0][0][0] == page_id
+            assert calls[0][0][1]["key"] == "content-appearance-published"
+            assert calls[0][0][1]["value"] == "full-width"
+            assert calls[0][0][1]["version"] == {"number": 4}
+            assert result is True
+
+    def test_set_page_width_max(self, pages_mixin):
+        """Test setting page to max."""
+        page_id = "page_set_max_123"
+
+        with (
+            patch.object(
+                pages_mixin.confluence,
+                "get_page_property",
+                side_effect=Exception("Not found"),
+            ),
+            patch.object(pages_mixin.confluence, "set_page_property") as mock_set,
+        ):
+            result = pages_mixin._set_page_width(page_id, "max")
+
+            assert mock_set.call_count == 2
+            calls = mock_set.call_args_list
+            assert calls[0][0][1]["value"] == "max"
+            assert result is True
+
+    def test_set_page_width_default(self, pages_mixin):
+        """Test setting page to default width."""
+        page_id = "page_set_default_123"
+
+        with (
+            patch.object(
+                pages_mixin.confluence,
+                "get_page_property",
+                side_effect=Exception("Not found"),
+            ),
+            patch.object(pages_mixin.confluence, "set_page_property") as mock_set,
+        ):
+            result = pages_mixin._set_page_width(page_id, "default")
+
+            assert mock_set.call_count == 2
+            calls = mock_set.call_args_list
+            assert calls[0][0][1]["value"] == "default"
+            assert calls[1][0][1]["value"] == "default"
+            assert result is True
+
+    def test_set_page_width_invalid_value(self, pages_mixin):
+        """Test that invalid width values are rejected."""
+        page_id = "page_invalid_width_123"
+
+        result = pages_mixin._set_page_width(page_id, "invalid-width")
+
+        assert result is False
+
+    def test_set_page_width_remove(self, pages_mixin):
+        """Test removing page width (reset to default)."""
+        page_id = "page_remove_width_123"
+
+        with patch.object(
+            pages_mixin.confluence, "delete_page_property"
+        ) as mock_delete:
+            result = pages_mixin._set_page_width(page_id, None)
+
+            assert mock_delete.call_count == 2
+            assert result is True
+
+    def test_get_page_content_includes_width(self, pages_mixin):
+        """Test that get_page_content includes page width."""
+        page_id = "page_with_width_123"
+
+        with (
+            patch.object(pages_mixin.confluence, "get_page_by_id") as mock_get,
+            patch.object(pages_mixin, "_get_page_emoji") as mock_emoji,
+            patch.object(pages_mixin, "_get_page_width") as mock_width,
+            patch.object(
+                pages_mixin.preprocessor, "process_html_content"
+            ) as mock_process,
+        ):
+            mock_get.return_value = {
+                "id": page_id,
+                "title": "Test Page",
+                "body": {"storage": {"value": "<p>Content</p>"}},
+                "version": {"number": 1},
+                "space": {"key": "TEST"},
+            }
+            mock_emoji.return_value = "\U0001f4c4"
+            mock_width.return_value = "full-width"
+            mock_process.return_value = ("<p>Content</p>", "Content")
+
+            page = pages_mixin.get_page_content(page_id)
+
+            mock_width.assert_called_once_with(page_id)
+            assert page.page_width == "full-width"
+
+
+class TestCopyPage:
+    """Tests for copying Confluence pages."""
+
+    @pytest.fixture
+    def pages_mixin(self, confluence_client):
+        """Create a PagesMixin instance for testing."""
+        with patch(
+            "mcp_atlassian.confluence.pages.ConfluenceClient.__init__"
+        ) as mock_init:
+            mock_init.return_value = None
+            mixin = PagesMixin()
+            mixin.confluence = confluence_client.confluence
+            mixin.config = confluence_client.config
+            mixin.preprocessor = confluence_client.preprocessor
+            return mixin
+
+    def test_copy_page_cloud_uses_native_copy_endpoint(self, pages_mixin):
+        """Cloud copies use the native v1 copy endpoint."""
+        pages_mixin.config.url = "https://example.atlassian.net/wiki"
+        pages_mixin.config.auth_type = "basic"
+        pages_mixin.confluence.post.return_value = {"id": "copy-123"}
+
+        with patch.object(pages_mixin, "get_page_content") as mock_get_page:
+            mock_get_page.return_value = ConfluencePage(
+                id="copy-123",
+                title="Copied Page",
+            )
+
+            page = pages_mixin.copy_page(
+                source_page_id="source-123",
+                destination_space_key="DEST",
+                new_title="Copied Page",
+                destination_parent_id="parent-123",
+                copy_attachments=False,
+            )
+
+        pages_mixin.confluence.post.assert_called_once_with(
+            "https://example.atlassian.net/wiki/rest/api/content/source-123/copy",
+            data={
+                "copyAttachments": False,
+                "copyPermissions": False,
+                "copyProperties": False,
+                "copyLabels": False,
+                "pageTitle": "Copied Page",
+                "destination": {"type": "parent_page", "value": "parent-123"},
+            },
+            absolute=True,
+        )
+        mock_get_page.assert_called_once_with("copy-123")
+        assert page.id == "copy-123"
+
+    def test_copy_page_cloud_oauth_uses_gateway_wiki_path(self, pages_mixin):
+        """Cloud OAuth copy calls include /wiki on the API gateway URL."""
+        pages_mixin.config.auth_type = "oauth"
+        pages_mixin.confluence.url = "https://api.atlassian.com/ex/confluence/cloud-1"
+        pages_mixin.confluence.post.return_value = {"id": "copy-123"}
+
+        with patch.object(pages_mixin, "get_page_content") as mock_get_page:
+            mock_get_page.return_value = ConfluencePage(
+                id="copy-123",
+                title="Copied Page",
+            )
+
+            pages_mixin.copy_page(
+                source_page_id="source-123",
+                destination_space_key="DEST",
+                new_title="Copied Page",
+            )
+
+        assert (
+            pages_mixin.confluence.post.call_args.args[0]
+            == "https://api.atlassian.com/ex/confluence/cloud-1/wiki"
+            "/rest/api/content/source-123/copy"
+        )
+
+    def test_copy_page_server_dc_falls_back_to_create_page(self, pages_mixin):
+        """Server/DC copies fetch storage and create a new page manually."""
+        pages_mixin.config.url = "https://confluence.example.com"
+        pages_mixin.config.auth_type = "pat"
+        pages_mixin.confluence.get_page_by_id.return_value = {
+            "body": {"storage": {"value": "<p>Source</p>"}},
+        }
+        pages_mixin.confluence.create_page.return_value = {"id": "copy-456"}
+
+        with patch.object(pages_mixin, "get_page_content") as mock_get_page:
+            mock_get_page.return_value = ConfluencePage(
+                id="copy-456",
+                title="Copied Page",
+            )
+
+            page = pages_mixin.copy_page(
+                source_page_id="source-456",
+                destination_space_key="DEST",
+                new_title="Copied Page",
+                destination_parent_id="parent-456",
+            )
+
+        pages_mixin.confluence.get_page_by_id.assert_called_once_with(
+            "source-456", expand="body.storage,version,space"
+        )
+        pages_mixin.confluence.create_page.assert_called_once_with(
+            space="DEST",
+            title="Copied Page",
+            body="<p>Source</p>",
+            representation="storage",
+            parent_id="parent-456",
+        )
+        mock_get_page.assert_called_once_with("copy-456")
+        assert page.id == "copy-456"
+
+
+class TestPageHierarchy:
+    """Tests for page hierarchy and navigation methods."""
+
+    @pytest.fixture
+    def pages_mixin(self, confluence_client):
+        """Create a PagesMixin instance for testing."""
+        with patch(
+            "mcp_atlassian.confluence.pages.ConfluenceClient.__init__"
+        ) as mock_init:
+            mock_init.return_value = None
+            mixin = PagesMixin()
+            mixin.confluence = confluence_client.confluence
+            mixin.config = confluence_client.config
+            mixin.preprocessor = confluence_client.preprocessor
+            return mixin
+
+    @staticmethod
+    def _raw_response(pages: list[dict], next_link: str | None = None) -> dict:
+        """Build a mock get_all_pages_from_space_raw response."""
+        resp: dict = {"results": pages}
+        if next_link:
+            resp["_links"] = {"next": next_link}
+        return resp
+
+    def test_get_space_page_tree_empty(self, pages_mixin):
+        """Test get_space_page_tree with no pages."""
+        pages_mixin.confluence.get_all_pages_from_space_raw = MagicMock(
+            return_value=self._raw_response([])
+        )
+
+        result = pages_mixin.get_space_page_tree("EMPTY")
+
+        assert isinstance(result, dict)
+        assert result["space_key"] == "EMPTY"
+        assert result["total_pages"] == 0
+        assert result["has_more"] is False
+        assert result["pages"] == []
+
+    def test_get_space_page_tree_single_root(self, pages_mixin):
+        """Test get_space_page_tree with single root page."""
+        mock_page = {
+            "id": "123",
+            "title": "Root Page",
+            "ancestors": [],
+            "extensions": {"position": 0},
+        }
+        pages_mixin.confluence.get_all_pages_from_space_raw = MagicMock(
+            return_value=self._raw_response([mock_page])
+        )
+
+        result = pages_mixin.get_space_page_tree("TEST")
+
+        assert result["space_key"] == "TEST"
+        assert result["total_pages"] == 1
+        assert result["has_more"] is False
+        assert len(result["pages"]) == 1
+        page = result["pages"][0]
+        assert page["id"] == "123"
+        assert page["title"] == "Root Page"
+        assert page["parent_id"] is None
+        assert page["depth"] == 0
+        assert page["position"] == 0
+
+    def test_get_space_page_tree_with_children(self, pages_mixin):
+        """Test get_space_page_tree returns parent_id and depth correctly."""
+        mock_pages = [
+            {
+                "id": "123",
+                "title": "Parent Page",
+                "ancestors": [],
+                "extensions": {"position": 0},
+            },
+            {
+                "id": "456",
+                "title": "Child Page",
+                "ancestors": [{"id": "123"}],
+                "extensions": {"position": 0},
+            },
+        ]
+        pages_mixin.confluence.get_all_pages_from_space_raw = MagicMock(
+            return_value=self._raw_response(mock_pages)
+        )
+
+        result = pages_mixin.get_space_page_tree("TEST")
+
+        assert result["total_pages"] == 2
+        pages = result["pages"]
+
+        parent = next(p for p in pages if p["id"] == "123")
+        child = next(p for p in pages if p["id"] == "456")
+
+        assert parent["parent_id"] is None
+        assert parent["depth"] == 0
+        assert child["parent_id"] == "123"
+        assert child["depth"] == 1
+
+        parent_idx = pages.index(parent)
+        child_idx = pages.index(child)
+        assert parent_idx < child_idx
+
+    def test_get_space_page_tree_sorting(self, pages_mixin):
+        """Test that pages are sorted by depth then position."""
+        mock_pages = [
+            {
+                "id": "789",
+                "title": "Third Page",
+                "ancestors": [],
+                "extensions": {"position": 2},
+            },
+            {
+                "id": "123",
+                "title": "First Page",
+                "ancestors": [],
+                "extensions": {"position": 0},
+            },
+            {
+                "id": "456",
+                "title": "Second Page",
+                "ancestors": [],
+                "extensions": {"position": 1},
+            },
+        ]
+        pages_mixin.confluence.get_all_pages_from_space_raw = MagicMock(
+            return_value=self._raw_response(mock_pages)
+        )
+
+        result = pages_mixin.get_space_page_tree("TEST")
+
+        pages = result["pages"]
+        assert pages[0]["id"] == "123"  # position 0
+        assert pages[1]["id"] == "456"  # position 1
+        assert pages[2]["id"] == "789"  # position 2
+
+    def test_get_space_page_tree_string_position_none(self, pages_mixin):
+        """Test that string 'none' positions don't cause TypeError.
+
+        Confluence DC/Server returns position as the string "none" for
+        pages without explicit ordering. Mixed with integer positions,
+        this previously caused TypeError in the sort key (gh-1319).
+        """
+        mock_pages = [
+            {
+                "id": "1",
+                "title": "Ordered Page",
+                "ancestors": [],
+                "extensions": {"position": 0},
+            },
+            {
+                "id": "2",
+                "title": "Unordered Page",
+                "ancestors": [],
+                "extensions": {"position": "none"},
+            },
+            {
+                "id": "3",
+                "title": "Another Ordered",
+                "ancestors": [],
+                "extensions": {"position": 1},
+            },
+            {
+                "id": "4",
+                "title": "Numeric String",
+                "ancestors": [],
+                "extensions": {"position": "5"},
+            },
+        ]
+        pages_mixin.confluence.get_all_pages_from_space_raw = MagicMock(
+            return_value=self._raw_response(mock_pages)
+        )
+
+        result = pages_mixin.get_space_page_tree("TEST")
+
+        pages = result["pages"]
+        assert len(pages) == 4
+        # Integer positions are preserved
+        assert pages[0]["id"] == "1"
+        assert pages[0]["position"] == 0
+        # Numeric string is coerced to int
+        p4 = next(p for p in pages if p["id"] == "4")
+        assert p4["position"] == 5
+        # String "none" is normalized to None and sorted last
+        p2 = next(p for p in pages if p["id"] == "2")
+        assert p2["position"] is None
+
+    def test_pagination_multiple_batches(self, pages_mixin):
+        """Test that pagination fetches across multiple API batches."""
+        batch1 = [
+            {
+                "id": str(i),
+                "title": f"Page {i}",
+                "ancestors": [],
+                "extensions": {"position": i},
+            }
+            for i in range(3)
+        ]
+        batch2 = [
+            {
+                "id": str(i),
+                "title": f"Page {i}",
+                "ancestors": [],
+                "extensions": {"position": i},
+            }
+            for i in range(3, 5)
+        ]
+        pages_mixin.confluence.get_all_pages_from_space_raw = MagicMock(
+            side_effect=[
+                self._raw_response(batch1, next_link="/rest/api/content?start=3"),
+                self._raw_response(batch2),  # no next link = last batch
+            ]
+        )
+
+        result = pages_mixin.get_space_page_tree("TEST", limit=500)
+
+        assert result["total_pages"] == 5
+        assert result["has_more"] is False
+        assert pages_mixin.confluence.get_all_pages_from_space_raw.call_count == 2
+
+        # Verify correct start offsets were passed to each batch
+        calls = pages_mixin.confluence.get_all_pages_from_space_raw.call_args_list
+        assert calls[0].kwargs["start"] == 0
+        assert calls[1].kwargs["start"] == 3
+
+    def test_pagination_respects_limit_ceiling(self, pages_mixin):
+        """Test has_more=True when limit reached but more pages exist."""
+        # 3 pages in batch, limit=3, and next_link exists
+        batch = [
+            {
+                "id": str(i),
+                "title": f"Page {i}",
+                "ancestors": [],
+                "extensions": {"position": i},
+            }
+            for i in range(3)
+        ]
+        pages_mixin.confluence.get_all_pages_from_space_raw = MagicMock(
+            return_value=self._raw_response(
+                batch, next_link="/rest/api/content?start=3"
+            )
+        )
+
+        result = pages_mixin.get_space_page_tree("TEST", limit=3)
+
+        assert result["total_pages"] == 3
+        assert result["has_more"] is True
+        assert result["next_start"] == 3
+
+    def test_pagination_exhausted_before_limit(self, pages_mixin):
+        """Test has_more=False when all pages fetched before hitting limit."""
+        batch = [
+            {
+                "id": "1",
+                "title": "Only Page",
+                "ancestors": [],
+                "extensions": {"position": 0},
+            }
+        ]
+        pages_mixin.confluence.get_all_pages_from_space_raw = MagicMock(
+            return_value=self._raw_response(batch)  # no next link
+        )
+
+        result = pages_mixin.get_space_page_tree("TEST", limit=500)
+
+        assert result["total_pages"] == 1
+        assert result["has_more"] is False
+        assert "next_start" not in result
+
+    def test_pagination_stops_on_empty_batch(self, pages_mixin):
+        """Test that pagination terminates when API returns empty results."""
+        batch1 = [
+            {
+                "id": "1",
+                "title": "Page 1",
+                "ancestors": [],
+                "extensions": {"position": 0},
+            }
+        ]
+        pages_mixin.confluence.get_all_pages_from_space_raw = MagicMock(
+            side_effect=[
+                self._raw_response(batch1, next_link="/rest/api/content?start=1"),
+                self._raw_response([]),  # empty batch
+            ]
+        )
+
+        result = pages_mixin.get_space_page_tree("TEST", limit=500)
+
+        assert result["total_pages"] == 1
+        assert result["has_more"] is False
+
+    def test_pagination_api_cap_smaller_than_limit(self, pages_mixin):
+        """Test correct pagination when API caps below requested limit.
+
+        Simulates Confluence's ~200 result server-side cap: even though
+        we request more, each batch returns at most the cap amount.
+        """
+        # Simulate: limit=500, API caps at 3 per batch, space has 7 pages
+        batches = [
+            [
+                {
+                    "id": str(i),
+                    "title": f"Page {i}",
+                    "ancestors": [],
+                    "extensions": {"position": i},
+                }
+                for i in range(0, 3)
+            ],
+            [
+                {
+                    "id": str(i),
+                    "title": f"Page {i}",
+                    "ancestors": [],
+                    "extensions": {"position": i},
+                }
+                for i in range(3, 6)
+            ],
+            [
+                {
+                    "id": "6",
+                    "title": "Page 6",
+                    "ancestors": [],
+                    "extensions": {"position": 6},
+                }
+            ],
+        ]
+        pages_mixin.confluence.get_all_pages_from_space_raw = MagicMock(
+            side_effect=[
+                self._raw_response(batches[0], next_link="/rest/api/content?start=3"),
+                self._raw_response(batches[1], next_link="/rest/api/content?start=6"),
+                self._raw_response(batches[2]),  # last batch, no next
+            ]
+        )
+
+        result = pages_mixin.get_space_page_tree("TEST", limit=500)
+
+        assert result["total_pages"] == 7
+        assert result["has_more"] is False
+        assert pages_mixin.confluence.get_all_pages_from_space_raw.call_count == 3
+
+    def test_pagination_missing_links_treated_as_last_page(self, pages_mixin):
+        """Test that missing _links in response is treated as no more pages."""
+        batch = [
+            {
+                "id": "1",
+                "title": "Page 1",
+                "ancestors": [],
+                "extensions": {"position": 0},
+            }
+        ]
+        # Response has no _links key at all
+        pages_mixin.confluence.get_all_pages_from_space_raw = MagicMock(
+            return_value={"results": batch}
+        )
+
+        result = pages_mixin.get_space_page_tree("TEST", limit=500)
+
+        assert result["total_pages"] == 1
+        assert result["has_more"] is False
+
+    def test_expand_uses_ancestors_only(self, pages_mixin):
+        """Test that the API call uses only 'ancestors' expand parameter."""
+        pages_mixin.confluence.get_all_pages_from_space_raw = MagicMock(
+            return_value=self._raw_response([])
+        )
+
+        pages_mixin.get_space_page_tree("TEST")
+
+        call_kwargs = pages_mixin.confluence.get_all_pages_from_space_raw.call_args
+        assert call_kwargs.kwargs.get("expand") == "ancestors"
+
+    def test_pagination_limit_one(self, pages_mixin):
+        """Test degenerate limit=1 boundary case."""
+        batch = [
+            {
+                "id": "1",
+                "title": "Page 1",
+                "ancestors": [],
+                "extensions": {"position": 0},
+            }
+        ]
+        pages_mixin.confluence.get_all_pages_from_space_raw = MagicMock(
+            return_value=self._raw_response(
+                batch, next_link="/rest/api/content?start=1"
+            )
+        )
+
+        result = pages_mixin.get_space_page_tree("TEST", limit=1)
+
+        assert result["total_pages"] == 1
+        assert result["has_more"] is True
+        assert result["next_start"] == 1
+        # Should request exactly 1 page
+        call_kwargs = pages_mixin.confluence.get_all_pages_from_space_raw.call_args
+        assert call_kwargs.kwargs["limit"] == 1
+
+    def test_pagination_links_without_next_key(self, pages_mixin):
+        """Test response where _links exists but next is absent."""
+        batch = [
+            {
+                "id": "1",
+                "title": "Page 1",
+                "ancestors": [],
+                "extensions": {"position": 0},
+            }
+        ]
+        # _links present with 'self' but no 'next'
+        pages_mixin.confluence.get_all_pages_from_space_raw = MagicMock(
+            return_value={
+                "results": batch,
+                "_links": {"self": "/rest/api/content?spaceKey=TEST"},
+            }
+        )
+
+        result = pages_mixin.get_space_page_tree("TEST", limit=500)
+
+        assert result["total_pages"] == 1
+        assert result["has_more"] is False
+
+
+class TestUpdatePageSection:
+    """Tests for PagesMixin.update_page_section."""
+
+    @pytest.fixture
+    def pages_mixin(self, confluence_client):
+        """Create a PagesMixin instance for testing."""
+        with patch(
+            "mcp_atlassian.confluence.pages.ConfluenceClient.__init__"
+        ) as mock_init:
+            mock_init.return_value = None
+            mixin = PagesMixin()
+            mixin.confluence = confluence_client.confluence
+            mixin.config = confluence_client.config
+            mixin.preprocessor = confluence_client.preprocessor
+            return mixin
+
+    def _make_page(self, page_id: str, title: str, storage_html: str) -> ConfluencePage:
+        return ConfluencePage(
+            id=page_id,
+            title=title,
+            content=storage_html,
+            space={"key": "PROJ", "name": "Project"},
+            version={"number": 1},
+        )
+
+    def test_replaces_section_content(self, pages_mixin):
+        """Section body is replaced; heading and surrounding content are kept."""
+        storage = (
+            "<h1>Intro</h1><p>intro text</p>"
+            "<h2>Target Section</h2><p>old content</p>"
+            "<h2>Another Section</h2><p>other content</p>"
+        )
+        raw_page = self._make_page("123", "My Page", storage)
+        updated_page = self._make_page("123", "My Page", "updated")
+
+        pages_mixin.preprocessor.markdown_to_confluence_storage.return_value = (
+            "<p>new content</p>"
+        )
+
+        with (
+            patch.object(pages_mixin, "get_page_content", return_value=raw_page),
+            patch.object(
+                pages_mixin, "update_page", return_value=updated_page
+            ) as mock_update,
+        ):
+            result = pages_mixin.update_page_section(
+                page_id="123",
+                heading_text="Target Section",
+                new_content="new content",
+            )
+
+        assert result is updated_page
+        call_body: str = mock_update.call_args.kwargs["body"]
+        # Heading preserved
+        assert "<h2>Target Section</h2>" in call_body
+        # New content inserted
+        assert "<p>new content</p>" in call_body
+        # Old content removed
+        assert "old content" not in call_body
+        # Sibling section untouched
+        assert "<h2>Another Section</h2>" in call_body
+        assert "<p>other content</p>" in call_body
+        # Written back as storage format
+        assert mock_update.call_args.kwargs["is_markdown"] is False
+        assert mock_update.call_args.kwargs["content_representation"] == "storage"
+
+    def test_stops_at_same_level_heading(self, pages_mixin):
+        """Content replacement stops at the next heading of the same level."""
+        storage = (
+            "<h2>Section A</h2><p>a content</p>"
+            "<h2>Section B</h2><p>b content</p><h3>Sub</h3><p>sub</p>"
+            "<h2>Section C</h2><p>c content</p>"
+        )
+        raw_page = self._make_page("1", "P", storage)
+        updated_page = self._make_page("1", "P", "")
+
+        pages_mixin.preprocessor.markdown_to_confluence_storage.return_value = (
+            "<p>new b</p>"
+        )
+
+        with (
+            patch.object(pages_mixin, "get_page_content", return_value=raw_page),
+            patch.object(
+                pages_mixin, "update_page", return_value=updated_page
+            ) as mock_update,
+        ):
+            pages_mixin.update_page_section("1", "Section B", "new b")
+
+        body: str = mock_update.call_args.kwargs["body"]
+        assert "b content" not in body
+        assert "<p>new b</p>" in body
+        # Section C must be intact
+        assert "<h2>Section C</h2>" in body
+        assert "<p>c content</p>" in body
+        # Section A must be intact
+        assert "<h2>Section A</h2>" in body
+        assert "<p>a content</p>" in body
+
+    def test_heading_not_found_raises(self, pages_mixin):
+        """ValueError is raised when heading text does not exist on the page."""
+        raw_page = self._make_page("1", "P", "<h2>Existing</h2><p>content</p>")
+
+        with patch.object(pages_mixin, "get_page_content", return_value=raw_page):
+            with pytest.raises(ValueError, match="not found in page"):
+                pages_mixin.update_page_section("1", "Nonexistent Heading", "data")
+
+    def test_invalid_content_format_raises(self, pages_mixin):
+        """ValueError is raised for unsupported content_format values."""
+        with pytest.raises(ValueError, match="Invalid content_format"):
+            pages_mixin.update_page_section(
+                "1", "Heading", "content", content_format="wiki"
+            )
+
+    def test_macros_outside_section_preserved(self, pages_mixin):
+        """Confluence macros outside the target section survive the update."""
+        macro = (
+            '<ac:structured-macro ac:name="toc">'
+            '<ac:parameter ac:name="maxLevel">3</ac:parameter>'
+            "</ac:structured-macro>"
+        )
+        storage = f"{macro}<h2>Section</h2><p>old</p><h2>Other</h2><p>other</p>"
+        raw_page = self._make_page("1", "P", storage)
+        updated_page = self._make_page("1", "P", "")
+
+        pages_mixin.preprocessor.markdown_to_confluence_storage.return_value = (
+            "<p>new</p>"
+        )
+
+        with (
+            patch.object(pages_mixin, "get_page_content", return_value=raw_page),
+            patch.object(
+                pages_mixin, "update_page", return_value=updated_page
+            ) as mock_update,
+        ):
+            pages_mixin.update_page_section("1", "Section", "new")
+
+        body: str = mock_update.call_args.kwargs["body"]
+        assert 'ac:name="toc"' in body
+
+    def test_storage_format_content_not_converted(self, pages_mixin):
+        """Storage content is inserted without markdown conversion."""
+        raw_page = self._make_page("1", "P", "<h2>Section</h2><p>old</p>")
+        updated_page = self._make_page("1", "P", "")
+
+        with (
+            patch.object(pages_mixin, "get_page_content", return_value=raw_page),
+            patch.object(pages_mixin, "update_page", return_value=updated_page),
+        ):
+            pages_mixin.update_page_section(
+                "1",
+                "Section",
+                "<p>raw storage</p>",
+                content_format="storage",
+            )
+
+        pages_mixin.preprocessor.markdown_to_confluence_storage.assert_not_called()

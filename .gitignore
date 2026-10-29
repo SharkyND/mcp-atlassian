@@ -29,6 +29,7 @@ MANIFEST
 # Environments
 .env
 .env.*
+!tests/e2e/docker/.env.example
 .venv
 env/
 venv/
@@ -74,7 +75,8 @@ playground/
 .cursor*
 
 # Claude
-.claude/
+.claude/worktrees/
+.claude/settings.local.json
 
-# Snyk Security Extension - AI Rules (auto-generated)
-.cursor/rules/snyk_rules.mdc
+# Dev docs (local task documents)
+dev/

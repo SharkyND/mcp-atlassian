@@ -3,7 +3,7 @@ name: mcp-atlassian
 description: A Helm chart for deploying MCP (Model Context Protocol) Atlassian server for Jira and Confluence integration
 type: application
 version: 0.1.0
-appVersion: "latest"
+appVersion: "0.23.1-puratos.1"
 
 home: https://github.com/SharkyND/mcp-atlassian
 sources:

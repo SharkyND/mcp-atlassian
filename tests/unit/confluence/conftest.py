@@ -7,27 +7,24 @@ framework to provide efficient, reusable test fixtures with session-scoped cachi
 """
 
 import os
-import sys
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-# Add the root tests directory to PYTHONPATH
-sys.path.append(str(Path(__file__).parent.parent.parent))
-
-from fixtures.confluence_mocks import (
+from mcp_atlassian.confluence.client import ConfluenceClient
+from mcp_atlassian.confluence.config import ConfluenceConfig
+from mcp_atlassian.utils.oauth import OAuthConfig
+from tests.fixtures.confluence_mocks import (
     MOCK_COMMENTS_RESPONSE,
+    MOCK_CONFLUENCE_CONTENT_TYPES,
+    MOCK_CONFLUENCE_MACROS,
+    MOCK_CONFLUENCE_SPACES,
     MOCK_CQL_SEARCH_RESPONSE,
     MOCK_LABELS_RESPONSE,
     MOCK_PAGE_RESPONSE,
     MOCK_PAGES_FROM_SPACE_RESPONSE,
     MOCK_SPACES_RESPONSE,
 )
-
-from mcp_atlassian.confluence.client import ConfluenceClient
-from mcp_atlassian.confluence.config import ConfluenceConfig
-from mcp_atlassian.utils.oauth import OAuthConfig
 from tests.utils.factories import AuthConfigFactory, ConfluencePageFactory
 from tests.utils.mocks import MockAtlassianClient, MockPreprocessor
 
@@ -47,44 +44,7 @@ def session_confluence_spaces():
     Returns:
         List[Dict[str, Any]]: Complete Confluence space definitions
     """
-    return [
-        {
-            "id": 12345,
-            "key": "TEST",
-            "name": "Test Space",
-            "type": "global",
-            "status": "current",
-            "description": {"plain": {"value": "Test space for unit tests"}},
-            "_links": {
-                "webui": "/spaces/TEST",
-                "self": "https://test.atlassian.net/wiki/rest/api/space/TEST",
-            },
-        },
-        {
-            "id": 12346,
-            "key": "DEMO",
-            "name": "Demo Space",
-            "type": "global",
-            "status": "current",
-            "description": {"plain": {"value": "Demo space for testing"}},
-            "_links": {
-                "webui": "/spaces/DEMO",
-                "self": "https://test.atlassian.net/wiki/rest/api/space/DEMO",
-            },
-        },
-        {
-            "id": 12347,
-            "key": "SAMPLE",
-            "name": "Sample Space",
-            "type": "personal",
-            "status": "current",
-            "description": {"plain": {"value": "Sample personal space"}},
-            "_links": {
-                "webui": "/spaces/SAMPLE",
-                "self": "https://test.atlassian.net/wiki/rest/api/space/SAMPLE",
-            },
-        },
-    ]
+    return MOCK_CONFLUENCE_SPACES
 
 
 @pytest.fixture(scope="session")
@@ -95,14 +55,7 @@ def session_confluence_content_types():
     Returns:
         List[Dict[str, Any]]: Mock Confluence content type data
     """
-    return [
-        {"name": "page", "type": "content"},
-        {"name": "blogpost", "type": "content"},
-        {"name": "comment", "type": "content"},
-        {"name": "attachment", "type": "content"},
-        {"name": "space", "type": "space"},
-        {"name": "user", "type": "user"},
-    ]
+    return MOCK_CONFLUENCE_CONTENT_TYPES
 
 
 @pytest.fixture(scope="session")
@@ -113,18 +66,7 @@ def session_confluence_macros():
     Returns:
         List[Dict[str, Any]]: Mock Confluence macro data
     """
-    return [
-        {"name": "info", "hasBody": True, "bodyType": "rich-text"},
-        {"name": "warning", "hasBody": True, "bodyType": "rich-text"},
-        {"name": "note", "hasBody": True, "bodyType": "rich-text"},
-        {"name": "tip", "hasBody": True, "bodyType": "rich-text"},
-        {"name": "code", "hasBody": True, "bodyType": "plain-text"},
-        {"name": "toc", "hasBody": False},
-        {"name": "children", "hasBody": False},
-        {"name": "excerpt", "hasBody": True, "bodyType": "rich-text"},
-        {"name": "include", "hasBody": False},
-        {"name": "panel", "hasBody": True, "bodyType": "rich-text"},
-    ]
+    return MOCK_CONFLUENCE_MACROS
 
 
 # ============================================================================
@@ -176,25 +118,6 @@ def mock_config(confluence_config_factory):
 # ============================================================================
 # Environment Fixtures
 # ============================================================================
-
-
-@pytest.fixture
-def mock_env_vars():
-    """
-    Mock environment variables for testing.
-
-    Note: This fixture is maintained for backward compatibility.
-    Consider using the environment fixtures from root conftest.py.
-    """
-    with patch.dict(
-        "os.environ",
-        {
-            "CONFLUENCE_URL": "https://example.atlassian.net/wiki",
-            "CONFLUENCE_USERNAME": "test_user",
-            "CONFLUENCE_API_TOKEN": "test_token",
-        },
-    ):
-        yield
 
 
 @pytest.fixture
@@ -508,6 +431,34 @@ def confluence_client(mock_config, mock_atlassian_confluence, mock_preprocessor)
         # Replace the actual preprocessor with our mock
         client.preprocessor = mock_preprocessor
         yield client
+
+
+@pytest.fixture
+def confluence_fetcher(mock_config, mock_atlassian_confluence, mock_preprocessor):
+    """
+    Create a ConfluenceFetcher instance with mocked dependencies.
+
+    Args:
+        mock_config: Mock configuration
+        mock_atlassian_confluence: Mock Atlassian client
+        mock_preprocessor: Mock text preprocessor
+
+    Returns:
+        ConfluenceFetcher: Configured fetcher instance
+    """
+    from mcp_atlassian.confluence import ConfluenceFetcher
+
+    with patch(
+        "mcp_atlassian.preprocessing.TextPreprocessor"
+    ) as mock_text_preprocessor:
+        mock_text_preprocessor.return_value = mock_preprocessor
+
+        fetcher = ConfluenceFetcher(config=mock_config)
+        # Replace the actual Confluence instance with our mock
+        fetcher.confluence = mock_atlassian_confluence
+        # Replace the actual preprocessor with our mock
+        fetcher.preprocessor = mock_preprocessor
+        yield fetcher
 
 
 # ============================================================================

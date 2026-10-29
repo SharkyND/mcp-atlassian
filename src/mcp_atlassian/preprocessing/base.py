@@ -2,13 +2,65 @@
 
 import logging
 import re
+import urllib.parse
 import warnings
+from collections.abc import Callable
 from typing import Any, Protocol
 
 from bs4 import BeautifulSoup, Tag
 from markdownify import markdownify as md
 
 logger = logging.getLogger("mcp-atlassian")
+
+
+def _extract_blocks(
+    text: str,
+    pattern: str,
+    transform_fn: Callable[[re.Match[str]], str],
+    storage: list[str],
+    prefix: str,
+    flags: int = 0,
+) -> str:
+    """Extract blocks matching pattern, transform, store, and replace with placeholders.
+
+    Args:
+        text: Input text to process.
+        pattern: Regex pattern to match blocks.
+        transform_fn: Function to transform the match into the target format.
+        storage: List to store transformed blocks.
+        prefix: Placeholder prefix (e.g., "CODEBLOCK").
+        flags: Regex flags to pass to ``re.sub``.
+
+    Returns:
+        Text with blocks replaced by placeholders.
+    """
+
+    def _replacer(match: re.Match[str]) -> str:
+        transformed = transform_fn(match)
+        placeholder = f"\x00{prefix}{len(storage)}\x00"
+        storage.append(transformed)
+        return placeholder
+
+    return re.sub(pattern, _replacer, text, flags=flags)
+
+
+def _restore_blocks(text: str, storage: list[str], prefix: str) -> str:
+    """Restore blocks from placeholders.
+
+    Replaces in reverse order (highest index first) to avoid
+    index collisions when placeholder text contains digits.
+
+    Args:
+        text: Text with placeholders.
+        storage: List of stored blocks.
+        prefix: Placeholder prefix used during extraction.
+
+    Returns:
+        Text with placeholders replaced by stored blocks.
+    """
+    for i in range(len(storage) - 1, -1, -1):
+        text = text.replace(f"\x00{prefix}{i}\x00", storage[i])
+    return text
 
 
 class ConfluenceClient(Protocol):
@@ -20,6 +72,10 @@ class ConfluenceClient(Protocol):
 
     def get_user_details_by_username(self, username: str) -> dict[str, Any]:
         """Get user details by username (for Server/DC compatibility)."""
+        ...
+
+    def get_user_details_by_userkey(self, userkey: str) -> dict[str, Any]:
+        """Get user details by userkey (for Server/DC compatibility)."""
         ...
 
 
@@ -40,6 +96,8 @@ class BasePreprocessor:
         html_content: str,
         space_key: str = "",
         confluence_client: ConfluenceClient | None = None,
+        content_id: str = "",
+        attachments: list[dict[str, Any]] | None = None,
     ) -> tuple[str, str]:
         """
         Process HTML content to replace user refs and page links.
@@ -48,6 +106,10 @@ class BasePreprocessor:
             html_content: The HTML content to process
             space_key: Optional space key for context
             confluence_client: Optional Confluence client for user lookups
+            content_id: Optional page/content ID for attachment URL
+                construction
+            attachments: Optional list of attachment dicts from
+                Confluence API for URL lookup
 
         Returns:
             Tuple of (processed_html, processed_markdown)
@@ -60,6 +122,13 @@ class BasePreprocessor:
             self._process_user_mentions_in_soup(soup, confluence_client)
             self._process_user_profile_macros_in_soup(soup, confluence_client)
 
+            # Preserve Confluence date lozenges, whose value is stored only in
+            # the datetime attribute and would otherwise be dropped by markdownify.
+            self._process_date_elements_in_soup(soup)
+
+            # Process Confluence image tags
+            self._process_images_in_soup(soup, content_id, attachments)
+
             # Convert to string and markdown
             processed_html = str(soup)
             processed_markdown = md(processed_html)
@@ -70,11 +139,26 @@ class BasePreprocessor:
             logger.error(f"Error in process_html_content: {str(e)}")
             raise
 
+    @staticmethod
+    def _process_date_elements_in_soup(soup: BeautifulSoup) -> None:
+        """Expose Confluence date-lozenge values as element text."""
+        for date_element in soup.find_all("time"):
+            datetime_value = date_element.get("datetime")
+            if (
+                isinstance(datetime_value, str)
+                and datetime_value
+                and not date_element.get_text(strip=True)
+            ):
+                date_element.string = datetime_value
+
     def _process_user_mentions_in_soup(
         self, soup: BeautifulSoup, confluence_client: ConfluenceClient | None = None
     ) -> None:
         """
         Process user mentions in BeautifulSoup object.
+
+        Handles both Cloud (ri:account-id) and Server/DC (ri:userkey,
+        ri:username) user reference formats.
 
         Args:
             soup: BeautifulSoup object containing HTML
@@ -85,25 +169,26 @@ class BasePreprocessor:
 
         for user_element in user_mentions:
             user_ref = user_element.find("ri:user")
-            if user_ref and user_ref.get("ri:account-id"):
-                # Case 1: Direct user reference without link-body
-                account_id = user_ref.get("ri:account-id")
-                if isinstance(account_id, str):
-                    self._replace_user_mention(
-                        user_element, account_id, confluence_client
-                    )
-                    continue
+            if not user_ref:
+                continue
 
-            # Case 2: User reference with link-body containing @
-            link_body = user_element.find("ac:link-body")
-            if link_body and "@" in link_body.get_text(strip=True):
-                user_ref = user_element.find("ri:user")
-                if user_ref and user_ref.get("ri:account-id"):
-                    account_id = user_ref.get("ri:account-id")
-                    if isinstance(account_id, str):
-                        self._replace_user_mention(
-                            user_element, account_id, confluence_client
-                        )
+            account_id = user_ref.get("ri:account-id")
+            userkey = user_ref.get("ri:userkey")
+            username = user_ref.get("ri:username")
+
+            if account_id and isinstance(account_id, str):
+                # Cloud: use account-id
+                self._replace_user_mention(user_element, account_id, confluence_client)
+            elif userkey and isinstance(userkey, str):
+                # Server/DC: use userkey (internal key, needs /rest/api/user?key=)
+                self._replace_user_mention_by_userkey(
+                    user_element, userkey, confluence_client
+                )
+            elif username and isinstance(username, str):
+                # Server/DC fallback: use username
+                self._replace_user_mention_by_username(
+                    user_element, username, confluence_client
+                )
 
     def _process_user_profile_macros_in_soup(
         self, soup: BeautifulSoup, confluence_client: ConfluenceClient | None = None
@@ -140,8 +225,9 @@ class BasePreprocessor:
 
             account_id = user_ref.get("ri:account-id")
             userkey = user_ref.get("ri:userkey")  # Fallback for Confluence Server/DC
+            username = user_ref.get("ri:username")  # Fallback for older Server/DC
 
-            user_identifier_for_log = account_id or userkey
+            user_identifier_for_log = account_id or userkey or username
             display_name = None
 
             if confluence_client and user_identifier_for_log:
@@ -152,9 +238,15 @@ class BasePreprocessor:
                         )
                         display_name = user_details.get("displayName")
                     elif userkey and isinstance(userkey, str):
-                        # For Confluence Server/DC, userkey might be the username
-                        user_details = confluence_client.get_user_details_by_username(
+                        # For Confluence Server/DC, use userkey endpoint
+                        user_details = confluence_client.get_user_details_by_userkey(
                             userkey
+                        )
+                        display_name = user_details.get("displayName")
+                    elif username and isinstance(username, str):
+                        # For older Confluence Server/DC, use username endpoint
+                        user_details = confluence_client.get_user_details_by_username(
+                            username
                         )
                         display_name = user_details.get("displayName")
                 except Exception as e:
@@ -223,8 +315,178 @@ class BasePreprocessor:
         new_text = f"@user_{account_id}"
         user_element.replace_with(new_text)
 
+    def _replace_user_mention_by_userkey(
+        self,
+        user_element: Tag,
+        userkey: str,
+        confluence_client: ConfluenceClient | None = None,
+    ) -> None:
+        """
+        Replace a user mention using userkey (Server/DC).
+
+        Uses the /rest/api/user?key= endpoint to resolve the display name.
+
+        Args:
+            user_element: The HTML element containing the user mention
+            userkey: The user's internal userkey
+            confluence_client: Optional Confluence client for user lookups
+        """
+        try:
+            if confluence_client is not None:
+                user_details = confluence_client.get_user_details_by_userkey(userkey)
+                display_name = user_details.get("displayName", "")
+                if display_name:
+                    user_element.replace_with(f"@{display_name}")
+                    return
+            user_element.replace_with(f"@user_{userkey}")
+        except Exception as e:
+            logger.warning(f"Error processing user mention by userkey: {str(e)}")
+            user_element.replace_with(f"@user_{userkey}")
+
+    def _replace_user_mention_by_username(
+        self,
+        user_element: Tag,
+        username: str,
+        confluence_client: ConfluenceClient | None = None,
+    ) -> None:
+        """
+        Replace a user mention using username/userkey (Server/DC).
+
+        Args:
+            user_element: The HTML element containing the user mention
+            username: The user's username or userkey
+            confluence_client: Optional Confluence client for user lookups
+        """
+        try:
+            if confluence_client is not None:
+                user_details = confluence_client.get_user_details_by_username(username)
+                display_name = user_details.get("displayName", "")
+                if display_name:
+                    user_element.replace_with(f"@{display_name}")
+                    return
+            # Fallback: use the username directly
+            user_element.replace_with(f"@{username}")
+        except Exception as e:
+            logger.warning(f"Error processing user mention by username: {str(e)}")
+            user_element.replace_with(f"@{username}")
+
+    def _find_attachment_url(
+        self,
+        filename: str,
+        attachments: list[dict[str, Any]] | None,
+    ) -> str | None:
+        """Find an attachment's download URL by filename.
+
+        Args:
+            filename: The attachment filename to look up
+            attachments: List of attachment dicts from Confluence API
+
+        Returns:
+            The download URL if found, None otherwise
+        """
+        if not attachments:
+            return None
+        for att in attachments:
+            if att.get("title") == filename:
+                download = att.get("_links", {}).get("download")
+                if download:
+                    return str(download)
+        return None
+
+    def _process_images_in_soup(
+        self,
+        soup: BeautifulSoup,
+        content_id: str = "",
+        attachments: list[dict[str, Any]] | None = None,
+    ) -> None:
+        """Convert Confluence ac:image tags to standard HTML img tags.
+
+        Args:
+            soup: BeautifulSoup object containing HTML
+            content_id: Optional page/content ID for fallback URL
+            attachments: Optional attachment list for URL lookup
+        """
+        for ac_image in soup.find_all("ac:image"):
+            src = ""
+            alt = ""
+
+            # Case 1: ri:attachment (file attached to the page)
+            ri_att = ac_image.find("ri:attachment")
+            if ri_att:
+                filename = ri_att.get("ri:filename", "")
+                alt = filename
+
+                # Check if this references a different page
+                is_cross_page = ri_att.find("ri:page") is not None
+
+                # Try attachment list lookup first
+                url = self._find_attachment_url(filename, attachments)
+                if url:
+                    # Prepend base_url if relative path
+                    if url.startswith("/") and self.base_url:
+                        src = f"{self.base_url}{url}"
+                    else:
+                        src = url
+                elif content_id and not is_cross_page:
+                    encoded = urllib.parse.quote(filename, safe="")
+                    src = f"{self.base_url}/download/attachments/{content_id}/{encoded}"
+                else:
+                    src = filename
+            else:
+                # Case 2: ri:url (external URL)
+                ri_url = ac_image.find("ri:url")
+                if ri_url:
+                    src = ri_url.get("ri:value", "")
+                    # Extract filename from URL path for alt text
+                    path = urllib.parse.urlparse(src).path
+                    alt = path.rsplit("/", 1)[-1] if "/" in path else src
+                else:
+                    # Unknown inner element
+                    logger.warning(
+                        "ac:image tag with unsupported child: %s",
+                        ac_image,
+                    )
+                    ac_image.replace_with("[unsupported image]")
+                    continue
+
+            # Build a standard <img> tag
+            img_tag = soup.new_tag("img", src=src, alt=alt)
+
+            # Preserve dimension attributes
+            width = ac_image.get("ac:width")
+            if width:
+                img_tag["width"] = width
+            height = ac_image.get("ac:height")
+            if height:
+                img_tag["height"] = height
+
+            ac_image.replace_with(img_tag)
+
     def _convert_html_to_markdown(self, text: str) -> str:
-        """Convert HTML content to markdown if needed."""
+        """Convert HTML content to markdown if needed.
+
+        Protects markdown code spans (fenced and inline) from being
+        interpreted as HTML by BeautifulSoup before conversion.
+        """
+        # Protect fenced code blocks and inline code from HTML parsing
+        code_blocks: list[str] = []
+        inline_codes: list[str] = []
+
+        text = _extract_blocks(
+            text,
+            r"```[^\n]*\n[\s\S]*?\n```",
+            lambda m: m.group(0),
+            code_blocks,
+            "HTMLCVTBLOCK",
+        )
+        text = _extract_blocks(
+            text,
+            r"`[^`]+`",
+            lambda m: m.group(0),
+            inline_codes,
+            "HTMLCVTINLINE",
+        )
+
         if re.search(r"<[^>]+>", text):
             try:
                 with warnings.catch_warnings():
@@ -234,4 +496,8 @@ class BasePreprocessor:
                     text = md(html)
             except Exception as e:
                 logger.warning(f"Error converting HTML to markdown: {str(e)}")
+
+        # Restore in reverse order: inline first, then blocks
+        text = _restore_blocks(text, inline_codes, "HTMLCVTINLINE")
+        text = _restore_blocks(text, code_blocks, "HTMLCVTBLOCK")
         return text

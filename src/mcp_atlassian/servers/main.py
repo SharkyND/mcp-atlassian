@@ -1,84 +1,155 @@
 """Main FastMCP server setup for Atlassian integration."""
 
+import base64
 import json
 import logging
 import os
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any, Literal, Optional
+from urllib.parse import urlparse
 
-from cachetools import TTLCache
-from fastmcp import FastMCP, settings
+from fastmcp import FastMCP
+from fastmcp import settings as fastmcp_settings
+from fastmcp.exceptions import NotFoundError
+from fastmcp.server.dependencies import get_http_request
+from fastmcp.server.event_store import EventStore
+from fastmcp.server.http import StarletteWithLifespan
 from fastmcp.tools import Tool as FastMCPTool
 from mcp.types import Tool as MCPTool
-from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
-from starlette.routing import Route
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from mcp_atlassian.bitbucket import BitbucketFetcher
 from mcp_atlassian.bitbucket.config import BitbucketConfig
-from mcp_atlassian.confluence import ConfluenceFetcher
 from mcp_atlassian.confluence.config import ConfluenceConfig
-from mcp_atlassian.jira import JiraFetcher
 from mcp_atlassian.jira.config import JiraConfig
+from mcp_atlassian.utils.env import is_env_truthy
 from mcp_atlassian.utils.environment import get_available_services
-from mcp_atlassian.utils.io import (
-    get_cli_read_only_flag,
-    get_env_read_only_flag,
-    resolve_read_only_mode,
-)
+from mcp_atlassian.utils.io import is_read_only_mode
 from mcp_atlassian.utils.logging import mask_sensitive
+from mcp_atlassian.utils.oauth import (
+    CLOUD_AUTHORIZE_URL,
+    CLOUD_TOKEN_URL,
+    DC_AUTHORIZE_PATH,
+    DC_TOKEN_PATH,
+)
 from mcp_atlassian.utils.prometheus_metrics import get_metrics, initialize_metrics
+from mcp_atlassian.utils.token_verifier import AtlassianOpaqueTokenVerifier
 from mcp_atlassian.utils.tools import get_enabled_tools, should_include_tool
+from mcp_atlassian.utils.toolsets import (
+    get_enabled_toolsets,
+    should_include_tool_by_toolset,
+)
+from mcp_atlassian.utils.urls import is_atlassian_cloud_url, validate_url_for_ssrf
 
 from .bitbucket import bitbucket_mcp
+from .client_storage import build_oauth_client_storage_from_env
 from .confluence import confluence_mcp
 from .context import MainAppContext
+from .error_handling import ErrorPreservingFastMCP
 from .jira import jira_mcp
+from .oauth_proxy import HardenedOAuthProxy, parse_env_list
 
 logger = logging.getLogger("mcp-atlassian.server.main")
 
-# Initialize metrics immediately when module is loaded
-pod_name = os.environ.get("POD_NAME")
-initialize_metrics(pod_name)
-logger.info(f"Metrics collection initialized for pod: {pod_name}")
+DEFAULT_HOST = "0.0.0.0"  # noqa: S104
+DEFAULT_ALLOWED_REDIRECT_URIS = [
+    "http://localhost:*",
+    "http://127.0.0.1:*",
+    "https://chatgpt.com/connector_platform_oauth_redirect",
+    "https://chat.openai.com/connector_platform_oauth_redirect",
+]
+DEFAULT_ALLOWED_GRANT_TYPES = ["authorization_code", "refresh_token"]
+OAUTH_PROXY_ENABLE_ENV = "ATLASSIAN_OAUTH_PROXY_ENABLE"
 
 
-async def health_check() -> JSONResponse:
+def _sanitize_schema_for_compatibility(tool: MCPTool) -> MCPTool:
+    """Sanitize tool inputSchema for AI platform compatibility.
+
+    Collapses simple nullable ``anyOf`` unions that Pydantic v2 generates
+    for ``T | None`` into a plain ``{"type": T}`` property.  This fixes
+    Vertex AI / Google ADK rejecting ``anyOf`` alongside ``default`` or
+    ``description`` fields (issues #640, #733).
+
+    The transform is intentionally conservative — it only flattens nullable
+    unions with exactly one non-null branch so that complex multi-type schemas
+    are left untouched. FastMCP/Pydantic can emit nested nullable unions on
+    Python 3.10, so nullable branches are resolved recursively.
+
+    Note: Only top-level ``properties`` are processed.  Nested schemas
+    (e.g. ``items`` of arrays or ``properties`` of sub-objects) are not
+    walked.  This is sufficient for current tool definitions; extend if
+    nested ``anyOf`` patterns appear in the future.
+
+    Args:
+        tool: The MCP tool whose inputSchema will be sanitized in-place.
+
+    Returns:
+        The same MCPTool instance (mutated) for chaining convenience.
+    """
+    schema = tool.inputSchema
+    if not schema or not isinstance(schema, dict):
+        return tool
+
+    properties = schema.get("properties")
+    if not properties or not isinstance(properties, dict):
+        return tool
+
+    def resolve_nullable_schema(schema_def: dict[str, Any]) -> dict[str, Any] | None:
+        any_of = schema_def.get("anyOf")
+        if not any_of or not isinstance(any_of, list):
+            return None
+
+        # Only flatten nullable unions with exactly one non-null branch.
+        non_null = [v for v in any_of if v != {"type": "null"}]
+        null_present = any(v == {"type": "null"} for v in any_of)
+        if not null_present or len(non_null) != 1 or not isinstance(non_null[0], dict):
+            return None
+
+        candidate = non_null[0]
+        nested = resolve_nullable_schema(candidate)
+        resolved = nested if nested is not None else candidate
+        if "type" not in resolved:
+            return None
+
+        return {key: value for key, value in resolved.items() if key != "anyOf"}
+
+    for _prop_name, prop_def in properties.items():
+        if not isinstance(prop_def, dict):
+            continue
+
+        resolved_schema = resolve_nullable_schema(prop_def)
+        if resolved_schema is None:
+            continue
+
+        # Collapse: pull the real schema up, drop anyOf, and preserve outer
+        # metadata such as description/default when both levels provide it.
+        prop_def.pop("anyOf")
+        for key, value in resolved_schema.items():
+            if key in {"default", "description"} and key in prop_def:
+                continue
+            prop_def[key] = value
+
+    return tool
+
+
+async def health_check(request: Request) -> JSONResponse:
     return JSONResponse({"status": "ok"})
 
 
-async def metrics_endpoint(request: Request) -> Response:
-    """Prometheus metrics endpoint for scraping."""
-    metrics_collector = get_metrics()
-    logger.debug(
-        f"Metrics endpoint called. Collector: {metrics_collector}, Enabled: {metrics_collector.is_enabled if metrics_collector else 'N/A'}"
-    )
-    if not metrics_collector or not metrics_collector.is_enabled:
-        return Response(
-            "# Metrics collection not enabled\n",
-            media_type="text/plain",
-            status_code=503,
-        )
-
-    content, content_type = metrics_collector.generate_metrics()
-    return Response(content, media_type=content_type)
-
-
 @asynccontextmanager
-async def main_lifespan(app: FastMCP[MainAppContext]) -> AsyncIterator[dict]:
+async def main_lifespan(app: FastMCP[MainAppContext]) -> AsyncIterator[dict[str, Any]]:
     logger.info("Main Atlassian MCP server lifespan starting...")
+    initialize_metrics()
     services = get_available_services()
-    cli_read_only = get_cli_read_only_flag()
-    env_read_only = get_env_read_only_flag()
-    read_only = resolve_read_only_mode(cli_read_only, env_read_only, None)
+    read_only = is_read_only_mode()
     enabled_tools = get_enabled_tools()
+    enabled_toolsets = get_enabled_toolsets()
 
     loaded_jira_config: JiraConfig | None = None
     loaded_confluence_config: ConfluenceConfig | None = None
-    loaded_bitbucket_config: BitbucketConfig | None = None
 
     if services.get("jira"):
         try:
@@ -90,8 +161,7 @@ async def main_lifespan(app: FastMCP[MainAppContext]) -> AsyncIterator[dict]:
                 )
             else:
                 logger.warning(
-                    "Jira URL found, but authentication is not fully configured. "
-                    "Jira tools will be unavailable."
+                    "Jira URL found, but authentication is not fully configured. Jira tools will be unavailable."
                 )
         except Exception as e:
             logger.error(f"Failed to load Jira configuration: {e}", exc_info=True)
@@ -106,38 +176,31 @@ async def main_lifespan(app: FastMCP[MainAppContext]) -> AsyncIterator[dict]:
                 )
             else:
                 logger.warning(
-                    "Confluence URL found, but authentication is not fully configured. "
-                    "Confluence tools will be unavailable."
+                    "Confluence URL found, but authentication is not fully configured. Confluence tools will be unavailable."
                 )
         except Exception as e:
             logger.error(f"Failed to load Confluence configuration: {e}", exc_info=True)
 
+    loaded_bitbucket_config: BitbucketConfig | None = None
     if services.get("bitbucket"):
         try:
-            bitbucket_config = BitbucketConfig.from_env()
-            loaded_bitbucket_config = bitbucket_config
-            logger.info(
-                "Bitbucket configuration loaded and authentication is configured."
-            )
-        except Exception as e:
-            logger.error(f"Failed to load Bitbucket configuration: {e}", exc_info=True)
+            config = BitbucketConfig.from_env()
+            if config.is_auth_configured():
+                loaded_bitbucket_config = config
+        except (ValueError, TypeError):
+            logger.warning("Bitbucket configuration is unavailable")
 
     app_context = MainAppContext(
         full_jira_config=loaded_jira_config,
         full_confluence_config=loaded_confluence_config,
         full_bitbucket_config=loaded_bitbucket_config,
         read_only=read_only,
-        cli_read_only=cli_read_only,
-        env_read_only=env_read_only,
         enabled_tools=enabled_tools,
+        enabled_toolsets=enabled_toolsets,
     )
-    logger.info(
-        "Read-only mode resolved: %s (cli=%s, env=%s)",
-        "ENABLED" if read_only else "DISABLED",
-        cli_read_only,
-        env_read_only,
-    )
+    logger.info(f"Read-only mode: {'ENABLED' if read_only else 'DISABLED'}")
     logger.info(f"Enabled tools filter: {enabled_tools or 'All tools enabled'}")
+    logger.info(f"Enabled toolsets filter: {sorted(enabled_toolsets)}")
 
     try:
         yield {"app_lifespan_context": app_context}
@@ -153,643 +216,319 @@ async def main_lifespan(app: FastMCP[MainAppContext]) -> AsyncIterator[dict]:
                 logger.debug("Cleaning up Jira resources...")
             if loaded_confluence_config:
                 logger.debug("Cleaning up Confluence resources...")
-            if loaded_bitbucket_config:
-                logger.debug("Cleaning up Bitbucket resources...")
         except Exception as e:
             logger.error(f"Error during cleanup: {e}", exc_info=True)
         logger.info("Main Atlassian MCP server lifespan shutdown complete.")
 
 
-class AtlassianMCP(FastMCP[MainAppContext]):
+class AtlassianMCP(ErrorPreservingFastMCP[MainAppContext]):
     """Custom FastMCP server class for Atlassian integration with tool filtering."""
 
-    async def _mcp_list_tools(self) -> list[MCPTool]:
-        # Filter tools based on enabled_tools, read_only mode, and service configuration
-        # from the lifespan context.
+    _active_streamable_http_path: str | None = None
+
+    @staticmethod
+    def _normalize_http_path(path: str) -> str:
+        normalized_path = path.strip()
+        if not normalized_path:
+            return "/"
+        if not normalized_path.startswith("/"):
+            normalized_path = f"/{normalized_path}"
+        normalized_path = normalized_path.rstrip("/")
+        return normalized_path or "/"
+
+    def get_streamable_http_path(self) -> str:
+        if self._active_streamable_http_path:
+            return self._active_streamable_http_path
+        return self._normalize_http_path(fastmcp_settings.streamable_http_path)
+
+    def _tool_filter_context(self) -> dict[str, Any] | None:
+        """Gather the per-request tool-enablement context (read-only mode, enabled
+        tools/toolsets, service availability) from the lifespan/request context.
+
+        Returns None when the lifespan context is unavailable.
+        """
         req_context = self._mcp_server.request_context
         if req_context is None or req_context.lifespan_context is None:
-            logger.warning(
-                "Lifespan context not available during _main_mcp_list_tools call."
-            )
-            return []
+            return None
 
-        lifespan_ctx = req_context.lifespan_context
-        if isinstance(lifespan_ctx, MainAppContext):
-            app_lifespan_state: MainAppContext | None = lifespan_ctx
-        elif isinstance(lifespan_ctx, dict):
-            app_lifespan_state = lifespan_ctx.get("app_lifespan_context")
-        else:
-            app_lifespan_state = None
+        lifespan_ctx_dict = req_context.lifespan_context
+        app_lifespan_state: MainAppContext | None = (
+            lifespan_ctx_dict.get("app_lifespan_context")
+            if isinstance(lifespan_ctx_dict, dict)
+            else None
+        )
+        read_only = (
+            getattr(app_lifespan_state, "read_only", False)
+            if app_lifespan_state
+            else False
+        )
         enabled_tools_filter = (
             getattr(app_lifespan_state, "enabled_tools", None)
             if app_lifespan_state
             else None
         )
-
-        base_read_only = (
-            getattr(app_lifespan_state, "read_only", None)
+        enabled_toolsets_filter: set[str] | None = (
+            getattr(app_lifespan_state, "enabled_toolsets", None)
             if app_lifespan_state
             else None
         )
 
-        if app_lifespan_state:
-            cli_read_only = getattr(app_lifespan_state, "cli_read_only", None)
-            env_read_only = getattr(app_lifespan_state, "env_read_only", None)
-        else:
-            cli_read_only = get_cli_read_only_flag()
-            env_read_only = get_env_read_only_flag()
-
-        header_read_only = None
         header_based_services = {"jira": False, "confluence": False, "bitbucket": False}
-        if hasattr(req_context, "request") and hasattr(req_context.request, "state"):
-            request_state = req_context.request.state
-            service_headers = getattr(request_state, "atlassian_service_headers", {})
-            header_read_only = getattr(request_state, "read_only_mode_header", None)
+        request = getattr(req_context, "request", None)
+        if request is not None:
+            service_headers = getattr(request.state, "atlassian_service_headers", {})
             if service_headers:
                 header_based_services = get_available_services(service_headers)
-                logger.debug(
-                    f"Header-based service availability: {header_based_services}"
-                )
 
-        effective_read_only = resolve_read_only_mode(
-            cli_read_only=cli_read_only,
-            env_read_only=env_read_only,
-            header_read_only=header_read_only,
-        )
+        return {
+            "read_only": read_only,
+            "enabled_tools_filter": enabled_tools_filter,
+            "enabled_toolsets_filter": enabled_toolsets_filter,
+            "app_lifespan_state": app_lifespan_state,
+            "header_based_services": header_based_services,
+        }
 
-        if (
-            header_read_only is None
-            and env_read_only is None
-            and cli_read_only is None
-            and base_read_only is not None
+    def _is_tool_authorized(
+        self, registered_name: str, tool_obj: FastMCPTool, ctx: dict[str, Any]
+    ) -> bool:
+        """Authorization boundaries enforced at BOTH listing and call time: the
+        ENABLED_TOOLS allowlist, the enabled toolsets, and read-only mode.
+
+        These are security boundaries — a tool excluded here must not be invocable
+        by name. (Service availability, below, is a listing-only UX filter: an
+        unavailable-service tool simply fails naturally if called.)
+        """
+        tool_tags = tool_obj.tags
+        if not should_include_tool_by_toolset(
+            tool_tags, ctx["enabled_toolsets_filter"]
         ):
-            effective_read_only = bool(base_read_only)
+            return False
+        if not should_include_tool(registered_name, ctx["enabled_tools_filter"]):
+            return False
+        if ctx["read_only"] and "write" in tool_tags:
+            return False
+        return True
 
-        logger.debug(
-            "_main_mcp_list_tools: base_read_only=%s, cli_read_only=%s, "
-            "env_read_only=%s, header_read_only=%s, effective_read_only=%s, "
-            "enabled_tools_filter=%s, header_services=%s",
-            base_read_only,
-            cli_read_only,
-            env_read_only,
-            header_read_only,
-            effective_read_only,
-            enabled_tools_filter,
-            header_based_services,
-        )
+    def _is_tool_enabled(
+        self, registered_name: str, tool_obj: FastMCPTool, ctx: dict[str, Any]
+    ) -> bool:
+        """Listing filter: the tool is authorized AND its backing service is
+        configured/available (the latter is a listing-only graceful-hide)."""
+        if not self._is_tool_authorized(registered_name, tool_obj, ctx):
+            return False
 
-        all_tools: dict[str, FastMCPTool] = await self.get_tools()
+        app_lifespan_state = ctx["app_lifespan_state"]
+        header_based_services = ctx["header_based_services"]
+        tool_tags = tool_obj.tags
+
+        for service in ("jira", "confluence", "bitbucket"):
+            if service not in tool_tags:
+                continue
+            available = header_based_services.get(service, False) or (
+                app_lifespan_state is not None
+                and getattr(app_lifespan_state, f"full_{service}_config", None)
+                is not None
+            )
+            if not available:
+                return False
+        return True
+
+    async def _list_tools_mcp(self) -> list[MCPTool]:
+        # Filter tools based on enabled_tools, read_only mode, and service configuration from the lifespan context.
+        ctx = self._tool_filter_context()
+        if ctx is None:
+            logger.warning(
+                "Lifespan context not available during _list_tools_mcp call."
+            )
+            return []
+
+        all_tools: list[FastMCPTool] = await self.list_tools()
         logger.debug(
             f"Aggregated {len(all_tools)} tools before filtering: "
-            f"{list(all_tools.keys())}"
+            f"{[tool.name for tool in all_tools]}"
         )
 
         filtered_tools: list[MCPTool] = []
-        for registered_name, tool_obj in all_tools.items():
-            tool_tags = tool_obj.tags
-
-            if not should_include_tool(registered_name, enabled_tools_filter):
-                logger.debug(f"Excluding tool '{registered_name}' (not enabled)")
+        for tool_obj in all_tools:
+            registered_name = tool_obj.name
+            if not self._is_tool_enabled(registered_name, tool_obj, ctx):
+                logger.debug(f"Excluding tool '{registered_name}' (filtered)")
                 continue
-
-            if tool_obj and effective_read_only and "write" in tool_tags:
-                logger.debug(
-                    f"Excluding tool '{registered_name}' due to read-only mode "
-                    f"and 'write' tag"
-                )
-                continue
-
-            # Exclude Jira/Confluence tools if config is not fully authenticated
-            is_jira_tool = "jira" in tool_tags
-            is_confluence_tool = "confluence" in tool_tags
-            is_bitbucket_tool = "bitbucket" in tool_tags
-            service_configured_and_available = True
-            if app_lifespan_state:
-                jira_available = (
-                    app_lifespan_state.full_jira_config is not None
-                ) or header_based_services.get("jira", False)
-                confluence_available = (
-                    app_lifespan_state.full_confluence_config is not None
-                ) or header_based_services.get("confluence", False)
-                bitbucket_available = (
-                    app_lifespan_state.full_bitbucket_config is not None
-                ) or header_based_services.get("bitbucket", False)
-
-                if is_jira_tool and not jira_available:
-                    logger.debug(
-                        f"Excluding Jira tool '{registered_name}' as Jira "
-                        f"configuration/authentication is incomplete and no "
-                        f"header-based auth available."
-                    )
-                    service_configured_and_available = False
-
-                if is_confluence_tool and not confluence_available:
-                    logger.debug(
-                        f"Excluding Confluence tool '{registered_name}' as Confluence "
-                        f"configuration/authentication is incomplete and no "
-                        f"header-based auth available."
-                    )
-                    service_configured_and_available = False
-
-                if is_bitbucket_tool and not bitbucket_available:
-                    logger.debug(
-                        f"Excluding Bitbucket tool '{registered_name}' as Bitbucket configuration/authentication is incomplete and no header-based auth available."
-                    )
-                    service_configured_and_available = False
-
-            elif is_jira_tool or is_confluence_tool or is_bitbucket_tool:
-                jira_available = header_based_services.get("jira", False)
-                confluence_available = header_based_services.get("confluence", False)
-                bitbucket_available = header_based_services.get("bitbucket", False)
-
-                if is_jira_tool and not jira_available:
-                    logger.debug(
-                        f"Excluding Jira tool '{registered_name}' as no Jira "
-                        f"authentication available."
-                    )
-                    service_configured_and_available = False
-                if is_confluence_tool and not confluence_available:
-                    logger.debug(
-                        f"Excluding Confluence tool '{registered_name}' as no "
-                        f"Confluence authentication available."
-                    )
-                    service_configured_and_available = False
-                if is_bitbucket_tool and not bitbucket_available:
-                    logger.debug(
-                        f"Excluding Bitbucket tool '{registered_name}' as no Bitbucket authentication available."
-                    )
-                    service_configured_and_available = False
-
-            if not service_configured_and_available:
-                continue
-
-            filtered_tools.append(tool_obj.to_mcp_tool(name=registered_name))
+            mcp_tool = tool_obj.to_mcp_tool(name=registered_name)
+            _sanitize_schema_for_compatibility(mcp_tool)
+            filtered_tools.append(mcp_tool)
 
         logger.debug(
-            f"_main_mcp_list_tools: Total tools after filtering: {len(filtered_tools)}"
+            f"_list_tools_mcp: Total tools after filtering: {len(filtered_tools)}"
         )
         return filtered_tools
+
+    async def _call_tool_mcp(self, key: str, arguments: dict[str, Any]) -> Any:
+        # Enforce the same enablement filter at call time as at listing time, so a
+        # tool hidden from the listing (read-only mode, not in ENABLED_TOOLS, toolset
+        # disabled, or service unavailable) cannot be invoked directly by name.
+        # Under an active filter context, denials and genuinely unknown tools raise
+        # byte-identical messages here (no exists-but-disabled leak), decoupled from
+        # upstream's error format (FastMCP uses a repr-quoted name).
+        ctx = self._tool_filter_context()
+        if ctx is not None:
+            tool_obj = await self.get_tool(key)
+            if tool_obj is None or not self._is_tool_authorized(key, tool_obj, ctx):
+                raise NotFoundError(f"Unknown tool: {key}")
+        result = await super()._call_tool_mcp(key, arguments)
+        metrics = get_metrics()
+        if metrics is not None:
+            try:
+                request = get_http_request()
+            except RuntimeError:
+                request = None
+            username = (
+                request.headers.get("X-Atlassian-Username", "unknown")
+                if request
+                else "unknown"
+            )
+            agent = request.headers.get("User-Agent", "mcp") if request else "mcp"
+            metrics.track_user_activity(
+                username=username[:128],
+                user_agent=agent.lower()[:128],
+                activity_type="tool_usage",
+            )
+        return result
 
     def http_app(
         self,
         path: str | None = None,
         middleware: list[Middleware] | None = None,
-        transport: Literal["streamable-http", "sse"] = "streamable-http",
-        stateless_http: bool = False,
-        **kwargs: Any,
-    ) -> "Starlette":
-        user_token_mw = Middleware(UserTokenMiddleware, mcp_server_ref=self)
+        json_response: bool | None = None,
+        stateless_http: bool | None = None,
+        transport: Literal["http", "streamable-http", "sse"] = "streamable-http",
+        event_store: EventStore | None = None,
+        retry_interval: int | None = None,
+        host_origin_protection: bool | Literal["auto"] | None = None,
+        allowed_hosts: list[str] | None = None,
+        allowed_origins: list[str] | None = None,
+    ) -> StarletteWithLifespan:
+        final_path = path
+        auth_endpoints: frozenset[tuple[str, str]]
+        if transport in ("http", "streamable-http"):
+            configured_path = path or fastmcp_settings.streamable_http_path
+            final_path = self._normalize_http_path(configured_path)
+            self._active_streamable_http_path = final_path
+            auth_endpoints = frozenset({("POST", final_path)})
+        else:
+            sse_path = self._normalize_http_path(path or fastmcp_settings.sse_path)
+            message_path = self._normalize_http_path(fastmcp_settings.message_path)
+            auth_endpoints = frozenset({("GET", sse_path), ("POST", message_path)})
+
+        user_token_mw = Middleware(
+            UserTokenMiddleware,
+            mcp_server_ref=self,
+            auth_endpoints=auth_endpoints,
+        )
         final_middleware_list = [user_token_mw]
         if middleware:
             final_middleware_list.extend(middleware)
         app = super().http_app(
-            path=path,
+            path=final_path,
             middleware=final_middleware_list,
-            transport=transport,
+            json_response=json_response,
             stateless_http=stateless_http,
-            **kwargs,
+            transport=transport,
+            event_store=event_store,
+            retry_interval=retry_interval,
+            host_origin_protection=host_origin_protection,
+            allowed_hosts=allowed_hosts,
+            allowed_origins=allowed_origins,
         )
-
-        # Add metrics endpoint
-        app.router.routes.append(Route("/metrics", metrics_endpoint, methods=["GET"]))
-
         return app
 
 
-token_validation_cache: TTLCache[
-    int,
-    tuple[
-        bool,
-        str | None,
-        JiraFetcher | None,
-        ConfluenceFetcher | None,
-        BitbucketFetcher | None,
-    ],
-] = TTLCache(maxsize=100, ttl=300)
-
-
 class UserTokenMiddleware:
-    """ASGI-compliant middleware to extract Atlassian user tokens/credentials from
-    Authorization headers."""
+    """ASGI-compliant middleware to extract Atlassian user tokens/credentials.
+
+    Based on PR #700 by @isaacpalomero - fixes ASGI protocol violations that caused
+    server crashes when MCP clients disconnect during HTTP requests.
+    """
 
     def __init__(
-        self, app: Any, mcp_server_ref: Optional["AtlassianMCP"] = None
+        self,
+        app: ASGIApp,
+        mcp_server_ref: Optional["AtlassianMCP"] = None,
+        auth_endpoints: frozenset[tuple[str, str]] | None = None,
     ) -> None:
         self.app = app
         self.mcp_server_ref = mcp_server_ref
+        self.auth_endpoints = auth_endpoints
         if not self.mcp_server_ref:
             logger.warning(
                 "UserTokenMiddleware initialized without mcp_server_ref. "
                 "Path matching for MCP endpoint might fail if settings are needed."
             )
 
-    async def __call__(self, scope: dict, receive: Callable, send: Callable) -> None:
-        """ASGI-compliant middleware following official ASGI specification."""
-        logger.debug(
-            f"UserTokenMiddleware.__call__: ENTERED for scope "
-            f"type='{scope.get('type')}', path='{scope.get('path', 'N/A')}', "
-            f"method='{scope.get('method', 'N/A')}'"
-        )
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        """Track bounded request labels without consuming auth or request bodies."""
+        metrics = get_metrics() if scope["type"] == "http" else None
+        if metrics is None:
+            await self._handle_request(scope, receive, send)
+            return
+        method = str(scope.get("method", "OTHER"))
+        if method not in {"GET", "POST", "DELETE", "OPTIONS"}:
+            method = "OTHER"
+        endpoint = "mcp" if self._should_process_auth(scope) else "other"
+        tracking = metrics.start_request_tracking(method, endpoint)
+        status = 500
 
+        async def track_send(message: Message) -> None:
+            nonlocal status
+            if message["type"] == "http.response.start":
+                status = message["status"]
+            await send(message)
+
+        try:
+            await self._handle_request(scope, receive, track_send)
+        finally:
+            metrics.end_request_tracking(tracking, status)
+
+    async def _handle_request(self, scope: Scope, receive: Receive, send: Send) -> None:
+        # Pass through non-HTTP requests directly per ASGI spec
         if scope["type"] != "http":
-            # For non-HTTP requests, pass through directly
             await self.app(scope, receive, send)
             return
 
         # According to ASGI spec, middleware should copy scope when modifying it
-        scope_copy = scope.copy()
+        scope_copy: Scope = dict(scope)
 
         # Ensure state exists in scope - this is where Starlette stores request state
         if "state" not in scope_copy:
             scope_copy["state"] = {}
 
-        # Start metrics tracking for HTTP request
-        metrics_collector = get_metrics()
-        request_path = scope.get("path", "")
-        method = scope.get("method", "")
-        metrics_context = None
-
-        # Start request tracking
-        if metrics_collector:
-            metrics_context = metrics_collector.start_request_tracking(
-                method, request_path
-            )
-
-        mcp_server_instance = self.mcp_server_ref
-        if mcp_server_instance is None:
-            logger.debug(
-                "UserTokenMiddleware.__call__: self.mcp_server_ref is None. "
-                "Skipping MCP auth logic."
-            )
-            await self.app(scope_copy, receive, send)
-            return
-
-        mcp_path = settings.streamable_http_path.rstrip("/")
-        request_path = scope.get("path", "").rstrip("/")
-        method = scope.get("method", "")
+        # Initialize default authentication state (only initialize fields that should always exist)
+        # Note: user_atlassian_token and user_atlassian_auth_type are NOT initialized
+        # They are only set when present, so hasattr() checks work correctly
+        scope_copy["state"]["user_atlassian_email"] = None
+        scope_copy["state"]["user_atlassian_cloud_id"] = None
+        scope_copy["state"]["auth_validation_error"] = None
 
         logger.debug(
-            f"UserTokenMiddleware.__call__: Comparing request_path='{request_path}' "
-            f"with mcp_path='{mcp_path}'. Request method='{method}'"
+            f"UserTokenMiddleware: Processing {scope_copy.get('method', 'UNKNOWN')} "
+            f"{scope_copy.get('path', 'UNKNOWN')}"
         )
 
-        if request_path == mcp_path and method == "POST":
-            # Parse headers from scope (headers are byte tuples per ASGI spec)
-            headers = dict(scope.get("headers", []))
+        # Skip auth header processing if IGNORE_HEADER_AUTH is set
+        # (useful for GCP Cloud Run / AWS ALB that inject Authorization headers)
+        ignore_header_auth = is_env_truthy("IGNORE_HEADER_AUTH")
 
-            read_only_header_bytes = headers.get(b"x-atlassian-read-only-mode")
-            read_only_header_value = (
-                read_only_header_bytes.decode("latin-1")
-                if read_only_header_bytes
-                else None
-            )
-            read_only_header_value = (
-                read_only_header_value.strip() if read_only_header_value else None
-            )
-            scope_copy["state"]["read_only_mode_header"] = read_only_header_value
-            if read_only_header_value:
-                logger.debug(
-                    "UserTokenMiddleware: X-Atlassian-Read-Only-Mode header: %s",
-                    read_only_header_value,
-                )
+        # Only process authentication for our MCP endpoint
+        if (
+            not ignore_header_auth
+            and self.mcp_server_ref
+            and self._should_process_auth(scope_copy)
+        ):
+            self._process_authentication_headers(scope_copy)
 
-            # Extract User-Agent header for tracking and make it lowercase
-            user_agent_header = headers.get(b"user-agent")
-            user_agent = (
-                user_agent_header.decode("latin-1") if user_agent_header else None
-            )
-            user_agent = user_agent.lower() if user_agent else None
-
-            # get username if present
-            username_header = headers.get(b"x-atlassian-username")
-            username = username_header.decode("latin-1") if username_header else None
-            username = username.lower() if username else None
-
-            # Check username requirement - validate that at least one username is provided
-            if os.environ.get("REQUIRE_USERNAME") == "true":
-                if not username:
-                    logger.error(
-                        "Username validation failed: REQUIRE_USERNAME is enabled but no username header provided"
-                    )
-                    error_response = json.dumps(
-                        {
-                            "error": "Username required",
-                            "message": '"X-Atlassian-Username" must be provided in headers when REQUIRE_USERNAME is enabled',
-                        }
-                    ).encode()
-
-                    await send(
-                        {
-                            "type": "http.response.start",
-                            "status": 400,
-                            "headers": [(b"content-type", b"application/json")],
-                        }
-                    )
-                    await send({"type": "http.response.body", "body": error_response})
-                    return
-
-            # Convert bytes to strings (ASGI headers are always bytes)
-            auth_header = headers.get(b"authorization")
-            auth_header_str = auth_header.decode("latin-1") if auth_header else None
-
-            cloud_id_header = headers.get(b"x-atlassian-cloud-id")
-            cloud_id_header_str = (
-                cloud_id_header.decode("latin-1") if cloud_id_header else None
-            )
-
-            # Extract additional Atlassian headers for service availability detection
-            jira_token_header = headers.get(b"x-atlassian-jira-personal-token")
-            jira_token_header_str = (
-                jira_token_header.decode("latin-1") if jira_token_header else None
-            )
-
-            jira_url_header = headers.get(b"x-atlassian-jira-url")
-            jira_url_header_str = (
-                jira_url_header.decode("latin-1") if jira_url_header else None
-            )
-
-            confluence_token_header = headers.get(
-                b"x-atlassian-confluence-personal-token"
-            )
-            confluence_token_header_str = (
-                confluence_token_header.decode("latin-1")
-                if confluence_token_header
-                else None
-            )
-
-            confluence_url_header = headers.get(b"x-atlassian-confluence-url")
-            confluence_url_header_str = (
-                confluence_url_header.decode("latin-1")
-                if confluence_url_header
-                else None
-            )
-
-            bitbucket_token_header = headers.get(
-                b"x-atlassian-bitbucket-personal-token"
-            )
-            bitbucket_token_header_str = (
-                bitbucket_token_header.decode("latin-1")
-                if bitbucket_token_header
-                else None
-            )
-
-            bitbucket_url_header = headers.get(b"x-atlassian-bitbucket-url")
-            bitbucket_url_header_str = (
-                bitbucket_url_header.decode("latin-1") if bitbucket_url_header else None
-            )
-
-            # Track service-specific user activity for business intelligence
-            activity_type = None
-            cached_messages = []
-            message_index = 0
-
-            # Create a wrapper to cache the request body without consuming it
-            async def cached_receive() -> dict:
-                nonlocal cached_messages, message_index
-
-                # If we already have this message cached, return it
-                if message_index < len(cached_messages):
-                    message = cached_messages[message_index]
-                    message_index += 1
-                    return message
-
-                # Otherwise, receive and cache the message
-                message = await receive()
-                cached_messages.append(message)
-                message_index += 1
-                return message
-
-            if metrics_collector:
-                try:
-                    # Read the request body to extract activity type
-                    body_parts = []
-                    while True:
-                        message = await cached_receive()
-                        if message["type"] == "http.request":
-                            body_parts.append(message.get("body", b""))
-                            if not message.get("more_body", False):
-                                break
-                        else:
-                            break
-
-                    # Combine all body parts
-                    full_body = b"".join(body_parts)
-                    if full_body:
-                        body_data = json.loads(full_body.decode("utf-8"))
-                        activity_type = body_data.get("params", {}).get("name")
-
-                    # Reset message index for the actual app to consume from the beginning
-                    message_index = 0
-
-                except (json.JSONDecodeError, UnicodeDecodeError, KeyError):
-                    # If we can't parse the body, continue without activity type
-                    activity_type = None
-                    # Reset message index for the actual app
-                    message_index = 0
-                # Only track when service-specific headers are provided (header-based auth)
-                # Track activity only once per request, using the appropriate service
-
-                # Determine which service to use based on activity type, or fallback to first available
-                service_to_use = None
-                username_to_use = None
-
-                if activity_type:
-                    if (
-                        activity_type.startswith("jira_")
-                        and jira_token_header_str
-                        and jira_url_header_str
-                    ):
-                        service_to_use = "jira"
-                        username_to_use = username
-                    elif (
-                        activity_type.startswith("confluence_")
-                        and confluence_token_header_str
-                        and confluence_url_header_str
-                    ):
-                        service_to_use = "confluence"
-                        username_to_use = username
-                    elif (
-                        activity_type.startswith("bitbucket_")
-                        and bitbucket_token_header_str
-                        and bitbucket_url_header_str
-                    ):
-                        service_to_use = "bitbucket"
-                        username_to_use = username
-
-                # If no specific service determined from activity type, use first available service
-                if not service_to_use:
-                    if jira_token_header_str and jira_url_header_str:
-                        service_to_use = "jira"
-                        username_to_use = username
-                        activity_type = activity_type or "jira_access"
-                    elif confluence_token_header_str and confluence_url_header_str:
-                        service_to_use = "confluence"
-                        username_to_use = username
-                        activity_type = activity_type or "confluence_access"
-                    elif bitbucket_token_header_str and bitbucket_url_header_str:
-                        service_to_use = "bitbucket"
-                        username_to_use = username
-                        activity_type = activity_type or "bitbucket_access"
-
-                # Track the activity for the determined service
-                if service_to_use:
-                    metrics_collector.track_user_activity(
-                        username=username_to_use,
-                        user_agent=user_agent,
-                        activity_type=activity_type,
-                    )
-
-            token_for_log = mask_sensitive(
-                auth_header_str.split(" ", 1)[1].strip()
-                if auth_header_str and " " in auth_header_str
-                else auth_header_str
-            )
-            logger.debug(
-                f"UserTokenMiddleware: Path='{request_path}', "
-                f"AuthHeader='{mask_sensitive(auth_header_str)}', "
-                f"ParsedToken(masked)='{token_for_log}', "
-                f"CloudId='{cloud_id_header_str}'"
-            )
-
-            # Extract and save cloudId if provided
-            if cloud_id_header_str and cloud_id_header_str.strip():
-                scope_copy["state"]["user_atlassian_cloud_id"] = (
-                    cloud_id_header_str.strip()
-                )
-                logger.debug(
-                    f"UserTokenMiddleware: Extracted cloudId from header: "
-                    f"{cloud_id_header_str.strip()}"
-                )
-            else:
-                scope_copy["state"]["user_atlassian_cloud_id"] = None
-                logger.debug(
-                    "UserTokenMiddleware: No cloudId header provided, "
-                    "will use global config"
-                )
-            service_headers = {}
-            if jira_token_header_str:
-                service_headers["X-Atlassian-Jira-Personal-Token"] = (
-                    jira_token_header_str
-                )
-            if jira_url_header_str:
-                service_headers["X-Atlassian-Jira-Url"] = jira_url_header_str
-            if confluence_token_header_str:
-                service_headers["X-Atlassian-Confluence-Personal-Token"] = (
-                    confluence_token_header_str
-                )
-            if confluence_url_header_str:
-                service_headers["X-Atlassian-Confluence-Url"] = (
-                    confluence_url_header_str
-                )
-            if bitbucket_token_header_str:
-                service_headers["X-Atlassian-Bitbucket-Personal-Token"] = (
-                    bitbucket_token_header_str
-                )
-            if bitbucket_url_header_str:
-                service_headers["X-Atlassian-Bitbucket-Url"] = bitbucket_url_header_str
-
-            scope_copy["state"]["atlassian_service_headers"] = service_headers
-            if service_headers:
-                logger.debug(
-                    f"UserTokenMiddleware: Extracted service headers: "
-                    f"{list(service_headers.keys())}"
-                )
-
-            # Check for mcp-session-id header for debugging
-            mcp_session_id_header = headers.get(b"mcp-session-id")
-            mcp_session_id = (
-                mcp_session_id_header.decode("latin-1")
-                if mcp_session_id_header
-                else None
-            )
-            if mcp_session_id:
-                logger.debug(
-                    f"UserTokenMiddleware: MCP-Session-ID header found: "
-                    f"{mcp_session_id}"
-                )
-
-            if auth_header_str and auth_header_str.startswith("Bearer "):
-                token = auth_header_str.split(" ", 1)[1].strip()
-                if not token:
-                    # Send 401 response for empty Bearer token
-                    await self._send_error_response(
-                        send, "Unauthorized: Empty Bearer token", 401
-                    )
-                    return
-
-                logger.debug(
-                    f"UserTokenMiddleware.__call__: Bearer token extracted "
-                    f"(masked): ...{mask_sensitive(token, 8)}"
-                )
-                scope_copy["state"]["user_atlassian_token"] = token
-                scope_copy["state"]["user_atlassian_auth_type"] = "oauth"
-                scope_copy["state"]["user_atlassian_email"] = None
-                logger.debug(
-                    f"UserTokenMiddleware.__call__: Set scope state (pre-validation): "
-                    f"auth_type='oauth', token_present={bool(token)}"
-                )
-            elif auth_header_str and auth_header_str.startswith("Token "):
-                token = auth_header_str.split(" ", 1)[1].strip()
-                if not token:
-                    # Send 401 response for empty Token (PAT)
-                    await self._send_error_response(
-                        send, "Unauthorized: Empty Token (PAT)", 401
-                    )
-                    return
-
-                logger.debug(
-                    f"UserTokenMiddleware.__call__: PAT (Token scheme) extracted "
-                    f"(masked): ...{mask_sensitive(token, 8)}"
-                )
-                scope_copy["state"]["user_atlassian_token"] = token
-                scope_copy["state"]["user_atlassian_auth_type"] = "pat"
-                scope_copy["state"]["user_atlassian_email"] = None
-                logger.debug(
-                    "UserTokenMiddleware.__call__: Set scope state for PAT auth."
-                )
-            elif auth_header_str:
-                auth_type = (
-                    auth_header_str.split(" ", 1)[0]
-                    if " " in auth_header_str
-                    else "UnknownType"
-                )
-                logger.warning(
-                    f"Unsupported Authorization type for {request_path}: {auth_type}"
-                )
-                await self._send_error_response(
-                    send,
-                    "Unauthorized: Only 'Bearer <OAuthToken>' or 'Token <PAT>' "
-                    "types are supported.",
-                    401,
-                )
-                return
-            else:
-                if (jira_token_header_str and jira_url_header_str) or (
-                    confluence_token_header_str and confluence_url_header_str
-                ):
-                    logger.debug(
-                        f"Header-based authentication detected for {request_path}. "
-                        f"Setting PAT auth type."
-                    )
-                    scope_copy["state"]["user_atlassian_auth_type"] = "pat"
-                    scope_copy["state"]["user_atlassian_email"] = None
-                else:
-                    logger.debug(
-                        f"No Authorization header provided for {request_path}. "
-                        f"Will proceed with global/fallback server configuration "
-                        f"if applicable."
-                    )
-
-        # Create a safe send wrapper to handle client disconnections and track metrics
-        response_status = 200  # Default status
-
-        async def safe_send(message: dict) -> None:
-            nonlocal response_status
+        # Create wrapped send function to handle client disconnections gracefully
+        async def safe_send(message: Message) -> None:
             try:
-                # Track response status for metrics
-                if message.get("type") == "http.response.start":
-                    response_status = message.get("status", 200)
-
                 await send(message)
             except (ConnectionResetError, BrokenPipeError, OSError) as e:
                 # Client disconnected - log but don't propagate to avoid ASGI violations
@@ -802,64 +541,478 @@ class UserTokenMiddleware:
                 # Re-raise unexpected errors
                 raise
 
-        # Continue with the request using the modified scope and cached receive
-        receive_func = cached_receive if "cached_receive" in locals() else receive
-        await self.app(scope_copy, receive_func, safe_send)
+        # Check for auth errors and return 401 before calling app
+        auth_error = scope_copy["state"].get("auth_validation_error")
+        if auth_error:
+            logger.warning(f"Authentication failed: {auth_error}")
+            await self._send_json_error_response(safe_send, 401, auth_error)
+            return  # Don't call self.app - request is rejected
 
-        # End metrics tracking
-        if metrics_collector and metrics_context:
-            metrics_collector.end_request_tracking(metrics_context, response_status)
+        # Reject unauthenticated MCP requests at the transport boundary: with no
+        # user identity, the downstream handler would fall back to the operator's
+        # global credentials, so any unauthenticated caller would transact as the
+        # operator. Refuse unless explicitly opted in (opt-in global-fallback gate).
+        if (
+            not ignore_header_auth
+            and self.mcp_server_ref
+            and self._should_process_auth(scope_copy)
+            and not scope_copy["state"].get("user_atlassian_auth_type")
+            and not is_env_truthy("ALLOW_GLOBAL_CRED_FALLBACK")
+        ):
+            logger.warning(
+                "UserTokenMiddleware: rejecting unauthenticated MCP request "
+                "(no user identity and ALLOW_GLOBAL_CRED_FALLBACK is off)"
+            )
+            await self._send_json_error_response(
+                safe_send,
+                401,
+                "Authentication required: no Atlassian credentials were provided.",
+            )
+            return  # Don't call self.app - request is rejected
 
-        logger.debug(
-            f"UserTokenMiddleware.__call__: EXITED for request path='{request_path}'"
-        )
+        if self.mcp_server_ref and self._should_process_auth(scope_copy):
+            headers = dict(scope_copy.get("headers", []))
+            username = (
+                headers.get(b"x-atlassian-username", b"").decode("latin-1").strip()
+            )
+            if is_env_truthy("REQUIRE_USERNAME") and not username:
+                await self._send_json_error_response(
+                    safe_send, 401, "Username metadata required"
+                )
+                return
+            metrics = get_metrics()
+            if metrics is not None:
+                metrics.track_user_activity(
+                    username=username[:128] or "unknown",
+                    user_agent=headers.get(b"user-agent", b"mcp")
+                    .decode("latin-1")
+                    .lower()[:128],
+                    activity_type="request",
+                )
 
-    async def _send_error_response(
-        self, send: Callable, error_message: str, status_code: int
+        # Call the next application with modified scope and safe send wrapper
+        await self.app(scope_copy, receive, safe_send)
+
+    async def _send_json_error_response(
+        self, send: Send, status_code: int, error_message: str
     ) -> None:
-        """Send an HTTP error response following ASGI protocol."""
+        """Send a JSON error response via ASGI protocol.
+
+        Args:
+            send: ASGI send callable (should be safe_send wrapper).
+            status_code: HTTP status code (e.g., 401).
+            error_message: Error message to include in JSON body.
+        """
+        body = json.dumps({"error": error_message}).encode("utf-8")
+        await send(
+            {
+                "type": "http.response.start",
+                "status": status_code,
+                "headers": [
+                    (b"content-type", b"application/json"),
+                    (b"content-length", str(len(body)).encode("ascii")),
+                ],
+            }
+        )
+        await send({"type": "http.response.body", "body": body})
+
+    def _should_process_auth(self, scope: Scope) -> bool:
+        """Check if this request should be processed for authentication."""
+        if not self.mcp_server_ref:
+            return False
+
         try:
-            response_body = f'{{"error": "{error_message}"}}'.encode()
+            method = scope.get("method", "").upper()
+            request_path = AtlassianMCP._normalize_http_path(scope.get("path", ""))
+            if self.auth_endpoints is not None:
+                return (method, request_path) in self.auth_endpoints
 
-            await send(
-                {
-                    "type": "http.response.start",
-                    "status": status_code,
-                    "headers": [
-                        [b"content-type", b"application/json"],
-                        [b"content-length", str(len(response_body)).encode()],
-                    ],
-                }
+            return (
+                method == "POST"
+                and request_path == self.mcp_server_ref.get_streamable_http_path()
+            )
+        except (AttributeError, ValueError) as e:
+            logger.warning(f"Error checking auth path: {e}")
+            return False
+
+    def _process_authentication_headers(self, scope: Scope) -> None:
+        """Process authentication headers and store in scope state."""
+        try:
+            # Parse headers from scope (headers are byte tuples per ASGI spec)
+            headers = dict(scope.get("headers", []))
+            auth_header = headers.get(b"authorization")
+            cloud_id_header = headers.get(b"x-atlassian-cloud-id")
+
+            # Convert bytes to strings (ASGI headers are always bytes)
+            auth_header_str = auth_header.decode("latin-1") if auth_header else None
+            cloud_id_str = (
+                cloud_id_header.decode("latin-1") if cloud_id_header else None
             )
 
-            await send(
-                {
-                    "type": "http.response.body",
-                    "body": response_body,
-                }
+            # Extract additional Atlassian service headers for service availability detection
+            jira_token_header = headers.get(b"x-atlassian-jira-personal-token")
+            jira_url_header = headers.get(b"x-atlassian-jira-url")
+            confluence_token_header = headers.get(
+                b"x-atlassian-confluence-personal-token"
             )
-        except (ConnectionResetError, BrokenPipeError, OSError) as e:
-            # Client disconnected during error response - log but don't propagate
+            confluence_url_header = headers.get(b"x-atlassian-confluence-url")
+
+            # Convert service header bytes to strings
+            jira_token_str = (
+                jira_token_header.decode("latin-1") if jira_token_header else None
+            )
+            jira_url_str = (
+                jira_url_header.decode("latin-1") if jira_url_header else None
+            )
+            confluence_token_str = (
+                confluence_token_header.decode("latin-1")
+                if confluence_token_header
+                else None
+            )
+            confluence_url_str = (
+                confluence_url_header.decode("latin-1")
+                if confluence_url_header
+                else None
+            )
+
+            # Validate URLs to prevent SSRF
+            if jira_url_str:
+                ssrf_error = validate_url_for_ssrf(jira_url_str)
+                if ssrf_error:
+                    scope["state"]["auth_validation_error"] = (
+                        f"Forbidden: Invalid Jira URL - {ssrf_error}"
+                    )
+                    return
+
+            if confluence_url_str:
+                ssrf_error = validate_url_for_ssrf(confluence_url_str)
+                if ssrf_error:
+                    scope["state"]["auth_validation_error"] = (
+                        f"Forbidden: Invalid Confluence URL - {ssrf_error}"
+                    )
+                    return
+
+            bitbucket_token_str = headers.get(
+                b"x-atlassian-bitbucket-personal-token", b""
+            ).decode("latin-1")
+            bitbucket_url_str = headers.get(b"x-atlassian-bitbucket-url", b"").decode(
+                "latin-1"
+            )
+            if bitbucket_url_str:
+                ssrf_error = validate_url_for_ssrf(bitbucket_url_str)
+                if ssrf_error:
+                    scope["state"]["auth_validation_error"] = (
+                        "Forbidden: Invalid Bitbucket URL"
+                    )
+                    return
+
+            # Build service headers dict
+            service_headers = {}
+            if jira_token_str:
+                service_headers["X-Atlassian-Jira-Personal-Token"] = jira_token_str
+            if jira_url_str:
+                service_headers["X-Atlassian-Jira-Url"] = jira_url_str
+            if confluence_token_str:
+                service_headers["X-Atlassian-Confluence-Personal-Token"] = (
+                    confluence_token_str
+                )
+            if confluence_url_str:
+                service_headers["X-Atlassian-Confluence-Url"] = confluence_url_str
+
+            if bitbucket_token_str:
+                service_headers["X-Atlassian-Bitbucket-Personal-Token"] = (
+                    bitbucket_token_str
+                )
+            if bitbucket_url_str:
+                service_headers["X-Atlassian-Bitbucket-Url"] = bitbucket_url_str
+            scope["state"]["atlassian_service_headers"] = service_headers
+            if service_headers:
+                logger.debug(
+                    f"UserTokenMiddleware: Extracted service headers: {list(service_headers.keys())}"
+                )
+
+            # Log mcp-session-id for debugging
+            mcp_session_id = headers.get(b"mcp-session-id")
+            if mcp_session_id:
+                session_id_str = mcp_session_id.decode("latin-1")
+                logger.debug(
+                    f"UserTokenMiddleware: MCP-Session-ID header found: {session_id_str}"
+                )
+
             logger.debug(
-                f"Client disconnected during error response: {type(e).__name__}: {e}"
+                f"UserTokenMiddleware: Processing auth for {scope.get('path')}, "
+                f"AuthHeader present: {bool(auth_header_str)}, "
+                f"CloudId present: {bool(cloud_id_str)}"
             )
-        except Exception:
-            # Re-raise unexpected errors
-            raise
+
+            # Process Cloud ID
+            if cloud_id_str and cloud_id_str.strip():
+                scope["state"]["user_atlassian_cloud_id"] = cloud_id_str.strip()
+                logger.debug(
+                    f"UserTokenMiddleware: Extracted cloudId: {cloud_id_str.strip()}"
+                )
+
+            # Process Authorization header
+            if auth_header_str:
+                self._parse_auth_header(auth_header_str, scope)
+            else:
+                logger.debug("UserTokenMiddleware: No Authorization header provided")
+                # If service headers are present without Authorization header, set PAT auth type
+                if service_headers and (
+                    (jira_token_str and jira_url_str)
+                    or (confluence_token_str and confluence_url_str)
+                    or (bitbucket_token_str and bitbucket_url_str)
+                ):
+                    scope["state"]["user_atlassian_auth_type"] = "pat"
+                    scope["state"]["user_atlassian_email"] = None
+                    logger.debug(
+                        "UserTokenMiddleware: Header-based authentication detected. Setting PAT auth type."
+                    )
+
+        except Exception as e:
+            logger.error(f"Error processing authentication headers: {e}", exc_info=True)
+            scope["state"]["auth_validation_error"] = "Authentication processing error"
+
+    def _parse_auth_header(self, auth_header: str, scope: Scope) -> None:
+        """Parse the Authorization header and store credentials in scope state."""
+        # Check prefix BEFORE stripping to preserve "Bearer " / "Token " matching
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:].strip()  # Remove "Bearer " prefix and strip token
+            if not token:
+                scope["state"]["auth_validation_error"] = (
+                    "Unauthorized: Empty Bearer token"
+                )
+            else:
+                scope["state"]["user_atlassian_token"] = token
+                scope["state"]["user_atlassian_auth_type"] = "oauth"
+                logger.debug(
+                    "UserTokenMiddleware: Bearer token extracted (masked): "
+                    f"...{mask_sensitive(token, 8)}"
+                )
+
+        elif auth_header.startswith("Token "):
+            token = auth_header[6:].strip()  # Remove "Token " prefix and strip token
+            if not token:
+                scope["state"]["auth_validation_error"] = (
+                    "Unauthorized: Empty Token (PAT)"
+                )
+            else:
+                scope["state"]["user_atlassian_token"] = token
+                scope["state"]["user_atlassian_auth_type"] = "pat"
+                logger.debug(
+                    "UserTokenMiddleware: PAT token extracted (masked): "
+                    f"...{mask_sensitive(token, 8)}"
+                )
+
+        elif auth_header.startswith("Basic "):
+            encoded = auth_header[6:].strip()
+            if not encoded:
+                scope["state"]["auth_validation_error"] = (
+                    "Unauthorized: Empty Basic auth credentials"
+                )
+                return
+            try:
+                decoded = base64.b64decode(encoded).decode("utf-8")
+            except (ValueError, UnicodeDecodeError) as e:
+                logger.warning(f"Failed to decode Basic auth: {e}")
+                scope["state"]["auth_validation_error"] = (
+                    "Unauthorized: Invalid Basic auth encoding"
+                )
+                return
+            if ":" not in decoded:
+                scope["state"]["auth_validation_error"] = (
+                    "Unauthorized: Invalid Basic auth format. "
+                    "Expected 'email:api_token'"
+                )
+                return
+            email, api_token = decoded.split(":", 1)
+            if not email or not api_token:
+                scope["state"]["auth_validation_error"] = (
+                    "Unauthorized: Email or API token is empty"
+                )
+                return
+            scope["state"]["user_atlassian_email"] = email
+            scope["state"]["user_atlassian_api_token"] = api_token
+            scope["state"]["user_atlassian_auth_type"] = "basic"
+            scope["state"]["user_atlassian_token"] = None
+            logger.debug(
+                f"UserTokenMiddleware: Basic auth extracted for email: {email}"
+            )
+
+        elif auth_header.strip():
+            # Non-empty but unsupported auth type
+            auth_value = auth_header.strip()
+            if " " in auth_value:
+                auth_type = auth_value.split(" ", 1)[0]
+            else:
+                # No space means no type prefix — likely a raw token.
+                # Redact to avoid leaking credentials in logs.
+                auth_type = "<redacted>"
+            logger.warning(f"Unsupported Authorization type: {auth_type}")
+            scope["state"]["auth_validation_error"] = (
+                "Unauthorized: Only 'Bearer <OAuthToken>', "
+                "'Token <PAT>', or 'Basic <base64(email:api_token)>' "
+                "types are supported."
+            )
+        else:
+            # Empty or whitespace-only
+            scope["state"]["auth_validation_error"] = (
+                "Unauthorized: Empty Authorization header"
+            )
 
 
-main_mcp = AtlassianMCP(name="Atlassian MCP", lifespan=main_lifespan)
-main_mcp.mount(server=jira_mcp, prefix="jira")
-main_mcp.mount(server=confluence_mcp, prefix="confluence")
-main_mcp.mount(server=bitbucket_mcp, prefix="bitbucket")
+def _get_allowed_redirect_uris() -> list[str] | None:
+    raw = os.getenv("ATLASSIAN_OAUTH_ALLOWED_CLIENT_REDIRECT_URIS")
+    parsed = parse_env_list(raw)
+    if parsed is None:
+        return DEFAULT_ALLOWED_REDIRECT_URIS
+    return parsed
+
+
+def _get_allowed_grant_types() -> list[str]:
+    raw = os.getenv("ATLASSIAN_OAUTH_ALLOWED_GRANT_TYPES")
+    parsed = parse_env_list(raw)
+    if parsed is None:
+        return DEFAULT_ALLOWED_GRANT_TYPES
+    if not parsed:
+        logger.warning(
+            "ATLASSIAN_OAUTH_ALLOWED_GRANT_TYPES is empty; defaulting to %s",
+            DEFAULT_ALLOWED_GRANT_TYPES,
+        )
+        return DEFAULT_ALLOWED_GRANT_TYPES
+    return parsed
+
+
+def _resolve_upstream_oauth_endpoints(instance_url: str) -> tuple[str, str]:
+    parsed_host = (urlparse(instance_url).hostname or "").lower()
+    is_cloud = (
+        is_atlassian_cloud_url(instance_url) or parsed_host == "auth.atlassian.com"
+    )
+
+    if is_cloud:
+        return CLOUD_AUTHORIZE_URL, CLOUD_TOKEN_URL
+
+    base_url = instance_url.rstrip("/")
+    return f"{base_url}{DC_AUTHORIZE_PATH}", f"{base_url}{DC_TOKEN_PATH}"
+
+
+def _is_cloud_instance(instance_url: str) -> bool:
+    parsed_host = (urlparse(instance_url).hostname or "").lower()
+    return is_atlassian_cloud_url(instance_url) or parsed_host == "auth.atlassian.com"
+
+
+def _build_auth_provider() -> HardenedOAuthProxy | None:
+    """Create an opt-in OAuth proxy auth provider with DCR + discovery support."""
+    if not is_env_truthy(OAUTH_PROXY_ENABLE_ENV, "false"):
+        logger.info(
+            "OAuth proxy auth provider disabled; set %s=true to enable DCR/proxy routes.",
+            OAUTH_PROXY_ENABLE_ENV,
+        )
+        return None
+
+    instance_url = (
+        os.getenv("ATLASSIAN_OAUTH_INSTANCE_URL")
+        or os.getenv("JIRA_URL")
+        or os.getenv("CONFLUENCE_URL")
+    )
+    client_id = (
+        os.getenv("ATLASSIAN_OAUTH_CLIENT_ID")
+        or os.getenv("JIRA_OAUTH_CLIENT_ID")
+        or os.getenv("CONFLUENCE_OAUTH_CLIENT_ID")
+    )
+    client_secret = (
+        os.getenv("ATLASSIAN_OAUTH_CLIENT_SECRET")
+        or os.getenv("JIRA_OAUTH_CLIENT_SECRET")
+        or os.getenv("CONFLUENCE_OAUTH_CLIENT_SECRET")
+    )
+    redirect_uri = os.getenv("ATLASSIAN_OAUTH_REDIRECT_URI")
+    scope_env = os.getenv("ATLASSIAN_OAUTH_SCOPE", "")
+
+    if not all([instance_url, client_id, client_secret, redirect_uri]):
+        logger.warning(
+            "OAuth proxy requested but required vars are missing. "
+            "Need instance URL + client credentials + redirect URI."
+        )
+        return None
+
+    scopes = [s for part in scope_env.replace(",", " ").split() if (s := part)]
+    is_cloud = _is_cloud_instance(instance_url)
+    upstream_authorize, upstream_token = _resolve_upstream_oauth_endpoints(instance_url)
+
+    parsed_redirect = urlparse(redirect_uri)
+    raw_redirect_path = parsed_redirect.path or "/callback"
+
+    base_url = os.getenv("PUBLIC_BASE_URL")
+    if not base_url and parsed_redirect.scheme and parsed_redirect.netloc:
+        redirect_dir = raw_redirect_path.rsplit("/", 1)[0]
+        base_url = f"{parsed_redirect.scheme}://{parsed_redirect.netloc}{redirect_dir}"
+
+    if not base_url:
+        host = os.getenv("HOST", DEFAULT_HOST)
+        port = os.getenv("PORT", "3000")
+        host_for_url = "localhost" if host in (DEFAULT_HOST, "127.0.0.1") else host
+        base_url = f"http://{host_for_url}:{port}"
+
+    base_path = urlparse(base_url).path.rstrip("/")
+    redirect_path = raw_redirect_path
+    if base_path:
+        if redirect_path == base_path:
+            redirect_path = "/"
+        elif redirect_path.startswith(base_path + "/"):
+            redirect_path = redirect_path[len(base_path) :]
+
+    if not redirect_path.startswith("/"):
+        redirect_path = f"/{redirect_path}"
+
+    allowed_client_redirect_uris = _get_allowed_redirect_uris()
+    allowed_grant_types = _get_allowed_grant_types()
+    require_consent = is_env_truthy("ATLASSIAN_OAUTH_REQUIRE_CONSENT", "true")
+    verifier = AtlassianOpaqueTokenVerifier(required_scopes=scopes)
+
+    return HardenedOAuthProxy(
+        upstream_authorization_endpoint=upstream_authorize,
+        upstream_token_endpoint=upstream_token,
+        upstream_client_id=client_id,
+        upstream_client_secret=client_secret,
+        token_verifier=verifier,
+        base_url=base_url,
+        redirect_path=redirect_path,
+        allowed_client_redirect_uris=allowed_client_redirect_uris,
+        valid_scopes=scopes or None,
+        allowed_grant_types=allowed_grant_types,
+        forced_scopes=scopes or None,
+        token_endpoint_auth_method="client_secret_post",  # noqa: S106
+        extra_authorize_params=(
+            {"audience": "api.atlassian.com", "prompt": "consent"} if is_cloud else None
+        ),
+        client_storage=build_oauth_client_storage_from_env(),
+        require_authorization_consent=require_consent,
+    )
+
+
+main_mcp = AtlassianMCP(
+    name="Atlassian MCP",
+    lifespan=main_lifespan,
+    auth=_build_auth_provider(),
+)
+main_mcp.mount(jira_mcp, namespace="jira")
+main_mcp.mount(confluence_mcp, namespace="confluence")
+main_mcp.mount(bitbucket_mcp, namespace="bitbucket")
 
 
 @main_mcp.custom_route("/healthz", methods=["GET"], include_in_schema=False)
 async def _health_check_route(request: Request) -> JSONResponse:
-    return await health_check()
+    return await health_check(request)
 
 
-@main_mcp.custom_route("/readyz", methods=["GET"], include_in_schema=False)
-async def _ready_check_route(request: Request) -> JSONResponse:
-    """Readiness check for Kubernetes probes."""
-    return JSONResponse({"status": "ready", "server": "mcp-atlassian"})
+logger.info("Added /healthz endpoint for Kubernetes probes")
+
+
+@main_mcp.custom_route("/metrics", methods=["GET"], include_in_schema=False)
+async def metrics_endpoint(request: Request) -> Response:
+    """Retain the fork's optional Prometheus endpoint without reading credentials."""
+    metrics = get_metrics()
+    if metrics is None or not metrics.is_enabled:
+        return Response("# Metrics collection not enabled\n", status_code=503)
+    content, content_type = metrics.generate_metrics()
+    return Response(content, media_type=content_type)

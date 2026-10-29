@@ -9,7 +9,7 @@ of mixing both API dialects in the MCP operation mixins.
 import logging
 from collections.abc import Iterator
 from typing import Any
-from urllib.parse import quote, urlparse, urlunparse
+from urllib.parse import quote, urljoin, urlparse, urlunparse
 
 from requests import Session
 from requests.exceptions import HTTPError
@@ -102,11 +102,18 @@ class BitbucketCloudClient:
         raw: bool = False,
     ) -> Any:
         """Perform one Cloud API request and return decoded data."""
-        url = (
-            endpoint
-            if endpoint.startswith("http")
-            else f"{self.base_url}/{endpoint.lstrip('/')}"
-        )
+        url = urljoin(self.base_url + "/", endpoint)
+        parsed, base = urlparse(url), urlparse(self.base_url)
+        if (
+            parsed.scheme != base.scheme
+            or parsed.netloc != base.netloc
+            or parsed.username is not None
+            or parsed.password is not None
+            or not parsed.path.startswith(base.path.rstrip("/") + "/")
+        ):
+            raise ValueError(
+                "Bitbucket pagination URL escaped the configured API origin"
+            )
         response = self._session.request(
             method,
             url,

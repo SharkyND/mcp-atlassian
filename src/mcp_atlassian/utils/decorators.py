@@ -5,14 +5,10 @@ from typing import Any, TypeVar
 
 import requests
 from fastmcp import Context
+from fastmcp.exceptions import ToolError
 from requests.exceptions import HTTPError
 
 from mcp_atlassian.exceptions import MCPAtlassianAuthenticationError
-from mcp_atlassian.utils.io import (
-    get_cli_read_only_flag,
-    get_env_read_only_flag,
-    resolve_read_only_mode,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -20,70 +16,102 @@ logger = logging.getLogger(__name__)
 F = TypeVar("F", bound=Callable[..., Awaitable[Any]])
 
 
-def check_write_access(func: F) -> F:
+def handle_tool_errors[F: Callable[..., Awaitable[Any]]](func: F) -> F:
     """
-    Decorator for FastMCP tools to check if the application is in read-only mode.
-    If in read-only mode, it raises a ValueError.
-    Assumes the decorated function is async and has `ctx: Context` as its first argument.
+    Convert tool handler exceptions to ToolError with details preserved.
+
+    Raising ToolError from inside the tool preserves actionable Atlassian API
+    errors for MCP clients even when the FastMCP server masks non-ToolError
+    exceptions.
     """
+    tool_name = func.__name__
 
     @wraps(func)
+    async def wrapper(*args: Any, **kwargs: Any) -> Any:
+        try:
+            return await func(*args, **kwargs)
+        except ToolError:
+            raise
+        except Exception as e:
+            detail = str(e).strip() or type(e).__name__
+            logger.error(f"Error in tool '{tool_name}': {detail}", exc_info=True)
+            message = f"Error calling tool '{tool_name}': {detail}"
+            raise ToolError(message) from e
+
+    return wrapper  # type: ignore
+
+
+def check_write_access[F: Callable[..., Awaitable[Any]]](func: F) -> F:
+    """
+    Decorator for FastMCP tools to check if the application is in read-only mode.
+    If in read-only mode, it raises a ToolError.
+    Also catches unhandled exceptions and re-raises them as ToolError with
+    descriptive error messages.
+    Assumes the decorated function is async and has `ctx: Context` as its
+    first argument.
+    """
+    tool_name = func.__name__
+
+    @handle_tool_errors
+    @wraps(func)
     async def wrapper(ctx: Context, *args: Any, **kwargs: Any) -> Any:
-        req_context = getattr(ctx, "request_context", None)
-        lifespan_ctx_dict = (
-            req_context.lifespan_context if req_context else {}  # type: ignore[attr-defined]
-        )
+        lifespan_ctx_dict = ctx.request_context.lifespan_context
         app_lifespan_ctx = (
             lifespan_ctx_dict.get("app_lifespan_context")
             if isinstance(lifespan_ctx_dict, dict)
             else None
         )  # type: ignore
 
-        if app_lifespan_ctx is not None:
-            base_read_only = getattr(app_lifespan_ctx, "read_only", None)
-            cli_read_only = getattr(app_lifespan_ctx, "cli_read_only", None)
-            env_read_only = getattr(app_lifespan_ctx, "env_read_only", None)
-        else:
-            base_read_only = None
-            cli_read_only = get_cli_read_only_flag()
-            env_read_only = get_env_read_only_flag()
-
-        header_read_only = None
-        if (
-            req_context
-            and hasattr(req_context, "request")
-            and hasattr(req_context.request, "state")
-        ):
-            header_read_only = getattr(
-                req_context.request.state, "read_only_mode_header", None
-            )
-
-        effective_read_only = resolve_read_only_mode(
-            cli_read_only=cli_read_only,
-            env_read_only=env_read_only,
-            header_read_only=header_read_only,
-        )
-
-        if (
-            header_read_only is None
-            and env_read_only is None
-            and cli_read_only is None
-            and base_read_only is not None
-        ):
-            effective_read_only = bool(base_read_only)
-
-        if effective_read_only:
-            tool_name = func.__name__
+        if app_lifespan_ctx is not None and app_lifespan_ctx.read_only:
             action_description = tool_name.replace(
                 "_", " "
             )  # e.g., "create_issue" -> "create issue"
             logger.warning(f"Attempted to call tool '{tool_name}' in read-only mode.")
-            msg = f"Cannot {action_description} in read-only mode."
-            raise ValueError(msg)
+            message = f"Cannot {action_description} in read-only mode."
+            raise ValueError(message)
 
         return await func(ctx, *args, **kwargs)
 
     return wrapper  # type: ignore
+
+
+def handle_auth_errors(
+    service_name: str = "Atlassian API",
+) -> Callable:
+    """Decorator to handle 401/403 HTTPError as auth errors.
+
+    Only catches HTTPError with 401/403 status codes and raises
+    MCPAtlassianAuthenticationError. All other exceptions pass
+    through unmodified.
+
+    Args:
+        service_name: Name of the service for error messages.
+    """
+
+    def decorator(func: Callable) -> Callable:
+        @wraps(func)
+        def wrapper(self: Any, *args: Any, **kwargs: Any) -> Any:
+            try:
+                return func(self, *args, **kwargs)
+            except HTTPError as http_err:
+                if http_err.response is not None and http_err.response.status_code in [
+                    401,
+                    403,
+                ]:
+                    error_msg = (
+                        f"Authentication failed for "
+                        f"{service_name} "
+                        f"({http_err.response.status_code}). "
+                        "Token may be expired or invalid. "
+                        "Please verify credentials."
+                    )
+                    logger.error(error_msg)
+                    raise MCPAtlassianAuthenticationError(error_msg) from http_err
+                raise  # re-raise non-auth HTTPError
+
+        return wrapper
+
+    return decorator
 
 
 def handle_atlassian_api_errors(service_name: str = "Atlassian API") -> Callable:
@@ -121,22 +149,29 @@ def handle_atlassian_api_errors(service_name: str = "Atlassian API") -> Callable
             except KeyError as e:
                 operation_name = getattr(func, "__name__", "API operation")
                 logger.error(f"Missing key in {operation_name} results: {str(e)}")
-                return []
+                message = (
+                    f"{operation_name} returned an unexpected response from "
+                    f"{service_name}: missing key {e}"
+                )
+                raise ValueError(message) from e
             except requests.RequestException as e:
                 operation_name = getattr(func, "__name__", "API operation")
                 logger.error(f"Network error during {operation_name}: {str(e)}")
-                return []
+                message = f"Network error during {operation_name}: {e}"
+                raise ValueError(message) from e
             except (ValueError, TypeError) as e:
                 operation_name = getattr(func, "__name__", "API operation")
                 logger.error(f"Error processing {operation_name} results: {str(e)}")
-                return []
+                message = f"Error processing {operation_name} results: {e}"
+                raise ValueError(message) from e
             except Exception as e:  # noqa: BLE001 - Intentional fallback with logging
                 operation_name = getattr(func, "__name__", "API operation")
                 logger.error(f"Unexpected error during {operation_name}: {str(e)}")
                 logger.debug(
                     f"Full exception details for {operation_name}:", exc_info=True
                 )
-                return []
+                message = f"Unexpected error during {operation_name}: {e}"
+                raise RuntimeError(message) from e
 
         return wrapper
 
