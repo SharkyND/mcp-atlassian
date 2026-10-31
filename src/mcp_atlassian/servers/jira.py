@@ -3142,6 +3142,7 @@ async def get_attachment_images(
 
 _LIST_MAX_TERMS = 1000
 _LIST_COUNT_MAX = 20000
+_LIST_PAGE_SIZE = 1000
 _LIST_KEY_CHUNK = 50
 _LIST_TEXT_CHUNK = 15
 _LIST_KEY_RE = re.compile(r"^([A-Za-z][A-Za-z0-9_]*)-(\d+)$")
@@ -3204,9 +3205,16 @@ def _list_compact(issue: dict, fields: list[str]) -> dict[str, Any]:
 def _list_fetch_all(jira: Any, jql: str, fields: list[str], limit: int | None) -> list[dict]:
     """All issues of a JQL query, paged by the server; stops after limit if given."""
     field_param = ",".join(dict.fromkeys(fields))
-    if jira.config.is_cloud:
-        return jira.jira.enhanced_jql_get_list_of_tickets(jql, fields=field_param, limit=limit)
     issues: list[dict] = []
+    if jira.config.is_cloud:
+        # Not enhanced_jql_get_list_of_tickets: it sends limit as maxResults, which Jira rejects above 5000
+        params: dict[str, Any] = {"jql": jql, "fields": field_param, "maxResults": _LIST_PAGE_SIZE}
+        while True:
+            page = jira.jira.get(jira.jira.resource_url("search/jql"), params=params) or {}
+            issues.extend(page.get("issues", []))
+            params["nextPageToken"] = page.get("nextPageToken")
+            if not params["nextPageToken"] or (limit is not None and len(issues) >= limit):
+                return issues
     start = 0
     while True:
         page = jira.jira.jql(jql, fields=field_param, start=start, limit=100) or {}
@@ -3399,11 +3407,15 @@ async def list_all(
     jira = await get_jira_fetcher(ctx)
     if count_by:
         name = count_by.strip()
-        issues = await asyncio.to_thread(_list_fetch_all, jira, jql, [name], _LIST_COUNT_MAX + 1)
+        # Jira returns only field IDs: "sprint" is a customfield and would count every issue as (none)
+        field = await asyncio.to_thread(jira.get_field_id, name)
+        if not field:
+            raise ValueError(f"Unknown field for count_by: {name}")
+        issues = await asyncio.to_thread(_list_fetch_all, jira, jql, [field], _LIST_COUNT_MAX + 1)
         complete = len(issues) <= _LIST_COUNT_MAX
         counts: dict[str, int] = {}
         for issue in issues[:_LIST_COUNT_MAX]:
-            value = _list_value((issue.get("fields") or {}).get(name))
+            value = _list_value((issue.get("fields") or {}).get(field))
             # Multi-valued fields (labels, sprint, components) count once per value
             for item in (value if isinstance(value, list) else [value]) or [None]:
                 label = "(none)" if item in (None, "") else str(item)
