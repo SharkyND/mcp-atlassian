@@ -93,33 +93,34 @@ class SearchMixin(JiraClient, IssueOperationsProto):
                 # avoids URL-length limits for large queries).
                 actual_total = -1
                 try:
-                    # Call 1: Get metadata (including total) using the search API
-                    metadata_params = {"jql": jql, "maxResults": 0}
-                    metadata_response = self.jira.get(
-                        self.jira.resource_url("search"), params=metadata_params
+                    # Call 1: The enhanced JQL API reports no total, so ask for an
+                    # approximate count. It may lag behind recent changes.
+                    count_response = self.jira.post(
+                        self.jira.resource_url("search/approximate-count"),
+                        json={"jql": jql},
                     )
 
                     if (
-                        isinstance(metadata_response, dict)
-                        and "total" in metadata_response
+                        isinstance(count_response, dict)
+                        and "count" in count_response
                     ):
                         try:
-                            actual_total = int(metadata_response["total"])
+                            actual_total = int(count_response["count"])
                         except (ValueError, TypeError):
                             logger.warning(
-                                f"Could not parse 'total' from metadata response "
-                                f"for JQL: {jql}. Received: "
-                                f"{metadata_response.get('total')}"
+                                f"Could not parse 'count' from approximate count "
+                                f"response for JQL: {jql}. Received: "
+                                f"{count_response.get('count')}"
                             )
                     else:
                         logger.warning(
-                            f"Could not retrieve total count from metadata "
-                            f"response for JQL: {jql}. Response type: "
-                            f"{type(metadata_response)}"
+                            f"Could not retrieve approximate count for JQL: {jql}. "
+                            f"Response type: {type(count_response)}"
                         )
-                except Exception as meta_err:
-                    logger.error(
-                        f"Error fetching metadata for JQL '{jql}': {str(meta_err)}"
+                except Exception as count_err:
+                    logger.warning(
+                        f"Error fetching approximate count for JQL '{jql}': "
+                        f"{str(count_err)}"
                     )
 
                 # Call 2: Get the actual issues using the enhanced method

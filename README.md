@@ -125,16 +125,19 @@ With header-based authentication, you can pass Jira, Confluence, and Bitbucket c
 **Required Headers:**
 
 For **Jira authentication**:
-- `X-Atlassian-Jira-Personal-Token`: Your Jira PAT or API token
+- `X-Atlassian-Jira-Personal-Token`: Your Jira PAT, or a classic Cloud API token
 - `X-Atlassian-Jira-Url`: Your Jira instance URL
+- `X-Atlassian-Jira-Username` (optional): Your Atlassian account email — set this **only** when `X-Atlassian-Jira-Personal-Token` is a classic Cloud API token (created at `id.atlassian.com/manage-profile/security/api-tokens`), which Atlassian Cloud only accepts via Basic auth. Omit it for Server/Data Center PATs or OAuth access tokens, which keep using Bearer/Token auth as before.
 
 For **Confluence authentication**:
-- `X-Atlassian-Confluence-Personal-Token`: Your Confluence PAT or API token
+- `X-Atlassian-Confluence-Personal-Token`: Your Confluence PAT, or a classic Cloud API token
 - `X-Atlassian-Confluence-Url`: Your Confluence instance URL
+- `X-Atlassian-Confluence-Username` (optional): Same rule as `X-Atlassian-Jira-Username`, for a classic Cloud API token.
 
 For **Bitbucket authentication**:
-- `X-Atlassian-Bitbucket-Personal-Token`: Your Bitbucket PAT or app password
+- `X-Atlassian-Bitbucket-Personal-Token`: Your Bitbucket PAT, app password, or a classic Cloud API token
 - `X-Atlassian-Bitbucket-Url`: Your Bitbucket instance URL
+- `X-Atlassian-Bitbucket-Username` (optional): Same rule as `X-Atlassian-Jira-Username`, for a classic Cloud API token.
 
 For **Xray for Jira authentication**:
 - Reuses your Jira headers (`X-Atlassian-Jira-Personal-Token` and `X-Atlassian-Jira-Url`), which must point to a Server/Data Center Jira with Xray installed.
@@ -219,10 +222,13 @@ There are three main approaches to configure the Docker container:
 > **Header-Based Authentication** (no environment variables needed):
 > - `X-Atlassian-Jira-Personal-Token`: Jira PAT/API token (passed as HTTP header), used for XRay as well
 > - `X-Atlassian-Jira-Url`: Jira instance URL (passed as HTTP header), used for XRay as well
+> - `X-Atlassian-Jira-Username`: Optional; set alongside a classic Cloud API token to force Basic auth (see [Header-Based Authentication](#d-dynamic-header-based-authentication---multi-tenant))
 > - `X-Atlassian-Confluence-Personal-Token`: Confluence PAT/API token (passed as HTTP header)
 > - `X-Atlassian-Confluence-Url`: Confluence instance URL (passed as HTTP header)
+> - `X-Atlassian-Confluence-Username`: Optional; same purpose as `X-Atlassian-Jira-Username`
 > - `X-Atlassian-Bitbucket-Url`: Bitbucket URL (passed as HTTP header)
 > - `X-Atlassian-Bitbucket-Personal-Token`: Bitbucket PAT token (passed as HTTP header)
+> - `X-Atlassian-Bitbucket-Username`: Optional; same purpose as `X-Atlassian-Jira-Username`
 > - `X-Atlassian-Read-Only-Mode`: Global per-request read-only mode — applies to all products (passed as HTTP header)
 > - `X-Atlassian-Jira-Read-Only-Mode`: Per-request read-only mode for Jira only (passed as HTTP header)
 > - `X-Atlassian-Confluence-Read-Only-Mode`: Per-request read-only mode for Confluence only (passed as HTTP header)

@@ -487,6 +487,86 @@ class TestGetJiraFetcher:
         assert result == cached_fetcher
         mock_jira_fetcher_class.assert_not_called()
 
+    @patch("mcp_atlassian.servers.dependencies.get_http_request")
+    @patch("mcp_atlassian.servers.dependencies.JiraFetcher")
+    async def test_header_based_fetcher_with_username_uses_basic_auth(
+        self,
+        mock_jira_fetcher_class,
+        mock_get_http_request,
+        mock_context,
+        mock_request,
+        config_factory,
+    ):
+        """A classic Cloud API token (sent with a username header) must be
+        authenticated via Basic auth, not Bearer/Token."""
+        mock_request.state.user_atlassian_auth_type = "pat"
+        mock_request.state.user_atlassian_email = None
+        mock_request.state.jira_fetcher = None
+        if hasattr(mock_request.state, "user_atlassian_token"):
+            delattr(mock_request.state, "user_atlassian_token")
+
+        mock_request.state.atlassian_service_headers = {
+            "X-Atlassian-Jira-Url": "https://jira.example.com",
+            "X-Atlassian-Jira-Personal-Token": "ATATclassic-cloud-api-token",
+            "X-Atlassian-Jira-Username": "user@example.com",
+        }
+        mock_get_http_request.return_value = mock_request
+
+        app_context = config_factory.create_app_context()
+        _setup_mock_context(mock_context, app_context)
+
+        mock_fetcher = _create_mock_fetcher(JiraFetcher)
+        mock_jira_fetcher_class.return_value = mock_fetcher
+
+        result = await get_jira_fetcher(mock_context)
+
+        assert result == mock_fetcher
+        mock_jira_fetcher_class.assert_called_once()
+
+        called_config = mock_jira_fetcher_class.call_args[1]["config"]
+        assert called_config.auth_type == "basic"
+        assert called_config.username == "user@example.com"
+        assert called_config.api_token == "ATATclassic-cloud-api-token"
+        assert called_config.personal_token is None
+
+    @patch("mcp_atlassian.servers.dependencies.get_http_request")
+    @patch("mcp_atlassian.servers.dependencies.JiraFetcher")
+    async def test_header_based_fetcher_without_username_uses_pat(
+        self,
+        mock_jira_fetcher_class,
+        mock_get_http_request,
+        mock_context,
+        mock_request,
+        config_factory,
+    ):
+        """Regression: header-based auth without a username header keeps the
+        pre-existing PAT/Bearer behavior (OAuth access tokens, Server/DC PATs)."""
+        mock_request.state.user_atlassian_auth_type = "pat"
+        mock_request.state.user_atlassian_email = None
+        mock_request.state.jira_fetcher = None
+        if hasattr(mock_request.state, "user_atlassian_token"):
+            delattr(mock_request.state, "user_atlassian_token")
+
+        mock_request.state.atlassian_service_headers = {
+            "X-Atlassian-Jira-Url": "https://jira.example.com",
+            "X-Atlassian-Jira-Personal-Token": "header-jira-token",
+        }
+        mock_get_http_request.return_value = mock_request
+
+        app_context = config_factory.create_app_context()
+        _setup_mock_context(mock_context, app_context)
+
+        mock_fetcher = _create_mock_fetcher(JiraFetcher)
+        mock_jira_fetcher_class.return_value = mock_fetcher
+
+        result = await get_jira_fetcher(mock_context)
+
+        assert result == mock_fetcher
+        called_config = mock_jira_fetcher_class.call_args[1]["config"]
+        assert called_config.auth_type == "pat"
+        assert called_config.personal_token == "header-jira-token"
+        assert called_config.username is None
+
     @pytest.mark.parametrize("scenario_key", ["pat"])
     @patch("mcp_atlassian.servers.dependencies.get_http_request")
     @patch("mcp_atlassian.servers.dependencies.JiraFetcher")
@@ -657,6 +737,86 @@ class TestGetConfluenceFetcher:
 
         assert result == cached_fetcher
         mock_confluence_fetcher_class.assert_not_called()
+
+    @patch("mcp_atlassian.servers.dependencies.get_http_request")
+    @patch("mcp_atlassian.servers.dependencies.ConfluenceFetcher")
+    async def test_header_based_fetcher_with_username_uses_basic_auth(
+        self,
+        mock_confluence_fetcher_class,
+        mock_get_http_request,
+        mock_context,
+        mock_request,
+        config_factory,
+    ):
+        """A classic Cloud API token (sent with a username header) must be
+        authenticated via Basic auth, not Bearer/Token."""
+        mock_request.state.user_atlassian_auth_type = "pat"
+        mock_request.state.user_atlassian_email = None
+        mock_request.state.confluence_fetcher = None
+        if hasattr(mock_request.state, "user_atlassian_token"):
+            delattr(mock_request.state, "user_atlassian_token")
+
+        mock_request.state.atlassian_service_headers = {
+            "X-Atlassian-Confluence-Url": "https://confluence.example.com",
+            "X-Atlassian-Confluence-Personal-Token": "ATATclassic-cloud-api-token",
+            "X-Atlassian-Confluence-Username": "user@example.com",
+        }
+        mock_get_http_request.return_value = mock_request
+
+        app_context = config_factory.create_app_context()
+        _setup_mock_context(mock_context, app_context)
+
+        mock_fetcher = _create_mock_fetcher(ConfluenceFetcher)
+        mock_confluence_fetcher_class.return_value = mock_fetcher
+
+        result = await get_confluence_fetcher(mock_context)
+
+        assert result == mock_fetcher
+        mock_confluence_fetcher_class.assert_called_once()
+
+        called_config = mock_confluence_fetcher_class.call_args[1]["config"]
+        assert called_config.auth_type == "basic"
+        assert called_config.username == "user@example.com"
+        assert called_config.api_token == "ATATclassic-cloud-api-token"
+        assert called_config.personal_token is None
+
+    @patch("mcp_atlassian.servers.dependencies.get_http_request")
+    @patch("mcp_atlassian.servers.dependencies.ConfluenceFetcher")
+    async def test_header_based_fetcher_without_username_uses_pat(
+        self,
+        mock_confluence_fetcher_class,
+        mock_get_http_request,
+        mock_context,
+        mock_request,
+        config_factory,
+    ):
+        """Regression: header-based auth without a username header keeps the
+        pre-existing PAT/Bearer behavior (OAuth access tokens, Server/DC PATs)."""
+        mock_request.state.user_atlassian_auth_type = "pat"
+        mock_request.state.user_atlassian_email = None
+        mock_request.state.confluence_fetcher = None
+        if hasattr(mock_request.state, "user_atlassian_token"):
+            delattr(mock_request.state, "user_atlassian_token")
+
+        mock_request.state.atlassian_service_headers = {
+            "X-Atlassian-Confluence-Url": "https://confluence.example.com",
+            "X-Atlassian-Confluence-Personal-Token": "header-confluence-token",
+        }
+        mock_get_http_request.return_value = mock_request
+
+        app_context = config_factory.create_app_context()
+        _setup_mock_context(mock_context, app_context)
+
+        mock_fetcher = _create_mock_fetcher(ConfluenceFetcher)
+        mock_confluence_fetcher_class.return_value = mock_fetcher
+
+        result = await get_confluence_fetcher(mock_context)
+
+        assert result == mock_fetcher
+        called_config = mock_confluence_fetcher_class.call_args[1]["config"]
+        assert called_config.auth_type == "pat"
+        assert called_config.personal_token == "header-confluence-token"
+        assert called_config.username is None
 
     @pytest.mark.parametrize("scenario_key", ["pat"])
     @patch("mcp_atlassian.servers.dependencies.get_http_request")
