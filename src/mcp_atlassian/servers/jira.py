@@ -3193,12 +3193,24 @@ def _list_value(value: Any) -> Any:
     return value
 
 
-def _list_compact(issue: dict, fields: list[str]) -> dict[str, Any]:
+def _list_field_ids(jira: Any, names: list[str]) -> dict[str, str]:
+    """Map field names to field IDs: Jira returns fields only under their ID, and "sprint" is a
+    customfield. Unknown names raise an error, they would come back empty."""
+    ids: dict[str, str] = {}
+    for name in names:
+        field = "key" if name == "key" else jira.get_field_id(name)
+        if not field:
+            raise ValueError(f"Unknown field: {name}")
+        ids[name] = field
+    return ids
+
+
+def _list_compact(issue: dict, fields: dict[str, str]) -> dict[str, Any]:
     raw = issue.get("fields") or {}
     out: dict[str, Any] = {"key": issue.get("key")}
-    for name in fields:
+    for name, field in fields.items():
         if name != "key":
-            out[name] = _list_value(raw.get(name))
+            out[name] = _list_value(raw.get(field))
     return out
 
 
@@ -3234,7 +3246,7 @@ def _list_and(jql: str, scope: str | None) -> str:
     return f"({jql}) AND ({scope})" if scope else jql
 
 
-def _list_check_keys(jira: Any, keys: list[str], scope: str | None, fields: list[str]) -> tuple[dict, list[str]]:
+def _list_check_keys(jira: Any, keys: list[str], scope: str | None, fields: dict[str, str]) -> tuple[dict, list[str]]:
     """Look up issue keys in chunks with "key in (...)". Keys Jira rejects as unknown count as
     missing; if the error names none of them, the chunk is matched by a key range instead."""
     found: dict[str, dict] = {}
@@ -3248,7 +3260,7 @@ def _list_check_keys(jira: Any, keys: list[str], scope: str | None, fields: list
             chunk = project_keys[offset : offset + _LIST_KEY_CHUNK]
             while chunk:
                 try:
-                    issues = _list_fetch_all(jira, _list_and(f"key in ({', '.join(chunk)})", scope), fields, None)
+                    issues = _list_fetch_all(jira, _list_and(f"key in ({', '.join(chunk)})", scope), list(fields.values()), None)
                     for issue in issues:
                         found[str(issue.get("key")).upper()] = _list_compact(issue, fields)
                     break
@@ -3264,7 +3276,7 @@ def _list_check_keys(jira: Any, keys: list[str], scope: str | None, fields: list
                     range_jql = (f"project = {project} AND key >= {project}-{min(numbers)} "
                                  f"AND key <= {project}-{max(numbers)}")
                     wanted = set(chunk)
-                    for issue in _list_fetch_all(jira, _list_and(range_jql, scope), fields, None):
+                    for issue in _list_fetch_all(jira, _list_and(range_jql, scope), list(fields.values()), None):
                         key = str(issue.get("key")).upper()
                         if key in wanted:
                             found[key] = _list_compact(issue, fields)
@@ -3274,7 +3286,7 @@ def _list_check_keys(jira: Any, keys: list[str], scope: str | None, fields: list
 
 
 def _list_check_text(jira: Any, terms: list[str], match_field: str, scope: str | None,
-                     fields: list[str]) -> tuple[dict, list[str]]:
+                     fields: dict[str, str]) -> tuple[dict, list[str]]:
     """Find issues whose text field contains each term as a whole word. Jira's text search
     preselects candidates, the exact match is done here."""
     jql_field = "text" if match_field == "text" else match_field
@@ -3285,7 +3297,7 @@ def _list_check_text(jira: Any, terms: list[str], match_field: str, scope: str |
         clauses = " OR ".join(
             f'{jql_field} ~ "\\"{term.replace(chr(92), " ").replace(chr(34), " ")}\\""' for term in chunk
         )
-        issues = _list_fetch_all(jira, _list_and(clauses, scope), list(dict.fromkeys(fields + read_fields)), None)
+        issues = _list_fetch_all(jira, _list_and(clauses, scope), list(dict.fromkeys([*fields.values(), *read_fields])), None)
         for issue in issues:
             raw = issue.get("fields") or {}
             text = "\n".join(str(_list_value(raw.get(name)) or "") for name in read_fields)
@@ -3347,15 +3359,16 @@ async def check_list(
     field_list = [name.strip() for name in fields.split(",") if name.strip()]
     jql = _list_jql(jql)
     jira = await get_jira_fetcher(ctx)
+    field_ids = await asyncio.to_thread(_list_field_ids, jira, field_list)
     result: dict[str, Any] = {"values_checked": len(terms)}
     if match_field == "key":
         invalid = [term for term in terms if not _LIST_KEY_RE.match(term)]
         keys = [term for term in terms if _LIST_KEY_RE.match(term)]
-        found, missing = await asyncio.to_thread(_list_check_keys, jira, keys, jql, field_list)
+        found, missing = await asyncio.to_thread(_list_check_keys, jira, keys, jql, field_ids)
         if invalid:
             result["not_an_issue_key"] = invalid
     else:
-        found, missing = await asyncio.to_thread(_list_check_text, jira, terms, match_field, jql, field_list)
+        found, missing = await asyncio.to_thread(_list_check_text, jira, terms, match_field, jql, field_ids)
     result.update({"found_count": len(found), "missing_count": len(missing), "missing": missing})
     if not only_missing:
         result["found"] = found
@@ -3407,10 +3420,7 @@ async def list_all(
     jira = await get_jira_fetcher(ctx)
     if count_by:
         name = count_by.strip()
-        # Jira returns only field IDs: "sprint" is a customfield and would count every issue as (none)
-        field = await asyncio.to_thread(jira.get_field_id, name)
-        if not field:
-            raise ValueError(f"Unknown field for count_by: {name}")
+        field = (await asyncio.to_thread(_list_field_ids, jira, [name]))[name]
         issues = await asyncio.to_thread(_list_fetch_all, jira, jql, [field], _LIST_COUNT_MAX + 1)
         complete = len(issues) <= _LIST_COUNT_MAX
         counts: dict[str, int] = {}
@@ -3430,10 +3440,11 @@ async def list_all(
             ensure_ascii=False,
         )
     field_list = [name.strip() for name in fields.split(",") if name.strip()]
-    issues = await asyncio.to_thread(_list_fetch_all, jira, jql, field_list, max_results + 1)
+    field_ids = await asyncio.to_thread(_list_field_ids, jira, field_list)
+    issues = await asyncio.to_thread(_list_fetch_all, jira, jql, list(field_ids.values()), max_results + 1)
     more = len(issues) > max_results
     issues = issues[:max_results]
     return json.dumps(
-        {"count": len(issues), "more": more, "issues": [_list_compact(issue, field_list) for issue in issues]},
+        {"count": len(issues), "more": more, "issues": [_list_compact(issue, field_ids) for issue in issues]},
         ensure_ascii=False,
     )
