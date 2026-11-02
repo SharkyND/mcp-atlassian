@@ -55,12 +55,11 @@ class TestSearchMixin:
     @staticmethod
     def _setup_dual_mocks(search_mixin, issues_response):
         """Mock both the Cloud (enhanced JQL) and Server/DC (POST) code paths."""
-        search_mixin.jira.post = MagicMock(return_value=issues_response)
+        search_mixin.jira.post = MagicMock(
+            return_value={**issues_response, "count": issues_response.get("total", 0)}
+        )
         search_mixin.jira.enhanced_jql_get_list_of_tickets = MagicMock(
             return_value=issues_response["issues"]
-        )
-        search_mixin.jira.get = MagicMock(
-            return_value={"total": issues_response.get("total", 0)}
         )
 
     @staticmethod
@@ -101,7 +100,8 @@ class TestSearchMixin:
                 search_mixin.jira.enhanced_jql_get_list_of_tickets.call_args[0][0]
                 == jql_query
             )
-            search_mixin.jira.post.assert_not_called()
+            search_mixin.jira.post.assert_called_once()
+            assert search_mixin.jira.post.call_args[1]["json"] == {"jql": jql_query}
         else:
             search_mixin.jira.post.assert_called_once()
             body = search_mixin.jira.post.call_args[1]["json"]
@@ -719,13 +719,28 @@ class TestSearchMixin:
     def test_search_issues_cloud_uses_enhanced_jql(self, search_mixin: SearchMixin):
         """Cloud path uses the enhanced JQL API, passing the requested limit."""
         search_mixin.config.is_cloud = True
-        search_mixin.jira.get = MagicMock(return_value={"total": 0})
+        search_mixin.jira.get = MagicMock()
         search_mixin.jira.enhanced_jql_get_list_of_tickets = MagicMock(return_value=[])
-        search_mixin.jira.post = MagicMock()
+        search_mixin.jira.post = MagicMock(return_value={"count": 7})
 
-        search_mixin.search_issues("project = TEST", limit=200)
+        result = search_mixin.search_issues("project = TEST", limit=200)
 
         search_mixin.jira.enhanced_jql_get_list_of_tickets.assert_called_once()
         _, kwargs = search_mixin.jira.enhanced_jql_get_list_of_tickets.call_args
         assert kwargs["limit"] == 200
-        search_mixin.jira.post.assert_not_called()
+        search_mixin.jira.get.assert_not_called()
+        assert search_mixin.jira.post.call_args[1]["json"] == {"jql": "project = TEST"}
+        assert result.total == 7
+
+    def test_search_issues_cloud_keeps_results_without_count(
+        self, search_mixin: SearchMixin
+    ):
+        """A failed approximate count leaves total at -1 and keeps the issues."""
+        search_mixin.config.is_cloud = True
+        search_mixin.jira.enhanced_jql_get_list_of_tickets = MagicMock(return_value=[])
+        search_mixin.jira.post = MagicMock(side_effect=ValueError("removed"))
+
+        result = search_mixin.search_issues("project = TEST")
+
+        search_mixin.jira.enhanced_jql_get_list_of_tickets.assert_called_once()
+        assert result.total == -1
