@@ -595,6 +595,106 @@ class TestPullRequestsMixin:
             },
         )
 
+    def test_add_pull_request_inline_comment_multiline_server(self, pullrequests_mixin):
+        """Test Server/DC multiline comments include the Bitbucket range marker."""
+        expected_response = {"id": 102, "text": "Replace this block"}
+        pullrequests_mixin.bitbucket.post.return_value = expected_response
+
+        with patch.object(
+            type(pullrequests_mixin.config),
+            "is_cloud",
+            new_callable=lambda: property(lambda self: False),
+        ):
+            result = pullrequests_mixin.add_pull_request_inline_comment(
+                "PROJECT",
+                "repo",
+                2,
+                "Replace this block",
+                "src/utils.py",
+                14,
+                line_type="ADDED",
+                start_line=10,
+                start_line_type="ADDED",
+            )
+
+        assert result == expected_response
+        pullrequests_mixin.bitbucket.post.assert_called_once_with(
+            "projects/PROJECT/repos/repo/pull-requests/2/comments",
+            data={
+                "text": "Replace this block",
+                "anchor": {
+                    "diffType": "EFFECTIVE",
+                    "line": 14,
+                    "lineType": "ADDED",
+                    "fileType": "TO",
+                    "path": "src/utils.py",
+                    "multilineMarker": {
+                        "startLine": 10,
+                        "startLineType": "ADDED",
+                    },
+                    "multilineSpan": {
+                        "dstSpanStart": 10,
+                        "dstSpanEnd": 14,
+                    },
+                },
+            },
+        )
+
+    @pytest.mark.parametrize(
+        ("range_arguments", "error"),
+        [
+            ({"start_line": 15}, "no greater than line"),
+            ({"start_line_type": "ADDED"}, "requires start_line"),
+            (
+                {"start_line": 10, "start_line_type": "REMOVED"},
+                "must use one line type",
+            ),
+        ],
+    )
+    def test_add_pull_request_inline_comment_rejects_invalid_range(
+        self, pullrequests_mixin, range_arguments, error
+    ):
+        """Test malformed multiline anchors are rejected before the API call."""
+        with patch.object(
+            type(pullrequests_mixin.config),
+            "is_cloud",
+            new_callable=lambda: property(lambda self: False),
+        ):
+            with pytest.raises(ValueError, match=error):
+                pullrequests_mixin.add_pull_request_inline_comment(
+                    "PROJECT",
+                    "repo",
+                    2,
+                    "Replace this block",
+                    "src/utils.py",
+                    14,
+                    **range_arguments,
+                )
+
+        pullrequests_mixin.bitbucket.post.assert_not_called()
+
+    def test_add_pull_request_inline_comment_rejects_multiline_cloud(
+        self, pullrequests_mixin
+    ):
+        """Test Cloud requests do not silently discard a multiline anchor."""
+        with patch.object(
+            type(pullrequests_mixin.config),
+            "is_cloud",
+            new_callable=lambda: property(lambda self: True),
+        ):
+            with pytest.raises(ValueError, match="only for Server/DC"):
+                pullrequests_mixin.add_pull_request_inline_comment(
+                    "workspace",
+                    "repo",
+                    1,
+                    "Replace this block",
+                    "src/main.py",
+                    14,
+                    start_line=10,
+                )
+
+        pullrequests_mixin.bitbucket.post.assert_not_called()
+
     def test_add_pull_request_inline_comment_invalid_line_type_defaults(
         self, pullrequests_mixin
     ):

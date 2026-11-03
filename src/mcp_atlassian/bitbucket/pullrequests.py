@@ -408,6 +408,9 @@ class PullRequestsMixin(BitbucketClient):
         file_path: str,
         line: int,
         line_type: str = "ADDED",
+        *,
+        start_line: int | None = None,
+        start_line_type: str | None = None,
     ) -> dict[str, Any]:
         """
         Add an inline comment on a specific line of a file in a pull request.
@@ -418,9 +421,12 @@ class PullRequestsMixin(BitbucketClient):
             pull_request_id: Pull request ID
             comment: Comment text
             file_path: Path to the file being commented on
-            line: Line number to attach the comment to
+            line: Line number to attach the comment to, or range end line
             line_type: Line type for Server/DC ('ADDED', 'REMOVED', or 'CONTEXT').
                        Ignored for Cloud (always targets the destination-side line).
+            start_line: Optional range start line for Server/DC multiline comments.
+            start_line_type: Optional line type for the range start. Defaults to
+                             line_type when start_line is provided.
 
         Returns:
             Created comment data
@@ -429,7 +435,20 @@ class PullRequestsMixin(BitbucketClient):
             MCPAtlassianAuthenticationError: If authentication fails (401/403)
         """
         try:
+            if line < 1:
+                raise ValueError("Inline comment line must be positive.")
+            if start_line_type is not None and start_line is None:
+                raise ValueError("start_line_type requires start_line.")
+            if start_line is not None and (start_line < 1 or start_line > line):
+                raise ValueError(
+                    "start_line must be positive and no greater than line."
+                )
+
             if self.config.is_cloud:
+                if start_line is not None:
+                    raise ValueError(
+                        "Multiline inline comments are supported only for Server/DC."
+                    )
                 endpoint = f"repositories/{workspace}/{repository}/pullrequests/{pull_request_id}/comments"
                 body: dict[str, Any] = {
                     "content": {"raw": comment},
@@ -452,7 +471,28 @@ class PullRequestsMixin(BitbucketClient):
                         "path": file_path,
                     },
                 }
+                if start_line is not None:
+                    resolved_start_type = start_line_type or line_type
+                    if resolved_start_type not in valid_line_types:
+                        raise ValueError("Invalid start_line_type.")
+                    if resolved_start_type != line_type:
+                        raise ValueError(
+                            "Multiline inline comments must use one line type."
+                        )
+                    body["anchor"]["multilineMarker"] = {
+                        "startLine": start_line,
+                        "startLineType": resolved_start_type,
+                    }
+                    # REMOVED lines only exist on the source (FROM) side, so the
+                    # span must be expressed in src*, not dst*, coordinates.
+                    span_prefix = "src" if file_type == "FROM" else "dst"
+                    body["anchor"]["multilineSpan"] = {
+                        f"{span_prefix}SpanStart": start_line,
+                        f"{span_prefix}SpanEnd": line,
+                    }
             return self.bitbucket.post(endpoint, data=body)
+        except ValueError:
+            raise
         except HTTPError as http_err:
             if http_err.response is not None and http_err.response.status_code in [
                 401,

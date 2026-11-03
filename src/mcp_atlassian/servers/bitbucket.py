@@ -1262,6 +1262,26 @@ async def add_pull_request_inline_comment(
             default="ADDED",
         ),
     ] = "ADDED",
+    start_line: Annotated[
+        int | None,
+        Field(
+            description=(
+                "Optional start line for a Server/DC multiline inline comment. "
+                "The line parameter is the range end."
+            ),
+            default=None,
+            ge=1,
+        ),
+    ] = None,
+    start_line_type: Annotated[
+        Literal["ADDED", "REMOVED", "CONTEXT"] | None,
+        Field(
+            description=(
+                "Optional type of the multiline range start. Defaults to line_type."
+            ),
+            default=None,
+        ),
+    ] = None,
 ) -> str:
     """
     Add an inline comment on a specific line of a file in a pull request.
@@ -1272,8 +1292,10 @@ async def add_pull_request_inline_comment(
         pull_request_id: Pull request ID.
         comment: Comment text.
         file_path: Path to the file to comment on.
-        line: Line number to attach the comment to.
+        line: Line number to attach the comment to, or range end line.
         line_type: Line type for Server/DC ('ADDED', 'REMOVED', or 'CONTEXT').
+        start_line: Optional range start line for Server/DC multiline comments.
+        start_line_type: Optional line type for the range start.
 
     Returns:
         JSON string containing the created comment details.
@@ -1293,12 +1315,15 @@ async def add_pull_request_inline_comment(
             file_path,
             line,
             line_type,
+            start_line=start_line,
+            start_line_type=start_line_type,
         )
 
         inline_info = result.get("inline") if isinstance(result, dict) else None
         anchor_info = result.get("anchor") if isinstance(result, dict) else None
         resolved_path = None
         resolved_line = None
+        resolved_start_line = None
 
         if isinstance(inline_info, dict):
             resolved_path = inline_info.get("path")
@@ -1306,24 +1331,45 @@ async def add_pull_request_inline_comment(
         elif isinstance(anchor_info, dict):
             resolved_path = anchor_info.get("path")
             resolved_line = anchor_info.get("line")
+            multiline_marker = anchor_info.get("multilineMarker")
+            if isinstance(multiline_marker, dict):
+                resolved_start_line = multiline_marker.get("startLine")
+
+        anchored = (
+            resolved_line is not None
+            if start_line is None
+            else (
+                resolved_path == file_path
+                and resolved_line == line
+                and resolved_start_line == start_line
+            )
+        )
 
         response_payload = {
-            "success": True,
+            "success": start_line is None or anchored,
             "comment": result,
             "pull_request_id": pull_request_id,
             "requested_file_path": file_path,
             "requested_line": line,
-            "anchored": resolved_line is not None,
+            "anchored": anchored,
             "file_path": resolved_path,
             "line": resolved_line,
         }
+        if start_line is not None:
+            response_payload["requested_start_line"] = start_line
+            response_payload["start_line"] = resolved_start_line
 
-        if resolved_line is None:
+        if not anchored:
             response_payload["warning"] = (
-                "Bitbucket accepted the comment but did not return a line anchor. "
+                "Bitbucket accepted the comment but did not return the requested "
+                "line anchor. "
                 "This usually means the supplied path/line did not match the PR diff "
                 "or the API created a general PR comment instead."
             )
+            if start_line is not None:
+                response_payload["error"] = (
+                    "Bitbucket did not return the requested multiline anchor."
+                )
 
         return json.dumps(
             response_payload,
