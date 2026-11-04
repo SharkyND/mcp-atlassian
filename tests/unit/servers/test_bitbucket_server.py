@@ -375,6 +375,103 @@ async def test_get_default_branch_no_default(monkeypatch: pytest.MonkeyPatch) ->
     assert parsed == {"error": "No default branch found"}
 
 
+async def test_add_pull_request_multiline_inline_comment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict = {}
+
+    def add_inline_comment(*args, **kwargs):  # noqa: ANN002, ANN003
+        captured.update({"args": args, "kwargs": kwargs})
+        return {
+            "id": 100,
+            "anchor": {
+                "path": "src/main.py",
+                "line": 45,
+                "multilineMarker": {
+                    "startLine": 40,
+                    "startLineType": "ADDED",
+                },
+                "multilineSpan": {
+                    "srcSpanStart": 40,
+                    "srcSpanEnd": 45,
+                    "dstSpanStart": 40,
+                    "dstSpanEnd": 45,
+                },
+            },
+        }
+
+    fetcher = SimpleNamespace(add_pull_request_inline_comment=add_inline_comment)
+
+    async def fake_fetcher(_ctx):  # noqa: ANN001
+        return fetcher
+
+    monkeypatch.setattr(bitbucket_server, "get_bitbucket_fetcher", fake_fetcher)
+
+    result = await tool_fn("add_pull_request_inline_comment")(
+        make_ctx(),
+        "ws",
+        "rep",
+        pull_request_id=7,
+        comment="Replace this block",
+        file_path="src/main.py",
+        line=45,
+        line_type="ADDED",
+        start_line=40,
+        start_line_type="ADDED",
+    )
+    parsed = json.loads(result)
+
+    assert captured["args"] == (
+        "ws",
+        "rep",
+        7,
+        "Replace this block",
+        "src/main.py",
+        45,
+        "ADDED",
+    )
+    assert captured["kwargs"] == {
+        "start_line": 40,
+        "start_line_type": "ADDED",
+    }
+    assert parsed["requested_start_line"] == 40
+    assert parsed["start_line"] == 40
+    assert parsed["line"] == 45
+
+
+async def test_add_pull_request_multiline_requires_returned_range_anchor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fetcher = SimpleNamespace(
+        add_pull_request_inline_comment=lambda *args, **kwargs: {
+            "id": 100,
+            "anchor": {"path": "src/main.py", "line": 45},
+        }
+    )
+
+    async def fake_fetcher(_ctx):  # noqa: ANN001
+        return fetcher
+
+    monkeypatch.setattr(bitbucket_server, "get_bitbucket_fetcher", fake_fetcher)
+
+    result = await tool_fn("add_pull_request_inline_comment")(
+        make_ctx(),
+        "ws",
+        "rep",
+        pull_request_id=7,
+        comment="Replace this block",
+        file_path="src/main.py",
+        line=45,
+        line_type="ADDED",
+        start_line=40,
+    )
+    parsed = json.loads(result)
+
+    assert parsed["success"] is False
+    assert parsed["anchored"] is False
+    assert "multiline anchor" in parsed["error"]
+
+
 async def test_create_branch_read_only(monkeypatch: pytest.MonkeyPatch) -> None:
     ctx = make_ctx(read_only=True)
 

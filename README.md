@@ -1069,7 +1069,7 @@ A per-product header always takes precedence over the global header for that pro
 - `create_branch`: Create a new branch in a repository
 - `add_pull_request_blocker_comment`: Add a blocking comment to a pull request
 - `add_pull_request_comment`: Add a regular comment to a pull request
-- `add_pull_request_inline_comment`: Add an inline comment on a specific line of a file in a pull request
+- `add_pull_request_inline_comment`: add_pull_request_inline_comment: Adds an inline PR comment, supporting both single-line and multiline (via start_line/start_line_type, with line as the range end) comments.
 
 #### Xray Tools
 
