@@ -1043,6 +1043,7 @@ A per-product header always takes precedence over the global header for that pro
 - `jira_add_comment`: Add a comment to an issue
 - `jira_summarize_attachments`: Extract readable text from PDF/Office/CSV/JSON attachments (via Microsoft MarkItDown)
 - `jira_get_attachment_images`: Fetch image attachments as viewable image content so a vision-capable client model can describe them
+- `jira_get_issue_markdown`: Return the description as Markdown file, converted without a model, with images at their place and the attachment list
 
 #### Confluence Tools
 
