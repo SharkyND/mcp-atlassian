@@ -1226,6 +1226,161 @@ async def add_pull_request_comment(
 
 @bitbucket_mcp.tool(tags={"bitbucket", "write"})
 @check_write_access
+async def approve_pull_request(
+    ctx: Context,
+    workspace: Annotated[
+        str,
+        Field(description="Workspace name (Cloud) or project key (Server/DC)"),
+    ],
+    repository: Annotated[
+        str,
+        Field(description="Repository name"),
+    ],
+    pull_request_id: Annotated[
+        int,
+        Field(description="Pull request ID"),
+    ],
+) -> str:
+    """
+    Approve a pull request as the authenticated user.
+
+    Args:
+        workspace: Workspace name or project key.
+        repository: Repository name.
+        pull_request_id: Pull request ID.
+
+    Returns:
+        JSON string containing the approval details.
+
+    Raises:
+        ValueError: If the Bitbucket client is not configured or available.
+    """
+    try:
+        bitbucket = await get_bitbucket_fetcher(ctx)
+
+        result = await asyncio.to_thread(
+            bitbucket.approve_pull_request,
+            workspace,
+            repository,
+            pull_request_id,
+        )
+
+        return json.dumps(
+            {
+                "success": True,
+                "approval": result,
+                "pull_request_id": pull_request_id,
+            },
+            indent=2,
+        )
+    except Exception as e:
+        log_level = logging.ERROR
+        if isinstance(e, MCPAtlassianAuthenticationError):
+            error_message = f"Authentication/Permission Error: {str(e)}"
+        elif isinstance(e, OSError | HTTPError):
+            error_message = f"Network or API Error: {str(e)}"
+        elif isinstance(e, ValueError):
+            error_message = f"Configuration Error: {str(e)}"
+        else:
+            error_message = f"An unexpected error occurred while approving PR {pull_request_id} in {workspace}/{repository}."
+            logger.exception("Unexpected error in bitbucket_approve_pull_request:")
+
+        error_result = {
+            "success": False,
+            "error": error_message,
+        }
+        logger.log(log_level, f"bitbucket_approve_pull_request failed: {error_message}")
+        return json.dumps(error_result, indent=2)
+
+
+@bitbucket_mcp.tool(tags={"bitbucket", "write"})
+@check_write_access
+async def request_changes_pull_request(
+    ctx: Context,
+    workspace: Annotated[
+        str,
+        Field(description="Workspace name (Cloud) or project key (Server/DC)"),
+    ],
+    repository: Annotated[
+        str,
+        Field(description="Repository name"),
+    ],
+    pull_request_id: Annotated[
+        int,
+        Field(description="Pull request ID"),
+    ],
+    user_slug: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Slug of the authenticated user (Server/DC only, ignored on Cloud). "
+                "Defaults to the configured username."
+            ),
+            default=None,
+        ),
+    ] = None,
+) -> str:
+    """
+    Request changes on a pull request as the authenticated user.
+
+    Args:
+        workspace: Workspace name or project key.
+        repository: Repository name.
+        pull_request_id: Pull request ID.
+        user_slug: Slug of the authenticated user (Server/DC only).
+
+    Returns:
+        JSON string containing the review status details.
+
+    Raises:
+        ValueError: If the Bitbucket client is not configured or available,
+            or on Server/DC when no user slug can be determined.
+    """
+    try:
+        bitbucket = await get_bitbucket_fetcher(ctx)
+
+        result = await asyncio.to_thread(
+            bitbucket.request_changes_pull_request,
+            workspace,
+            repository,
+            pull_request_id,
+            user_slug,
+        )
+
+        return json.dumps(
+            {
+                "success": True,
+                "review": result,
+                "pull_request_id": pull_request_id,
+            },
+            indent=2,
+        )
+    except Exception as e:
+        log_level = logging.ERROR
+        if isinstance(e, MCPAtlassianAuthenticationError):
+            error_message = f"Authentication/Permission Error: {str(e)}"
+        elif isinstance(e, OSError | HTTPError):
+            error_message = f"Network or API Error: {str(e)}"
+        elif isinstance(e, ValueError):
+            error_message = f"Configuration Error: {str(e)}"
+        else:
+            error_message = f"An unexpected error occurred while requesting changes on PR {pull_request_id} in {workspace}/{repository}."
+            logger.exception(
+                "Unexpected error in bitbucket_request_changes_pull_request:"
+            )
+
+        error_result = {
+            "success": False,
+            "error": error_message,
+        }
+        logger.log(
+            log_level, f"bitbucket_request_changes_pull_request failed: {error_message}"
+        )
+        return json.dumps(error_result, indent=2)
+
+
+@bitbucket_mcp.tool(tags={"bitbucket", "write"})
+@check_write_access
 async def add_pull_request_inline_comment(
     ctx: Context,
     workspace: Annotated[
