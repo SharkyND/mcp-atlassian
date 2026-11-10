@@ -227,6 +227,36 @@ success_cases.extend(
             "capture": create_branch_capture,
         },
         {
+            "func": "approve_pull_request",
+            "method": "approve_pull_request",
+            "return_value": {"approved": True},
+            "kwargs": {
+                "workspace": "ws",
+                "repository": "rep",
+                "pull_request_id": 3,
+            },
+            "expected": {
+                "success": True,
+                "approval": {"approved": True},
+                "pull_request_id": 3,
+            },
+        },
+        {
+            "func": "request_changes_pull_request",
+            "method": "request_changes_pull_request",
+            "return_value": {"state": "changes_requested"},
+            "kwargs": {
+                "workspace": "ws",
+                "repository": "rep",
+                "pull_request_id": 3,
+            },
+            "expected": {
+                "success": True,
+                "review": {"state": "changes_requested"},
+                "pull_request_id": 3,
+            },
+        },
+        {
             "func": "add_pull_request_blocker_comment",
             "method": "add_pull_request_blocker_comment",
             "return_value": {"text": "ok"},

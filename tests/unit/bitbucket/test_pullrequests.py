@@ -689,3 +689,169 @@ class TestPullRequestsMixin:
                 "workspace", "repo", 1, "comment", "file.py", 1
             )
         assert "Error adding inline PR comment" in str(exc_info.value)
+
+    def test_approve_pull_request_success_cloud(self, pullrequests_mixin):
+        """Test approving a pull request on Cloud."""
+        expected_response = {"approved": True, "role": "PARTICIPANT"}
+        pullrequests_mixin.bitbucket.post.return_value = expected_response
+
+        with patch.object(
+            type(pullrequests_mixin.config),
+            "is_cloud",
+            new_callable=lambda: property(lambda self: True),
+        ):
+            result = pullrequests_mixin.approve_pull_request("workspace", "repo", 1)
+
+        assert result == expected_response
+        pullrequests_mixin.bitbucket.post.assert_called_once_with(
+            "repositories/workspace/repo/pullrequests/1/approve"
+        )
+
+    def test_approve_pull_request_success_server(self, pullrequests_mixin):
+        """Test approving a pull request on Server/DC."""
+        expected_response = {"approved": True, "status": "APPROVED"}
+        pullrequests_mixin.bitbucket.post.return_value = expected_response
+
+        with patch.object(
+            type(pullrequests_mixin.config),
+            "is_cloud",
+            new_callable=lambda: property(lambda self: False),
+        ):
+            result = pullrequests_mixin.approve_pull_request("PROJECT", "repo", 2)
+
+        assert result == expected_response
+        pullrequests_mixin.bitbucket.post.assert_called_once_with(
+            "projects/PROJECT/repos/repo/pull-requests/2/approve"
+        )
+
+    def test_approve_pull_request_authentication_error(self, pullrequests_mixin):
+        """Test authentication error in approve_pull_request."""
+        mock_response = Mock()
+        mock_response.status_code = 401
+        pullrequests_mixin.bitbucket.post.side_effect = HTTPError(
+            response=mock_response
+        )
+
+        with pytest.raises(MCPAtlassianAuthenticationError):
+            pullrequests_mixin.approve_pull_request("workspace", "repo", 1)
+
+    def test_approve_pull_request_http_error_other(self, pullrequests_mixin):
+        """Test other HTTP error in approve_pull_request."""
+        mock_response = Mock()
+        mock_response.status_code = 500
+        pullrequests_mixin.bitbucket.post.side_effect = HTTPError(
+            response=mock_response
+        )
+
+        with pytest.raises(HTTPError):
+            pullrequests_mixin.approve_pull_request("workspace", "repo", 1)
+
+    def test_approve_pull_request_general_exception(self, pullrequests_mixin):
+        """Test general exception in approve_pull_request."""
+        pullrequests_mixin.bitbucket.post.side_effect = Exception("API error")
+
+        with pytest.raises(Exception) as exc_info:
+            pullrequests_mixin.approve_pull_request("workspace", "repo", 1)
+        assert "Error approving pull request" in str(exc_info.value)
+
+    def test_request_changes_pull_request_success_cloud(self, pullrequests_mixin):
+        """Test requesting changes on a pull request on Cloud."""
+        expected_response = {"state": "changes_requested"}
+        pullrequests_mixin.bitbucket.post.return_value = expected_response
+
+        with patch.object(
+            type(pullrequests_mixin.config),
+            "is_cloud",
+            new_callable=lambda: property(lambda self: True),
+        ):
+            result = pullrequests_mixin.request_changes_pull_request(
+                "workspace", "repo", 1
+            )
+
+        assert result == expected_response
+        pullrequests_mixin.bitbucket.post.assert_called_once_with(
+            "repositories/workspace/repo/pullrequests/1/request-changes"
+        )
+
+    def test_request_changes_pull_request_success_server(self, pullrequests_mixin):
+        """Test requesting changes on a pull request on Server/DC."""
+        expected_response = {"status": "NEEDS_WORK"}
+        pullrequests_mixin.bitbucket.put.return_value = expected_response
+
+        with patch.object(
+            type(pullrequests_mixin.config),
+            "is_cloud",
+            new_callable=lambda: property(lambda self: False),
+        ):
+            result = pullrequests_mixin.request_changes_pull_request(
+                "PROJECT", "repo", 2, user_slug="jdoe"
+            )
+
+        assert result == expected_response
+        pullrequests_mixin.bitbucket.put.assert_called_once_with(
+            "projects/PROJECT/repos/repo/pull-requests/2/participants/jdoe",
+            data={"user": {"slug": "jdoe"}, "status": "NEEDS_WORK"},
+        )
+
+    def test_request_changes_pull_request_server_requires_slug(
+        self, pullrequests_mixin
+    ):
+        """Test Server/DC raises ValueError when no user slug is available."""
+        pullrequests_mixin.config.username = None
+
+        with patch.object(
+            type(pullrequests_mixin.config),
+            "is_cloud",
+            new_callable=lambda: property(lambda self: False),
+        ):
+            with pytest.raises(ValueError, match="user slug is required"):
+                pullrequests_mixin.request_changes_pull_request("PROJECT", "repo", 2)
+
+        pullrequests_mixin.bitbucket.put.assert_not_called()
+
+    def test_request_changes_pull_request_authentication_error(
+        self, pullrequests_mixin
+    ):
+        """Test authentication error in request_changes_pull_request."""
+        mock_response = Mock()
+        mock_response.status_code = 403
+        pullrequests_mixin.bitbucket.post.side_effect = HTTPError(
+            response=mock_response
+        )
+
+        with patch.object(
+            type(pullrequests_mixin.config),
+            "is_cloud",
+            new_callable=lambda: property(lambda self: True),
+        ):
+            with pytest.raises(MCPAtlassianAuthenticationError):
+                pullrequests_mixin.request_changes_pull_request("workspace", "repo", 1)
+
+    def test_request_changes_pull_request_http_error_other(self, pullrequests_mixin):
+        """Test other HTTP error in request_changes_pull_request."""
+        mock_response = Mock()
+        mock_response.status_code = 500
+        pullrequests_mixin.bitbucket.post.side_effect = HTTPError(
+            response=mock_response
+        )
+
+        with patch.object(
+            type(pullrequests_mixin.config),
+            "is_cloud",
+            new_callable=lambda: property(lambda self: True),
+        ):
+            with pytest.raises(HTTPError):
+                pullrequests_mixin.request_changes_pull_request("workspace", "repo", 1)
+
+    def test_request_changes_pull_request_general_exception(self, pullrequests_mixin):
+        """Test general exception in request_changes_pull_request."""
+        pullrequests_mixin.bitbucket.post.side_effect = Exception("API error")
+
+        with patch.object(
+            type(pullrequests_mixin.config),
+            "is_cloud",
+            new_callable=lambda: property(lambda self: True),
+        ):
+            with pytest.raises(Exception) as exc_info:
+                pullrequests_mixin.request_changes_pull_request("workspace", "repo", 1)
+        assert "Error requesting changes on pull request" in str(exc_info.value)

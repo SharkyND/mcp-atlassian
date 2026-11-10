@@ -473,6 +473,116 @@ class PullRequestsMixin(BitbucketClient):
             msg = f"Error adding inline PR comment: {str(e)}"
             raise Exception(msg) from e
 
+    def approve_pull_request(
+        self, workspace: str, repository: str, pull_request_id: int
+    ) -> dict[str, Any]:
+        """
+        Approve a pull request as the authenticated user.
+
+        Args:
+            workspace: Workspace name (Cloud) or project key (Server/DC)
+            repository: Repository name
+            pull_request_id: Pull request ID
+
+        Returns:
+            Participant data describing the approval
+
+        Raises:
+            MCPAtlassianAuthenticationError: If authentication fails with the Bitbucket API (401/403)
+        """
+        try:
+            if self.config.is_cloud:
+                endpoint = f"repositories/{workspace}/{repository}/pullrequests/{pull_request_id}/approve"
+            else:
+                endpoint = f"projects/{workspace}/repos/{repository}/pull-requests/{pull_request_id}/approve"
+            return self.bitbucket.post(endpoint) or {}
+        except HTTPError as http_err:
+            if http_err.response is not None and http_err.response.status_code in [
+                401,
+                403,
+            ]:
+                error_msg = (
+                    f"Authentication failed for Bitbucket API ({http_err.response.status_code}). "
+                    "Token may be expired or invalid. Please verify credentials."
+                )
+                logger.error(error_msg)
+                raise MCPAtlassianAuthenticationError(error_msg) from http_err
+            else:
+                logger.error(f"HTTP error during API call: {http_err}", exc_info=False)
+                raise http_err
+        except Exception as e:
+            error_msg = f"Error approving PR {pull_request_id} in {workspace}/{repository}: {str(e)}"
+            logger.error(error_msg)
+            msg = f"Error approving pull request: {str(e)}"
+            raise Exception(msg) from e
+
+    def request_changes_pull_request(
+        self,
+        workspace: str,
+        repository: str,
+        pull_request_id: int,
+        user_slug: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        Request changes on a pull request as the authenticated user.
+
+        On Cloud this uses the dedicated ``request-changes`` endpoint. Server/DC
+        has no such endpoint, so the user's participant status is set to
+        ``NEEDS_WORK`` instead, which requires the user's slug.
+
+        Args:
+            workspace: Workspace name (Cloud) or project key (Server/DC)
+            repository: Repository name
+            pull_request_id: Pull request ID
+            user_slug: Slug of the authenticated user (Server/DC only). Defaults
+                to the configured username.
+
+        Returns:
+            Participant data describing the review status
+
+        Raises:
+            ValueError: If running on Server/DC and no user slug is available
+            MCPAtlassianAuthenticationError: If authentication fails with the Bitbucket API (401/403)
+        """
+        slug = user_slug or self.config.username
+        if not self.config.is_cloud and not slug:
+            msg = (
+                "A user slug is required to request changes on Bitbucket Server/DC. "
+                "Provide user_slug or configure BITBUCKET_USERNAME."
+            )
+            raise ValueError(msg)
+
+        try:
+            if self.config.is_cloud:
+                endpoint = f"repositories/{workspace}/{repository}/pullrequests/{pull_request_id}/request-changes"
+                return self.bitbucket.post(endpoint) or {}
+            endpoint = f"projects/{workspace}/repos/{repository}/pull-requests/{pull_request_id}/participants/{slug}"
+            return (
+                self.bitbucket.put(
+                    endpoint, data={"user": {"slug": slug}, "status": "NEEDS_WORK"}
+                )
+                or {}
+            )
+        except HTTPError as http_err:
+            if http_err.response is not None and http_err.response.status_code in [
+                401,
+                403,
+            ]:
+                error_msg = (
+                    f"Authentication failed for Bitbucket API ({http_err.response.status_code}). "
+                    "Token may be expired or invalid. Please verify credentials."
+                )
+                logger.error(error_msg)
+                raise MCPAtlassianAuthenticationError(error_msg) from http_err
+            else:
+                logger.error(f"HTTP error during API call: {http_err}", exc_info=False)
+                raise http_err
+        except Exception as e:
+            error_msg = f"Error requesting changes on PR {pull_request_id} in {workspace}/{repository}: {str(e)}"
+            logger.error(error_msg)
+            msg = f"Error requesting changes on pull request: {str(e)}"
+            raise Exception(msg) from e
+
     def get_pull_request_diff(
         self, workspace: str, repository: str, pull_request_id: int
     ) -> str:

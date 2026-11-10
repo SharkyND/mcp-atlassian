@@ -1070,6 +1070,8 @@ A per-product header always takes precedence over the global header for that pro
 - `add_pull_request_blocker_comment`: Add a blocking comment to a pull request
 - `add_pull_request_comment`: Add a regular comment to a pull request
 - `add_pull_request_inline_comment`: Add an inline comment on a specific line of a file in a pull request
+- `approve_pull_request`: Approve a pull request as the authenticated user
+- `request_changes_pull_request`: Request changes on a pull request as the authenticated user
 
 #### Xray Tools
 
