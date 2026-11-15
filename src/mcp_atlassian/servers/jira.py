@@ -3153,6 +3153,8 @@ _LIST_PAGE_SIZE = 1000
 _LIST_KEY_CHUNK = 50
 _LIST_TEXT_CHUNK = 15
 _LIST_KEY_RE = re.compile(r"^([A-Za-z][A-Za-z0-9_]*)-(\d+)$")
+_LIST_SPRINT_TYPE = "com.pyxis.greenhopper.jira:gh-sprint"
+_LIST_SPRINT_TEXT = re.compile(r"[\[,](state|name)=([^,\]]*)")
 
 
 def _list_parse_terms(raw: str | list[str]) -> list[str]:
@@ -3219,12 +3221,52 @@ def _list_field_ids(jira: Any, names: list[str]) -> dict[str, str]:
     return ids
 
 
-def _list_compact(issue: dict, fields: dict[str, str]) -> dict[str, Any]:
+def _list_sprint_fields(jira: Any, field_ids: dict[str, str]) -> frozenset[str]:
+    """The requested fields that are Sprint fields (schema type gh-sprint)."""
+    custom = {field for field in field_ids.values() if field.startswith("customfield_")}
+    if not custom:
+        return frozenset()
+    sprint = {
+        str(field["id"])
+        for field in jira.get_fields() or []
+        if isinstance(field, dict)
+        and (field.get("schema") or {}).get("custom") == _LIST_SPRINT_TYPE
+        and field.get("id")
+    }
+    return frozenset(custom & sprint)
+
+
+def _list_sprints(value: Any) -> list[dict[str, str]]:
+    """Name and state of every sprint in a Sprint field value. Cloud returns objects,
+    Server/Data Center strings like
+    "...Sprint@1[id=1,state=ACTIVE,name=Sprint 1,...]"."""
+    sprints: list[dict[str, str]] = []
+    for item in value if isinstance(value, list) else [value] if value else []:
+        if isinstance(item, dict):
+            name, state = item.get("name"), item.get("state")
+        elif isinstance(item, str):
+            parts = dict(_LIST_SPRINT_TEXT.findall(item))
+            name, state = parts.get("name"), parts.get("state")
+        else:
+            continue
+        if name:
+            sprints.append({"name": str(name), "state": str(state or "").lower()})
+    return sprints
+
+
+def _list_compact(
+    issue: dict, fields: dict[str, str], sprint_fields: frozenset[str] = frozenset()
+) -> dict[str, Any]:
+    """Requested fields of an issue; a Sprint field becomes [{"name", "state"}]."""
     raw = issue.get("fields") or {}
     out: dict[str, Any] = {"key": issue.get("key")}
     for name, field in fields.items():
-        if name != "key":
-            out[name] = _list_value(raw.get(field))
+        if name == "key":
+            continue
+        value = raw.get(field)
+        out[name] = (
+            _list_sprints(value) if field in sprint_fields else _list_value(value)
+        )
     return out
 
 
@@ -3463,7 +3505,11 @@ async def list_all(
     fields: Annotated[
         str,
         Field(
-            description="Comma-separated fields to return for each issue.",
+            description=(
+                "Comma-separated fields to return for each issue. 'sprint' returns "
+                "every sprint of the issue as {name, state} (active, closed or "
+                "future), closed sprints included."
+            ),
             default="summary,status",
         ),
     ] = "summary,status",
@@ -3531,6 +3577,7 @@ async def list_all(
         )
     field_list = [name.strip() for name in fields.split(",") if name.strip()]
     field_ids = await asyncio.to_thread(_list_field_ids, jira, field_list)
+    sprint_fields = await asyncio.to_thread(_list_sprint_fields, jira, field_ids)
     issues = await asyncio.to_thread(
         _list_fetch_all, jira, jql, list(field_ids.values()), max_results + 1
     )
@@ -3540,7 +3587,9 @@ async def list_all(
         {
             "count": len(issues),
             "more": more,
-            "issues": [_list_compact(issue, field_ids) for issue in issues],
+            "issues": [
+                _list_compact(issue, field_ids, sprint_fields) for issue in issues
+            ],
         },
         ensure_ascii=False,
     )

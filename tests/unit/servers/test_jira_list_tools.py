@@ -209,3 +209,44 @@ async def test_list_all_pages_with_next_page_token_on_cloud():
 
     assert [issue["key"] for issue in result["issues"]] == ["ABC-1", "ABC-2"]
     assert sent_tokens == [None, "next"]
+
+
+@pytest.mark.anyio
+async def test_list_all_returns_sprints_with_state():
+    """A Sprint field lists every sprint with name and state (Cloud objects and
+    Server/Data Center strings); other fields keep their readable value."""
+    server_sprint = (
+        "com.atlassian.greenhopper.service.sprint.Sprint@1a[id=7,rapidViewId=3,"
+        "state=FUTURE,name=Sprint 8,startDate=<null>]"
+    )
+    fetcher = _server_fetcher(
+        [
+            _issue(
+                "ABC-1",
+                "Issue 1",
+                customfield_10020=[
+                    {"id": 1, "name": "Sprint 7", "state": "closed", "boardId": 2},
+                    server_sprint,
+                ],
+            )
+        ]
+    )
+    fetcher.get_fields.return_value = [
+        {
+            "id": "customfield_10020",
+            "schema": {"custom": "com.pyxis.greenhopper.jira:gh-sprint"},
+        }
+    ]
+
+    result = await _call(
+        list_all, fetcher, jql="project = ABC", fields="summary,Sprint"
+    )
+
+    assert result["issues"][0] == {
+        "key": "ABC-1",
+        "summary": "Issue 1",
+        "Sprint": [
+            {"name": "Sprint 7", "state": "closed"},
+            {"name": "Sprint 8", "state": "future"},
+        ],
+    }
