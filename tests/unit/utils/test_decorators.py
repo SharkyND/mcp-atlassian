@@ -70,3 +70,46 @@ async def test_check_write_access_header_false_allows_write():
     ctx = DummyContext(read_only=True, cli_read_only=True, header="false")
     result = await dummy_tool(ctx, 6)
     assert result == 12
+
+
+class TestHandleAtlassianApiErrorsAuthMessages:
+    """401 and 403 give different messages; 403 is not an expired token."""
+
+    @staticmethod
+    def _raise(status, text):
+        from requests.exceptions import HTTPError
+
+        from mcp_atlassian.utils.decorators import handle_atlassian_api_errors
+
+        class Fetcher:
+            @handle_atlassian_api_errors("Confluence API")
+            def search(self):
+                response = MagicMock()
+                response.status_code = status
+                response.text = text
+                raise HTTPError(response=response)
+
+        return Fetcher().search
+
+    def test_403_is_permission_denied(self):
+        from mcp_atlassian.exceptions import MCPAtlassianAuthenticationError
+
+        call = self._raise(403, "XP-Search Aggregator API : HTTP/1.1 403 Forbidden")
+        with pytest.raises(MCPAtlassianAuthenticationError) as exc_info:
+            call()
+        message = str(exc_info.value)
+        assert message.startswith("Permission denied by Confluence API (403)")
+        assert "Token may be expired" not in message
+        assert "XP-Search Aggregator API" in message
+
+    def test_401_is_authentication_failed(self):
+        from mcp_atlassian.exceptions import MCPAtlassianAuthenticationError
+
+        call = self._raise(401, "")
+        with pytest.raises(MCPAtlassianAuthenticationError) as exc_info:
+            call()
+        message = str(exc_info.value)
+        assert message == (
+            "Authentication failed for Confluence API (401). "
+            "Token may be expired or invalid. Please verify credentials."
+        )

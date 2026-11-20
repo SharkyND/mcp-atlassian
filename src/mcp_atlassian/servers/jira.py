@@ -136,7 +136,7 @@ async def get_user_profile(
     user_identifier: Annotated[
         str,
         Field(
-            description="Identifier for the user (e.g., email address 'user@example.com', username 'johndoe', account ID 'accountid:...', or key for Server/DC)."
+            description="Identifier for the user (e.g., email address 'user@example.com', username 'johndoe', account ID 'accountid:...', or key for Server/DC), or 'me' for the account this request runs as."
         ),
     ],
 ) -> str:

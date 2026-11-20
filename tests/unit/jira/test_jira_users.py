@@ -625,3 +625,22 @@ class TestUsersMixin:
             Exception, match="Error processing user profile for 'error_user'"
         ):
             users_mixin.get_user_profile_by_identifier("error_user")
+
+    @pytest.mark.parametrize("identifier", ["me", " Me ", "myself", "currentUser()"])
+    def test_get_user_profile_by_identifier_current_user(self, users_mixin, identifier):
+        """'me' and its aliases read the account the request runs as via myself()."""
+        users_mixin.config = MagicMock(spec=JiraConfig)
+        users_mixin.config.is_cloud = True
+        users_mixin.jira.myself = MagicMock(
+            return_value={
+                "accountId": "acc-1",
+                "displayName": "Signed In",
+                "active": True,
+            }
+        )
+        users_mixin.jira.user = MagicMock()
+        user = users_mixin.get_user_profile_by_identifier(identifier)
+        assert user.account_id == "acc-1"
+        assert user.display_name == "Signed In"
+        users_mixin.jira.myself.assert_called_once_with()
+        users_mixin.jira.user.assert_not_called()
