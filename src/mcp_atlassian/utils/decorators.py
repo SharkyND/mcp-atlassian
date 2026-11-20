@@ -168,11 +168,23 @@ def handle_atlassian_api_errors(service_name: str = "Atlassian API") -> Callable
                     401,
                     403,
                 ]:
-                    error_msg = (
-                        f"Authentication failed for {service_name} "
-                        f"({http_err.response.status_code}). "
-                        "Token may be expired or invalid. Please verify credentials."
-                    )
+                    status_code = http_err.response.status_code
+                    detail = (http_err.response.text or "").strip()[:300]
+                    if status_code == 403:
+                        # The credentials were accepted; the account may not read this
+                        # content or use this function (e.g. no access to the product).
+                        error_msg = (
+                            f"Permission denied by {service_name} (403): the account "
+                            "lacks access to this content or function, or the site "
+                            "does not accept this kind of token."
+                        )
+                    else:
+                        error_msg = (
+                            f"Authentication failed for {service_name} (401). "
+                            "Token may be expired or invalid. Please verify credentials."
+                        )
+                    if detail:
+                        error_msg += f" Server response: {detail}"
                     logger.error(error_msg)
                     raise MCPAtlassianAuthenticationError(error_msg) from http_err
                 else:

@@ -20,6 +20,12 @@ JiraUserType = TypeVar("JiraUserType", bound="JiraUser")
 logger = logging.getLogger("mcp-jira")
 
 
+# Identifiers that mean the account the request runs as (compared case-insensitively).
+_CURRENT_USER_IDENTIFIERS = frozenset(
+    {"me", "myself", "currentuser()", "currentuser", "current user"}
+)
+
+
 class UsersMixin(JiraClient):
     """Mixin for Jira user operations."""
 
@@ -300,7 +306,9 @@ class UsersMixin(JiraClient):
         Retrieve Jira user profile information by identifier.
 
         Args:
-            identifier (str): User identifier (accountId, username, key, or email).
+            identifier (str): User identifier (accountId, username, key, or
+                email), or "me" (also "myself", "currentUser()") for the account
+                the request runs as.
 
         Returns:
             JiraUser: JiraUser model with profile information.
@@ -310,11 +318,17 @@ class UsersMixin(JiraClient):
             MCPAtlassianAuthenticationError: If authentication fails.
             Exception: For other API errors.
         """
-        api_kwargs = self._determine_user_api_params(identifier)
+        current = identifier.strip().casefold() in _CURRENT_USER_IDENTIFIERS
+        api_kwargs = {} if current else self._determine_user_api_params(identifier)
 
         try:
-            logger.debug(f"Calling self.jira.user() with parameters: {api_kwargs}")
-            user_data = self.jira.user(**api_kwargs)
+            if current:
+                # The account the request runs as: GET /rest/api/2/myself.
+                logger.debug("Calling self.jira.myself() for the current user")
+                user_data = self.jira.myself()
+            else:
+                logger.debug(f"Calling self.jira.user() with parameters: {api_kwargs}")
+                user_data = self.jira.user(**api_kwargs)
             if not isinstance(user_data, dict):
                 logger.error(
                     f"User lookup for '{identifier}' returned unexpected type: {type(user_data)}. Data: {user_data}"
